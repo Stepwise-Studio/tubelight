@@ -64,7 +64,7 @@ export function TeammatePreview({ draft }: { draft: TeammateDraft }) {
     <Surface tone="panel2" radius={radius.xl} padding={20} style={{ alignItems: 'center', gap: 12 }}>
       {/* Reanimated web leaves keyframe entrances hidden; web is only a preview. */}
       <Animated.View key={draft.avatar_shape + draft.color} entering={Platform.OS === 'web' ? undefined : settle}>
-        <TeammateAvatar teammate={{ ...draft, name: draft.name || 'New teammate' }} size={96} />
+        <TeammateAvatar teammate={{ ...draft, name: draft.name || 'New teammate' }} size={96} live />
       </Animated.View>
       <View style={{ alignItems: 'center', gap: 2, maxWidth: '100%' }}>
         <Text variant="heading" numberOfLines={1}>{draft.name.trim() || 'Unnamed'}</Text>

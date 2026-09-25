@@ -54,6 +54,19 @@
         {
           "color": "#9FE3F0"
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Tubelight uses the microphone for voice conversations with your teammates."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose photos to share with your teammates.",
+          "cameraPermission": "Take photos to share with your teammates."
+        }
       ]
     ],
     "experiments": {

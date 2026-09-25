@@ -8,10 +8,9 @@ export default function TabsLayout() {
   return (
     <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: c.canvas } }}>
       <Tabs.Screen name="index" options={{ title: 'Chats' }} />
-      <Tabs.Screen name="team" options={{ title: 'Team' }} />
       <Tabs.Screen name="approvals" options={{ title: 'Approvals' }} />
       <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   )
 }

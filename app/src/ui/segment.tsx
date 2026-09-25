@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Pressable, type LayoutChangeEvent } from 'react-native'
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import Animated, { interpolate, useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated'
 
 import { motion, useTheme } from '@/theme'
 
@@ -14,22 +14,34 @@ export interface SegmentProps<T extends string> {
   onChange: (v: T) => void
   options: { value: T; label: string; count?: number }[]
   accessibilityLabel?: string
+  /** Page position (0..n-1) of a swipeable pager: the pill follows the finger instead of waiting for the tap. */
+  progress?: SharedValue<number>
 }
 
 /**
  * Segmented control with a sliding pill (transitions.dev "tabs sliding": 250ms, smooth out).
  * The first position is written without animation, so it never slides in from 0.
  */
-export function Segment<T extends string>({ value, onChange, options, accessibilityLabel }: SegmentProps<T>) {
+export function Segment<T extends string>({ value, onChange, options, accessibilityLabel, progress }: SegmentProps<T>) {
   const { c, scheme } = useTheme()
   const [layouts, setLayouts] = useState<Record<string, { x: number; w: number }>>({})
   const [placed, setPlaced] = useState(false)
   const cur = layouts[value]
+  const all = options.map((o) => layouts[o.value])
+  const tracked = progress && all.every(Boolean) ? all as { x: number; w: number }[] : null
   const pill = useAnimatedStyle(() => {
+    if (tracked && progress) {
+      const idx = tracked.map((_, i) => i)
+      return {
+        opacity: 1,
+        width: interpolate(progress.value, idx, tracked.map((l) => l.w), 'clamp'),
+        transform: [{ translateX: interpolate(progress.value, idx, tracked.map((l) => l.x), 'clamp') }],
+      }
+    }
     if (!cur) return { opacity: 0 }
     const t = (v: number) => (placed ? withTiming(v, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) : v)
     return { opacity: 1, width: t(cur.w), transform: [{ translateX: t(cur.x) }] }
-  }, [cur, placed])
+  }, [cur, placed, tracked])
 
   return (
     <Squircle

@@ -12,13 +12,16 @@ export interface TeammateAvatarProps {
   state?: AvatarState
   /** Tap to hop (the libraries.dev delight). Off inside pressable rows so the row gets the tap. */
   interactive?: boolean
-  /** Freeze animation (e.g. avatars deep in a scrolled thread). */
+  /** Freeze animation. Defaults to frozen unless `working` or `live`: a screen full of
+   *  animating Skia shaders is what made lists feel heavy. */
   paused?: boolean
+  /** Animate while idle (hero spots: profile header, editor preview). */
+  live?: boolean
   onPress?: () => void
 }
 
 /** Every teammate's face goes through here (libraries.dev bot-avatars, Skia). */
-export function TeammateAvatar({ teammate, size = 40, state = 'default', interactive = true, paused, onPress }: TeammateAvatarProps) {
+export function TeammateAvatar({ teammate, size = 40, state = 'default', interactive = true, paused, live, onPress }: TeammateAvatarProps) {
   return (
     <View style={{ width: size, height: size }} pointerEvents={interactive || onPress ? 'auto' : 'none'}>
       <BotAvatar
@@ -26,7 +29,7 @@ export function TeammateAvatar({ teammate, size = 40, state = 'default', interac
         color={teammate.color}
         size={size}
         state={state}
-        paused={paused}
+        paused={paused ?? !(state === 'working' || live)}
         interactive={interactive}
         onPress={onPress}
         jumpEvery={state === 'working' ? 8 : 0}

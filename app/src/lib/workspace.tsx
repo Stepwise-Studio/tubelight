@@ -56,7 +56,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
       supabase.from('projects').select('*').order('created_at'),
       supabase.from('project_members').select('*').order('added_at'),
       supabase.from('threads').select('*'),
-      supabase.from('approvals').select('*').eq('status', 'pending').order('created_at', { ascending: false }),
+      supabase.from('approvals').select('*').eq('status', 'pending').eq('kind', 'approval').order('created_at', { ascending: false }),
       supabase.from('runs').select('*').in('status', LIVE),
     ])
     const failed = [t, p, m, th, a, r].find((x) => x.error)
@@ -112,7 +112,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
           const row = (e.eventType === 'DELETE' ? e.old : e.new) as Approval
           setPending((l) => {
             const rest = l.filter((x) => x.id !== row.id)
-            return e.eventType !== 'DELETE' && row.status === 'pending' ? [row, ...rest] : rest
+            return e.eventType !== 'DELETE' && row.status === 'pending' && row.kind === 'approval' ? [row, ...rest] : rest
           })
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'runs' }, (e) => {

@@ -3,39 +3,36 @@ import { useState } from 'react'
 import { FlatList, RefreshControl, View } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
 import { Add01Icon } from '@hugeicons/core-free-icons'
+import type { ReactElement } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
-import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { freeHandle, fromTemplate, modelName, roleName, toolkitName, useModels, useTemplates, type Template } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, radius, useTheme } from '@/theme'
-import { Button, Card, Chip, EmptyState, IconButton, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
+import { Button, Card, Chip, EmptyState, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
 
 const openProfile = (id: string) => router.push({ pathname: '/teammate/[id]', params: { id } })
 
-export default function Team() {
+/** The Crew page of Chats: every teammate as a card, filtered by the shared search. */
+export function CrewList({ header, query }: { header?: ReactElement; query: string }) {
   const { c } = useTheme()
   const ws = useWorkspace()
   const inset = useTabBarInset()
   const { models } = useModels()
   const [refreshing, setRefreshing] = useState(false)
   const refresh = async () => { setRefreshing(true); await ws.refresh(); setRefreshing(false) }
-
-  const header = (
-    <TabHeader
-      title="Team"
-      right={ws.teammates.length > 0 && <IconButton icon={Add01Icon} accessibilityLabel="New teammate" onPress={() => router.push('/teammate/new')} />}
-    />
-  )
+  const q = query.trim().toLowerCase()
+  const crew = q ? ws.teammates.filter((t) => `${t.name} ${t.handle} ${t.role} ${t.bio}`.toLowerCase().includes(q)) : ws.teammates
+  const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />
 
   if (ws.loading) {
     return (
       <View style={{ flex: 1 }}>
         {header}
-        <View style={{ paddingHorizontal: 16, gap: 12 }} accessible accessibilityLabel="Loading your team">
+        <View style={{ paddingHorizontal: 16, gap: 12 }} accessible accessibilityLabel="Loading your crew">
           {[0, 1, 2].map((i) => (
             <Squircle key={i} style={{ borderRadius: radius.xl, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 16, flexDirection: 'row', gap: 14 }}>
               <Skeleton width={64} height={64} radius={32} />
@@ -51,25 +48,16 @@ export default function Team() {
     )
   }
 
-  if (ws.teammates.length === 0) {
-    return (
-      <FlatList
-        data={[]}
-        renderItem={null}
-        ListHeaderComponent={<>{header}<StarterTemplates /></>}
-        contentContainerStyle={{ paddingBottom: inset + 16 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
-      />
-    )
-  }
-
   return (
     <FlatList
-      data={ws.teammates}
+      data={crew}
       keyExtractor={(t) => t.id}
       ListHeaderComponent={header}
-      contentContainerStyle={{ paddingBottom: inset + 16, gap: 12 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
+      ListEmptyComponent={ws.teammates.length === 0 ? <StarterTemplates /> : <EmptyState title="No one matches" body={`Nobody in your crew matches "${query.trim()}".`} />}
+      contentContainerStyle={{ paddingBottom: inset + 96, gap: 12 }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      refreshControl={refreshControl}
       renderItem={({ item, index }) => (
         <Animated.View entering={index < 8 ? FadeIn.duration(motion.duration.slow).delay(motion.staggerDelay(index)) : undefined} style={{ paddingHorizontal: 16 }}>
           <TeammateCard t={item} model={modelName(item.model, models)} working={ws.isWorking(item.id)} />

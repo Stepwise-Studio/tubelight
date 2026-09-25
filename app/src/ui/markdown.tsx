@@ -1,8 +1,9 @@
 import * as Clipboard from 'expo-clipboard'
 import * as WebBrowser from 'expo-web-browser'
-import { useState, type ReactNode } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import { Linking, ScrollView, Text as RNText, View, type TextStyle } from 'react-native'
 import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked'
+import { Highlight, themes } from 'prism-react-renderer'
 import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { type Palette, fonts, radius, type as typeScale, useTheme } from '@/theme'
@@ -15,7 +16,7 @@ import { Squircle } from './squircle'
 import { Text } from './text'
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
-  const { c } = useTheme()
+  const { c, scheme } = useTheme()
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     await Clipboard.setStringAsync(code)
@@ -33,7 +34,21 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         </Press>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12 }}>
-        <RNText selectable style={[typeScale.mono, { color: c.ink }]}>{code.replace(/\n$/, '')}</RNText>
+        <Highlight code={code.replace(/\n$/, '')} language={(language || 'text').toLowerCase()} theme={scheme === 'dark' ? themes.oneDark : themes.oneLight}>
+          {({ tokens, getTokenProps }) => (
+            <RNText selectable style={[typeScale.mono, { color: c.ink }]}>
+              {tokens.map((line, i) => (
+                <RNText key={i}>
+                  {line.map((token, k) => {
+                    const { style } = getTokenProps({ token })
+                    return <RNText key={k} style={{ color: style?.color as string | undefined, fontStyle: style?.fontStyle === 'italic' ? 'italic' : 'normal' }}>{token.content}</RNText>
+                  })}
+                  {i < tokens.length - 1 ? '\n' : null}
+                </RNText>
+              ))}
+            </RNText>
+          )}
+        </Highlight>
       </ScrollView>
     </Squircle>
   )
@@ -88,7 +103,7 @@ function useStyles(c: Palette): MarkedStyles {
 }
 
 /** Light markdown for teammate messages: text, lists, links, code blocks with copy + horizontal scroll. */
-export function Markdown({ value }: { value: string }) {
+export const Markdown = memo(function Markdown({ value }: { value: string }) {
   const { c, scheme } = useTheme()
   const renderer = new TubeRenderer(c)
   const elements = useMarkdown(value, {
@@ -99,4 +114,4 @@ export function Markdown({ value }: { value: string }) {
   })
   // Drop the trailing paragraph margin so bubbles hug their text.
   return <View style={{ marginBottom: -8 }}>{elements}</View>
-}
+})

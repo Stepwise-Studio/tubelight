@@ -56,7 +56,7 @@ export interface Thread {
   created_at: string
 }
 
-export type MessageKind = 'text' | 'approval' | 'handoff' | 'error' | 'event'
+export type MessageKind = 'text' | 'approval' | 'handoff' | 'error' | 'event' | 'question' | 'connect'
 
 export interface Message {
   id: string
@@ -66,6 +66,7 @@ export interface Message {
   teammate_id: string | null
   text: string
   mentions: string[]
+  reply_to?: string | null
   kind: MessageKind
   meta: {
     stream_id?: string
@@ -75,6 +76,15 @@ export interface Message {
     note?: string
     event_id?: string
     event_type?: string
+    attachments?: Attachment[]
+    /** question cards */
+    question?: string
+    options?: string[]
+    allow_other?: boolean
+    /** connect cards */
+    toolkit?: string
+    name?: string
+    reason?: string
     [k: string]: unknown
   }
   proactive: boolean
@@ -97,8 +107,14 @@ export interface Run {
   ended_at: string | null
 }
 
+/** A file the user attached; stored in the private `attachments` bucket at `path`. */
+export interface Attachment { path: string; name: string; mime: string; size: number; width?: number; height?: number }
+
 export interface Approval {
   id: string
+  /** approval: act tools. question: ask_user options. connect: connect_app. */
+  kind: 'approval' | 'question' | 'connect'
+  answer: string | null
   owner_id: string
   thread_id: string
   teammate_id: string | null

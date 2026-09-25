@@ -22,7 +22,7 @@ export default function Approvals() {
   const [history, setHistory] = useState<Approval[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
-  const loadHistory = () => supabase.from('approvals').select('*').neq('status', 'pending')
+  const loadHistory = () => supabase.from('approvals').select('*').neq('status', 'pending').eq('kind', 'approval')
     .order('decided_at', { ascending: false, nullsFirst: false }).limit(50)
     .then(({ data }) => setHistory((data as Approval[]) ?? []))
   // Decisions move cards from Pending to History; refetch when the pending set changes.

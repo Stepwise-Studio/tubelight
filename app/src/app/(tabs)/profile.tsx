@@ -27,7 +27,7 @@ import {
 const AGENT_URL = process.env.EXPO_PUBLIC_AGENT_URL ?? 'http://localhost:8787'
 const TOKEN_KEY = 'tubelight.pushToken'
 
-export default function Settings() {
+export default function Profile() {
   const { c } = useTheme()
   const inset = useTabBarInset()
   const { session } = useSession()
@@ -57,7 +57,7 @@ export default function Settings() {
       keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
     >
-      <TabHeader title="Settings" />
+      <TabHeader title="Profile" />
       <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 36 }}>
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
         <Appearance />

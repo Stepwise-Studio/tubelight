@@ -59,7 +59,7 @@ export default function TeammateProfile() {
           <EmptyState
             title="This teammate isn’t here anymore"
             body="They may have been deleted on another device."
-            action={<Button label="Back to your team" variant="soft" onPress={() => router.replace('/team')} />}
+            action={<Button label="Back to your team" variant="soft" onPress={() => router.replace('/')} />}
           />
         )}
       </View>
@@ -139,7 +139,7 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
       />
       <KeyboardAwareScrollView bottomOffset={96} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + (dirty ? 112 : 40) }}>
         <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingTop: 24, gap: 12 }}>
-          <TeammateAvatar teammate={draft} size={88} state={working ? 'working' : 'default'} />
+          <TeammateAvatar teammate={draft} size={88} live state={working ? 'working' : 'default'} />
           <View style={{ alignItems: 'center', gap: 2 }}>
             <Text variant="title" numberOfLines={1}>{t.name}</Text>
             <Text variant="caption" color="ink3" numberOfLines={1}>@{t.handle} · {t.role}</Text>
