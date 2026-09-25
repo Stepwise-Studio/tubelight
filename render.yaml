@@ -1,0 +1,23 @@
+# Render Blueprint: New > Blueprint > pick this repo. Secrets (sync: false) are asked for once in the dashboard.
+services:
+  - type: web
+    name: tubelight-agent
+    runtime: docker
+    rootDir: agent-service
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - { key: SUPABASE_URL, sync: false }
+      - { key: SUPABASE_SERVICE_ROLE_KEY, sync: false }
+      - { key: SUPABASE_ANON_KEY, sync: false }
+      - { key: SUPABASE_DB_URL, sync: false }
+      - { key: GROQ_API_KEY, sync: false }
+      - { key: OPENROUTER_API_KEY, sync: false }
+      - { key: COMPOSIO_API_KEY, sync: false }
+      - { key: CF_ACCOUNT_ID, sync: false }
+      - { key: CF_API_TOKEN, sync: false }
+      - { key: CF_GATEWAY_ID, sync: false }
+      - { key: DEFAULT_MODEL, value: groq:openai/gpt-oss-120b }
+      - { key: ROUTER_MODEL, value: groq:openai/gpt-oss-20b }
+      - { key: LLM_FALLBACKS, value: "cloudflare:@cf/openai/gpt-oss-120b,groq:qwen/qwen3.8-27b" }

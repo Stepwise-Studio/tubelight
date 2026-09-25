@@ -1,16 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
 import { Composer } from '@/components/chat/composer'
-import { ChatRow, senderOf, timeOf, type ChatItem, type RowContext } from '@/components/chat/message-row'
+import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
 import { ThreadAvatar } from '@/components/thread-avatar'
 import { api } from '@/lib/api'
 import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
-import { useThread, type LiveStatus } from '@/lib/use-thread'
+import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import { Button, EmptyState, Press, Skeleton, TeammateAvatar, Text, TextSwap, toast } from '@/ui'
@@ -60,8 +60,6 @@ export default function Thread() {
     ...t.messages.map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]
 
-  const handles = new Set(people.map((p) => p.handle.toLowerCase()))
-
   const retryRun = async () => {
     const lastUser = t.messages.find((m) => m.sender_type === 'user' && !m.local)
     if (!lastUser) return toast({ title: 'Nothing to retry', body: 'Send a new message instead.' })
@@ -77,10 +75,37 @@ export default function Thread() {
     }
   }
 
-  const send = async (text: string, mentions: string[]) => {
-    const err = await t.send(text, mentions)
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
+  const [highlight, setHighlight] = useState<string | null>(null)
+  const list = useRef<FlatList<ChatItem>>(null)
+
+  const send = async (text: string, mentions: string[], opts: SendOptions = {}) => {
+    const err = await t.send(text, mentions, { ...opts, reply_to: replyTo?.id ?? null })
+    setReplyTo(null)
     if (err) toast({ title: 'Message not sent', body: err, tone: 'error' })
   }
+
+  // Handlers read the latest render through a ref, so the context value (and every memoised row) stays put.
+  const latest = useRef({ t, items, retryRun, ws })
+  useLayoutEffect(() => { latest.current = { t, items, retryRun, ws } })
+  // Stable across renders (the React Compiler memoises it on handleKey), so memoised rows don't re-render per delta.
+  const handleKey = people.map((p) => p.handle.toLowerCase()).join(',')
+  const ctx: ChatActions = {
+    onReply: (m) => setReplyTo(m),
+    jumpTo: (id) => {
+      const index = latest.current.items.findIndex((i) => i.type === 'message' && i.m.id === id)
+      if (index < 0) return
+      list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true })
+      setHighlight(id)
+      setTimeout(() => setHighlight((h) => (h === id ? null : h)), 1400)
+    },
+    onRetryMessage: async (m) => { const err = await latest.current.t.retry(m); if (err) toast({ title: 'Message not sent', body: err, tone: 'error' }) },
+    onDiscardMessage: (m) => latest.current.t.discard(m.id),
+    onRetryRun: () => latest.current.retryRun(),
+    onDecided: () => { latest.current.t.refreshApprovals(); latest.current.ws.refresh() },
+    handles: new Set(handleKey.split(',')),
+  }
+  const byId = new Map(t.messages.map((m) => [m.id, m]))
 
   // ---- header
   const working = liveRuns.find((r) => r.status === 'running')
@@ -123,25 +148,24 @@ export default function Thread() {
     )
   }
 
-  const ctxFor = (index: number): RowContext => {
+  const rowProps = (index: number) => {
     const item = items[index]
     const older = items[index + 1]
+    const newer = items[index - 1]
     const olderTime = older ? timeOf(older) : null
     const time = timeOf(item)
     const newDay = !older ? (!t.hasMore ? dayLabel(time) : null) : !sameDay(olderTime!, time) ? dayLabel(time) : null
-    const firstInGroup = !older || !!newDay || senderOf(older) !== senderOf(item) || senderOf(item) === 'system'
-      || Date.parse(time) - Date.parse(olderTime!) > GROUP_GAP_MS
+    const joins = (a: ChatItem, b: ChatItem) => senderOf(a) === senderOf(b) && senderOf(a) !== 'system'
+      && sameDay(timeOf(a), timeOf(b)) && Math.abs(Date.parse(timeOf(a)) - Date.parse(timeOf(b))) <= GROUP_GAP_MS
+    const m = item.type === 'message' ? item.m : undefined
     return {
-      firstInGroup,
+      firstInGroup: !older || !!newDay || !joins(older, item),
+      lastInGroup: !newer || !joins(item, newer),
       dayBreak: newDay,
       pauseAvatar: index > 12,
-      liveThread: live,
-      approvals: t.approvals,
-      onRetryMessage: async (m) => { const err = await t.retry(m); if (err) toast({ title: 'Message not sent', body: err, tone: 'error' }) },
-      onDiscardMessage: (m) => t.discard(m.id),
-      onRetryRun: retryRun,
-      onApprovalDecided: () => { t.refreshApprovals(); ws.refresh() },
-      mentionHandles: handles,
+      approval: m?.meta.approval_id ? t.approvals[m.meta.approval_id] : undefined,
+      replyTo: m?.reply_to ? byId.get(m.reply_to) ?? null : undefined,
+      highlighted: !!m && m.id === highlight,
     }
   }
 
@@ -163,6 +187,7 @@ export default function Thread() {
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       {header}
+      <ChatActionsContext.Provider value={ctx}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         {t.loading ? (
           <View style={{ flex: 1, justifyContent: 'flex-end', padding: 16, gap: 18 }} accessible accessibilityLabel="Loading messages">
@@ -179,10 +204,15 @@ export default function Thread() {
           empty
         ) : (
           <FlatList
+            ref={list}
             data={items}
             inverted
             keyExtractor={(i) => i.key}
-            renderItem={({ item, index }) => <ChatRow item={item} ctx={ctxFor(index)} />}
+            renderItem={({ item, index }) => <ChatRow item={item} {...rowProps(index)} />}
+            onScrollToIndexFailed={(e) => list.current?.scrollToOffset({ offset: e.averageItemLength * e.index, animated: true })}
+            initialNumToRender={14}
+            maxToRenderPerBatch={8}
+            windowSize={11}
             contentContainerStyle={{ paddingTop: 12, paddingBottom: 8, flexGrow: 1 }}
             onEndReached={t.loadOlder}
             onEndReachedThreshold={0.4}
@@ -198,8 +228,11 @@ export default function Thread() {
           live={live}
           onSend={send}
           onStop={stop}
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
         />
       </KeyboardAvoidingView>
+      </ChatActionsContext.Provider>
     </View>
   )
 }

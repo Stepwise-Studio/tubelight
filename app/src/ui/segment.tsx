@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Pressable, type LayoutChangeEvent } from 'react-native'
-import Animated, { interpolate, useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated'
+import { Pressable } from 'react-native'
+import Animated, { useAnimatedStyle, withTiming, type SharedValue } from 'react-native-reanimated'
 
 import { motion, useTheme } from '@/theme'
 
@@ -24,30 +24,28 @@ export interface SegmentProps<T extends string> {
  */
 export function Segment<T extends string>({ value, onChange, options, accessibilityLabel, progress }: SegmentProps<T>) {
   const { c, scheme } = useTheme()
-  const [layouts, setLayouts] = useState<Record<string, { x: number; w: number }>>({})
+  const [width, setWidth] = useState(0)
   const [placed, setPlaced] = useState(false)
-  const cur = layouts[value]
-  const all = options.map((o) => layouts[o.value])
-  const tracked = progress && all.every(Boolean) ? all as { x: number; w: number }[] : null
+  const n = options.length
+  const index = Math.max(0, options.findIndex((o) => o.value === value))
+  // Tabs are flex: 1, so every slot is the same width: inner width (minus 1px border and 3px padding each side) / n.
+  const seg = width ? (width - 8) / n : 0
   const pill = useAnimatedStyle(() => {
-    if (tracked && progress) {
-      const idx = tracked.map((_, i) => i)
-      return {
-        opacity: 1,
-        width: interpolate(progress.value, idx, tracked.map((l) => l.w), 'clamp'),
-        transform: [{ translateX: interpolate(progress.value, idx, tracked.map((l) => l.x), 'clamp') }],
-      }
+    if (!seg) return { opacity: 0 }
+    const x = progress ? 3 + progress.value * seg : 3 + index * seg
+    return {
+      opacity: 1,
+      width: seg,
+      transform: [{ translateX: progress || !placed ? x : withTiming(x, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) }],
     }
-    if (!cur) return { opacity: 0 }
-    const t = (v: number) => (placed ? withTiming(v, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) : v)
-    return { opacity: 1, width: t(cur.w), transform: [{ translateX: t(cur.x) }] }
-  }, [cur, placed, tracked])
+  }, [seg, index, placed])
 
   return (
     <Squircle
       accessibilityRole="tablist"
       accessibilityLabel={accessibilityLabel}
       style={{ flexDirection: 'row', padding: 3, borderRadius: 12, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }}
+      onLayout={(e) => { setWidth(e.nativeEvent.layout.width); requestAnimationFrame(() => setPlaced(true)) }}
     >
       <Animated.View
         pointerEvents="none"
@@ -65,11 +63,6 @@ export function Segment<T extends string>({ value, onChange, options, accessibil
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
             accessibilityLabel={o.count != null ? `${o.label}, ${o.count}` : o.label}
-            onLayout={(e: LayoutChangeEvent) => {
-              const { x, width } = e.nativeEvent.layout
-              setLayouts((l) => ({ ...l, [o.value]: { x, w: width } }))
-              if (o.value === value) requestAnimationFrame(() => setPlaced(true))
-            }}
             onPress={() => { if (!active) { haptic.tap(); onChange(o.value) } }}
             style={{ flex: 1, height: 34, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 12 }}
           >

@@ -22,7 +22,6 @@ export function FabMenu({ items, accessibilityLabel = 'New' }: { items: FabItem[
   const p = useSharedValue(0)
 
   useEffect(() => {
-    if (open) setMounted(true)
     p.value = withTiming(open ? 1 : 0, {
       duration: open ? motion.duration.fast : motion.duration.quick, easing: motion.ease.smoothOut,
     })
@@ -78,7 +77,7 @@ export function FabMenu({ items, accessibilityLabel = 'New' }: { items: FabItem[
       <View style={[{ position: 'absolute', right: 16, bottom }, elevation(scheme)]}>
         <Press
           radius={28}
-          onPress={() => { haptic.tap(); setOpen((o) => !o) }}
+          onPress={() => { haptic.tap(); if (!open) setMounted(true); setOpen(!open) }}
           accessibilityLabel={open ? 'Close menu' : accessibilityLabel}
           accessibilityState={{ expanded: open }}
           style={{ width: 56, height: 56, alignItems: 'center', justifyContent: 'center', backgroundColor: c.tube }}

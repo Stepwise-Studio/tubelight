@@ -19,7 +19,7 @@ import { modelName, useModels } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Activity, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
-import { motion, radius, useTheme } from '@/theme'
+import { motion, useTheme } from '@/theme'
 import {
   Button, Divider, EmptyState, IconButton, ListRow, Segment, Skeleton, Surface, TeammateAvatar, Text,
   confirm, haptic, showMenu, toast,

@@ -27,7 +27,7 @@ import {
 const AGENT_URL = process.env.EXPO_PUBLIC_AGENT_URL ?? 'http://localhost:8787'
 const TOKEN_KEY = 'tubelight.pushToken'
 
-export default function Profile() {
+export default function ProfileScreen() {
   const { c } = useTheme()
   const inset = useTabBarInset()
   const { session } = useSession()
