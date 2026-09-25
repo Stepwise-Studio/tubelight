@@ -22,8 +22,9 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   let res: Response
   try {
     res = await fetch(BASE + path, { ...init, headers, body: init.json !== undefined ? JSON.stringify(init.json) : init.body })
-  } catch {
-    throw new ApiError('Can’t reach the teammate service. Check it’s running and on the same network.', 0)
+  } catch (e) {
+    const why = __DEV__ ? ` (${e instanceof Error ? e.message : String(e)})` : ''
+    throw new ApiError(`Can’t reach the teammate service. Check it’s running and on the same network.${why}`, 0)
   }
   if (!res.ok) {
     const body = await res.json().catch(() => null)

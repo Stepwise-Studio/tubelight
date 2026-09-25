@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, KeyboardIcon, StopIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { ApiError, BASE, api, authHeaders } from '@/lib/api'
+import { stripCues } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
 import { motion, useTheme } from '@/theme'
@@ -18,12 +19,16 @@ import { VoiceGlow } from './voice-glow'
 
 type Phase = 'starting' | 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'stopped'
 
-const SPEECH = 0.32 // level that counts as talking
+const SPEECH = 0.32 // minimum level that counts as talking
+const CALIBRATE_MS = 400 // listen to the room first; talking must rise clearly above it
+const MIN_TALK_MS = 300 // a cough or a door isn't a turn
 const SILENCE_MS = 1100 // this long below it after talking ends the turn
 const MAX_TURN_MS = 60_000
+// Module constant: useAudioRecorder recreates (and releases) the recorder whenever its options object changes.
+const RECORDING = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true }
 
 const toLevel = (db?: number) => (db === undefined ? 0 : Math.max(0, Math.min(1, (db + 55) / 45)))
-const plain = (s: string) => s.replace(/```[\s\S]*?```/g, ' (code in the chat) ').replace(/[*_`#>[\]]/g, '').replace(/\s+/g, ' ').trim()
+const plain = (s: string) => stripCues(s).replace(/```[\s\S]*?```/g, ' (code in the chat) ').replace(/[*_`#>[\]]/g, '').replace(/\s+/g, ' ').trim()
 
 export interface VoiceModeProps {
   teammate?: Teammate
@@ -42,7 +47,7 @@ export interface VoiceModeProps {
 export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: VoiceModeProps) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true })
+  const recorder = useAudioRecorder(RECORDING)
   const rec = useAudioRecorderState(recorder, 80)
   const level = useSharedValue(0)
   const [phase, setPhase] = useState<Phase>('starting')
@@ -50,7 +55,7 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
   const [note, setNote] = useState('')
 
   const phaseRef = useRef<Phase>('starting')
-  const turn = useRef({ startedAt: 0, spoke: false, lastLoud: 0, sent: '', sawLive: false })
+  const turn = useRef({ startedAt: 0, spoke: false, lastLoud: 0, floor: 0, loudMs: 0, lastTick: 0, sent: '', sawLive: false })
   const players = useRef<AudioPlayer[]>([])
   const closed = useRef(false)
 
@@ -70,11 +75,12 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true })
       await recorder.prepareToRecordAsync()
       recorder.record()
-      turn.current = { ...turn.current, startedAt: Date.now(), spoke: false, lastLoud: 0 }
+      const now = Date.now()
+      turn.current = { ...turn.current, startedAt: now, spoke: false, lastLoud: 0, floor: 0, loudMs: 0, lastTick: now }
       setNote('')
       go('listening')
-    } catch {
-      setNote('The microphone is busy. Tap to try again.')
+    } catch (e) {
+      setNote(`The microphone is busy. Tap to try again.${__DEV__ ? ` (${(e as Error).message})` : ''}`)
       go('stopped')
     }
   }
@@ -87,9 +93,8 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
       await recorder.stop()
       const uri = recorder.uri
       if (!uri) throw new Error('No recording')
-      const form = new FormData()
-      form.append('audio', { uri, name: 'speech.m4a', type: 'audio/m4a' } as unknown as Blob)
-      const { text } = await api<{ text: string }>('/voice/transcribe', { method: 'POST', body: form })
+      const audio = await (await fetch(uri)).arrayBuffer()
+      const { text } = await api<{ text: string }>('/voice/transcribe', { method: 'POST', body: audio, headers: { 'Content-Type': 'audio/m4a' } })
       if (!text.trim()) { setNote('I didn’t catch that.'); return listen() }
       setCaption(text)
       turn.current = { ...turn.current, sent: text, sawLive: false }
@@ -151,10 +156,17 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
   useEffect(() => {
     if (phaseRef.current !== 'listening') return
     const l = toLevel(rec.metering)
-    level.value = l
     const now = Date.now()
     const t = turn.current
-    if (l > SPEECH) { t.spoke = true; t.lastLoud = now }
+    const dt = now - t.lastTick
+    t.lastTick = now
+    if (now - t.startedAt < CALIBRATE_MS) { t.floor = Math.max(t.floor, l); return }
+    level.value = Math.max(0, l - t.floor) / (1 - Math.min(t.floor, 0.9)) // the glow shows your voice, not the room
+    if (l > Math.max(SPEECH, t.floor + 0.18)) {
+      t.lastLoud = now
+      t.loudMs += dt
+      if (t.loudMs >= MIN_TALK_MS) t.spoke = true
+    }
     if ((t.spoke && now - t.lastLoud > SILENCE_MS) || now - t.startedAt > MAX_TURN_MS) endTurn()
   }, [rec.metering, rec.durationMillis]) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -11,6 +11,9 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 - `app/` Expo SDK 57, Expo Router in `src/app/`. Design system `src/ui/` (import from `@/ui`, see `src/ui/README.md`), theme `src/theme/` (tokens, `motion.ts` = transitions.dev tokens), data `src/lib/` (`workspace.tsx` global state, `use-thread.ts` thread realtime, `api.ts`, `supabase.ts`, `types.ts`). Chat UI `src/components/chat/`. Vendored libraries.dev RN ports `src/vendor/` (eslint-ignored; keep "Tubelight patch" comments).
 
 ## Run (all local; phone = Galaxy S21 FE over USB, adb serial RZCW40ZL54A)
+- The desktop app crashes often and kills child processes (even setsid). Run long things as user units:
+  `systemd-run --user --unit=tl-svc|tl-metro|tl-release ...` (see git log / previous units; `systemctl --user status tl-*`, `reset-failed` before reuse).
+  Keep tool calls short: no sleeps over ~15s, downscale phone screenshots before reading.
 - Service: `cd agent-service && setsid .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8787 &` (`kill -USR1 <pid>` dumps stacks).
 - Metro: `cd app && setsid npx expo start --dev-client --port 8081 --localhost &`, then `adb reverse tcp:8081 tcp:8081; adb reverse tcp:8787 tcp:8787`.
 - Native rebuild only after adding native deps: `cd app/android && JAVA_HOME=~/.local/share/jdk/jdk-17* ./gradlew app:assembleDebug -PreactNativeArchitectures=arm64-v8a` (JDK 25 breaks CMake). `android/` is generated (CNG); if missing: `CI=1 npx expo prebuild -p android`, then `echo "sdk.dir=$HOME/Android/Sdk" > android/local.properties`.

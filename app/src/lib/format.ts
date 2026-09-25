@@ -41,3 +41,6 @@ export function ago(iso: string, now = new Date()) {
   if (s < 6 * 3600) return `${Math.floor(s / 3600)} h`
   return relativeTime(iso, now)
 }
+
+/** Voice replies carry Orpheus vocal cues like [cheerful] or [sigh]: spoken, never shown. Links ([x](url)) are left alone. */
+export const stripCues = (s: string) => s.replace(/\s?\[[a-z]+(?: [a-z]+)?\](?!\()/g, '')

@@ -60,10 +60,22 @@ async def transcribe(audio: bytes, filename: str) -> str:
         raise HTTPException(400, "No audio was recorded.")
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.post(f"{BASE}/audio/transcriptions", headers={"Authorization": f"Bearer {_key()}"},
-                         files={"file": (filename, audio)}, data={"model": STT_MODEL, "response_format": "json"})
+                         files={"file": (filename, audio)}, data={"model": STT_MODEL, "response_format": "verbose_json"})
     if r.status_code != 200:
         raise HTTPException(502, "Couldn't transcribe that. Try again.")
-    return r.json().get("text", "").strip()
+    return heard(r.json())
+
+
+# Whisper invents these from silence and room noise.
+PHANTOMS = {"thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "so", "oh", "hmm", "uh", "um"}
+
+
+def heard(result: dict) -> str:
+    """The words actually spoken: segments Whisper itself flags as probably-not-speech are dropped, then known phantoms."""
+    segments = result.get("segments")
+    text = " ".join(s.get("text", "") for s in segments if s.get("no_speech_prob", 0) < 0.6) if segments else result.get("text", "")
+    text = " ".join(text.split())
+    return "" if re.sub(r"[^a-z ]", "", text.lower()).strip() in PHANTOMS else text
 
 
 async def speak(text: str, teammate_id: str | None) -> bytes:

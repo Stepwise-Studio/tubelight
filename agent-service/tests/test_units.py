@@ -183,3 +183,12 @@ def test_model_ids_and_fallback_chain(monkeypatch):
     assert isinstance(chain, RunnableWithFallbacks) and len(chain.fallbacks) == 1
     assert chain.runnable.openai_api_base == "https://openrouter.ai/api/v1"
     assert chain.fallbacks[0].openai_api_base == "https://api.groq.com/openai/v1"
+
+
+def test_voice_heard_drops_silence_and_phantoms():
+    from app.voice import heard, parts
+
+    assert heard({"text": " Thank you.", "segments": [{"text": " Thank you.", "no_speech_prob": 0.2}]}) == ""
+    assert heard({"segments": [{"text": " Hi Dev", "no_speech_prob": 0.1}, {"text": " blah", "no_speech_prob": 0.9}]}) == "Hi Dev"
+    assert heard({"text": "Book a meeting"}) == "Book a meeting"
+    assert parts("") == [] and len(parts("Short. " * 40)[0]) <= 120

@@ -8,7 +8,7 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
-import { fullTime } from '@/lib/format'
+import { fullTime, stripCues } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
@@ -111,7 +111,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
         {/* Same label and bubble the final row carries, so the swap doesn't shift anything. */}
         {proactive && <EventLabel />}
         <Bubble side="left" first={first} last={last}>
-          <View accessibilityLiveRegion="none"><Markdown value={item.g.text} /></View>
+          <View accessibilityLiveRegion="none"><Markdown value={stripCues(item.g.text)} /></View>
         </Bubble>
       </TeammateBlock>
     )
@@ -219,7 +219,7 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
         <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={{ maxWidth: '100%' }}>
           <Bubble side="left" first={first} last={last} highlighted={highlighted}>
             {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
-            <Markdown value={m.text} />
+            <Markdown value={stripCues(m.text)} />
             <Attachments items={m.meta.attachments} />
           </Bubble>
         </Pressable>

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -194,8 +194,12 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
 
 # ------------------------------------------------------------------ voice
 @app.post("/voice/transcribe")
-async def transcribe(audio: UploadFile, user: User = Depends(current_user)):
-    return {"text": await voice.transcribe(await audio.read(), audio.filename or "speech.m4a")}
+async def transcribe(request: Request, user: User = Depends(current_user)):
+    """Raw audio body (the app's fetch can't send React Native-style multipart files)."""
+    audio = await request.body()
+    if len(audio) > 25 * 1024 * 1024:
+        raise HTTPException(413, "That recording is too long.")
+    return {"text": await voice.transcribe(audio, "speech.m4a")}
 
 
 class SpeakIn(BaseModel):
