@@ -9,12 +9,12 @@ from typing import Any, Literal
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import config, connectors, db, events, llm, memory, runs, sandbox
+from . import config, connectors, db, events, files, llm, memory, runs, sandbox, voice
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -105,16 +105,39 @@ async def templates() -> list[dict[str, Any]]:
 class MessageIn(BaseModel):
     text: str
     mentions: list[str] = []
+    reply_to: str | None = None
+    attachments: list[dict[str, Any]] = []
+    voice: bool = False  # sent from voice mode: the teammate answers as speech
+
+
+async def _quoted(thread_id: str, reply_to: str | None) -> str:
+    """What the teammate sees when the user swipes to reply: the quoted message ahead of the text."""
+    if not reply_to:
+        return ""
+    q = await db.one("messages", {"id": f"eq.{reply_to}", "thread_id": f"eq.{thread_id}"})
+    if not q:
+        return ""
+    who = "their own earlier message" if q["sender_type"] == "user" else "a teammate's message"
+    if q.get("teammate_id"):
+        tm = await db.one("teammates", {"id": f"eq.{q['teammate_id']}"})
+        who = f"{tm['name']}'s message" if tm else who
+    snippet = " ".join(q["text"].split())[:400]
+    return f'[Replying to {who}: "{snippet}"]\n'
 
 
 @app.post("/threads/{thread_id}/messages")
 async def post_message(thread_id: str, body: MessageIn, user: User = Depends(current_user)):
-    if not body.text.strip():
+    if not body.text.strip() and not body.attachments:
         raise HTTPException(400, "Write a message first.")
     thread = await owned("threads", thread_id, user, "conversation")
+    meta = {"attachments": body.attachments} if body.attachments else {}
     message = await db.insert("messages", {"thread_id": thread_id, "owner_id": user["id"], "sender_type": "user",
-                                           "text": body.text, "mentions": body.mentions})
-    run_id = await runs.start(user["id"], thread_id, body.text, mentions=body.mentions,
+                                           "text": body.text, "mentions": body.mentions, "reply_to": body.reply_to,
+                                           "meta": meta})
+    prompt = await _quoted(thread_id, body.reply_to) + body.text + await files.describe(user["id"], body.attachments)
+    if body.voice:
+        prompt += voice.INSTRUCTION
+    run_id = await runs.start(user["id"], thread_id, prompt, mentions=body.mentions,
                               teammate_id=thread.get("teammate_id"))
     await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
     return {"message": {**message, "run_id": run_id}, "run_id": run_id}
@@ -127,9 +150,11 @@ async def cancel_run(run_id: str, user: User = Depends(current_user)):
 
 
 class Decision(BaseModel):
-    action: Literal["approve", "reject"]
+    # approve/reject: approvals. answer/skip: questions. connected/skip: connect cards.
+    action: Literal["approve", "reject", "answer", "connected", "skip"]
     args: dict[str, Any] | None = None
     note: str | None = None
+    answer: str | None = None
 
 
 @app.post("/approvals/{approval_id}")
@@ -141,16 +166,46 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
     if not run or run["status"] not in ("waiting_approval", "running"):  # running: another decision is resuming it
         await db.update("approvals", {"id": f"eq.{approval_id}"}, {"status": "expired"})
         raise HTTPException(409, "This request is no longer active, so nothing was done.")
-    status = "approved" if body.action == "approve" else "rejected"
+    kind = approval.get("kind", "approval")
+    allowed = {"approval": {"approve", "reject"}, "question": {"answer", "skip"}, "connect": {"connected", "skip"}}[kind]
+    if body.action not in allowed:
+        raise HTTPException(400, "That response doesn't fit this request.")
+    if body.action == "answer" and not (body.answer or "").strip():
+        raise HTTPException(400, "Pick an option or write an answer.")
+    if body.action == "connected":
+        toolkit = approval["draft"].get("toolkit", "")
+        if not any(c["toolkit"] == toolkit and c["connected"] for c in await connectors.list_connections(user["id"])):
+            raise HTTPException(409, f"{approval['draft'].get('name', toolkit)} isn't connected yet. Finish signing in, then try again.")
+    status = "approved" if body.action in ("approve", "answer", "connected") else "rejected"
     await db.update("approvals", {"id": f"eq.{approval_id}"}, {
         "status": status, "final_args": body.args if body.action == "approve" else None,
-        "note": body.note, "decided_at": db.now()})
+        "note": body.note, "answer": body.answer, "decided_at": db.now()})
+    if body.action == "answer":  # the chosen option reads as the user's reply in the thread
+        await db.insert("messages", {"thread_id": approval["thread_id"], "owner_id": user["id"], "sender_type": "user",
+                                     "text": body.answer.strip(), "run_id": run["id"], "meta": {"answer_to": approval_id}})
     await db.activity(user["id"], "approval_decision", approval["tool_name"], run_id=run["id"],
                       thread_id=approval["thread_id"], teammate_id=approval.get("teammate_id"),
                       input={"approval_id": approval_id, "action": body.action, "note": body.note},
                       output={"args": body.args} if body.args else None)
-    await runs.resume(run, {"approval_id": approval_id, "action": body.action, "args": body.args, "note": body.note})
+    await runs.resume(run, {"approval_id": approval_id, "action": body.action, "args": body.args, "note": body.note,
+                            "answer": body.answer})
     return {"ok": True, "status": status}
+
+
+# ------------------------------------------------------------------ voice
+@app.post("/voice/transcribe")
+async def transcribe(audio: UploadFile, user: User = Depends(current_user)):
+    return {"text": await voice.transcribe(await audio.read(), audio.filename or "speech.m4a")}
+
+
+class SpeakIn(BaseModel):
+    text: str
+    teammate_id: str | None = None
+
+
+@app.post("/voice/speak")
+async def speak(body: SpeakIn, user: User = Depends(current_user)):
+    return Response(await voice.speak(body.text, body.teammate_id), media_type="audio/wav")
 
 
 # ------------------------------------------------------------------ memories

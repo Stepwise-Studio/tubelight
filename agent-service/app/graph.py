@@ -137,8 +137,10 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     if T.MULTI in tool_names:
         lines.append(f"Connected apps ({', '.join(tm.get('allowed_toolkits') or [])}): find the right app tool with "
                      "COMPOSIO_SEARCH_TOOLS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL using the exact slug and "
-                     "arguments. Never invent slugs. If an app is not connected, ask the user to connect it in the "
-                     "Connections screen.")
+                     "arguments. Never invent slugs.")
+    lines.append("If a request needs an app that is not connected (GMAIL, GITHUB, LINEAR, NOTION), call connect_app "
+                 "instead of telling the user to go somewhere. When the next step depends on the user's preference, "
+                 "call ask_user with 2 to 4 short options rather than listing questions in prose.")
     if tm["role"] in ("developer", "tester") and "run_shell" not in tool_names:
         lines.append("You have no code sandbox right now (Docker is not available), so you cannot run code or tests. "
                      "Say so when it matters and reason from what you can read.")
@@ -304,7 +306,16 @@ def make_gate(ctx: RunCtx):
         ai = state["messages"][-1]
         known = {t.name for t in await ctx.tools_for(tm)}
         pending = []
+        connected: set[str] | None = None
         for tc in ai.tool_calls:
+            if tc["name"] in T.PROMPTS:
+                if tc["name"] == "connect_app":
+                    if connected is None:
+                        connected = {c["toolkit"] for c in await connectors.list_connections(ctx.owner_id) if c["connected"]}
+                    if str(tc["args"].get("toolkit", "")).upper() in connected:
+                        continue  # nothing to wait for; the tools node says it is already connected
+                pending.append(await _prompt(ctx, tm, tc))
+                continue
             if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
                 continue
             tool_name, title, draft = T.approval_view(tc["name"], tc["args"])
@@ -321,13 +332,43 @@ def make_gate(ctx: RunCtx):
             await db.update("approvals", {"id": f"eq.{approval['id']}"}, {"message_id": msg["id"]})
             await db.activity(ctx.owner_id, "approval_request", tool_name, run_id=ctx.run_id, thread_id=ctx.thread_id,
                               teammate_id=tm["id"], input=draft, output={"approval_id": approval["id"]}, status="pending")
-            pending.append({"approval_id": approval["id"], "tool_call_id": tc["id"], "title": title})
+            pending.append({"approval_id": approval["id"], "tool_call_id": tc["id"], "title": title, "kind": "approval"})
         if pending:
-            await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "waiting", "Waiting for your approval"))
-            await push.notify(ctx.owner_id, f"{tm['name']} needs your approval", pending[0]["title"], ctx.thread_id)
+            first = pending[0]
+            label = {"question": "Waiting for your answer", "connect": "Waiting for you to connect"}.get(first["kind"], "Waiting for your approval")
+            await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "waiting", label))
+            heading = f"{tm['name']} needs your approval" if first["kind"] == "approval" else f"{tm['name']} asked you"
+            await push.notify(ctx.owner_id, heading, first["title"], ctx.thread_id)
         return {"pending": pending, "decisions": {}}
 
     return gate
+
+
+async def _prompt(ctx: RunCtx, tm: dict, tc: dict) -> dict:
+    """A question-with-options or connect-an-app card: an approvals row of that kind plus its chat message."""
+    args = tc["args"]
+    if tc["name"] == "ask_user":
+        kind = "question"
+        options = [str(o).strip() for o in (args.get("options") or []) if str(o).strip()][:4]
+        title = str(args.get("question") or "Which way should I go?").strip()
+        draft = {"question": title, "options": options, "allow_other": bool(args.get("allow_other", True))}
+    else:
+        kind = "connect"
+        toolkit = str(args.get("toolkit", "")).upper()
+        name = connectors.DEFAULT_TOOLKITS.get(toolkit, toolkit.title())
+        title = f"Connect {name}"
+        draft = {"toolkit": toolkit, "name": name, "reason": str(args.get("reason") or "")}
+    row = await db.insert("approvals", {
+        "owner_id": ctx.owner_id, "thread_id": ctx.thread_id, "teammate_id": tm["id"], "run_id": ctx.run_id,
+        "tool_name": tc["name"], "kind": kind, "title": title, "draft": draft,
+    })
+    msg = await db.insert("messages", {
+        "thread_id": ctx.thread_id, "owner_id": ctx.owner_id, "sender_type": "teammate", "teammate_id": tm["id"],
+        "text": title, "kind": kind, "proactive": ctx.proactive, "run_id": ctx.run_id,
+        "meta": {"approval_id": row["id"], **draft},
+    })
+    await db.update("approvals", {"id": f"eq.{row['id']}"}, {"message_id": msg["id"]})
+    return {"approval_id": row["id"], "tool_call_id": tc["id"], "title": title, "kind": kind}
 
 
 def wait(state: State) -> dict:
@@ -365,6 +406,10 @@ def make_tools(ctx: RunCtx):
                                               f"{args.get('note', '')}", name="handoff"))
                 out.append(ToolMessage(text, tool_call_id=tc["id"], name=name))
                 continue
+            if name in T.PROMPTS:
+                d = decisions.get(approval_of.get(tc["id"], "")) or {}
+                out.append(ToolMessage(await _prompt_result(ctx, tm, name, args, d), tool_call_id=tc["id"], name=name))
+                continue
             if tc["id"] in approval_of:
                 d = decisions.get(approval_of[tc["id"]]) or {"action": "reject"}
                 if d.get("action") != "approve":
@@ -379,6 +424,23 @@ def make_tools(ctx: RunCtx):
         return {"messages": out + notes, "pending": [], "decisions": {}, **update}
 
     return tools_node
+
+
+async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) -> str:
+    if name == "ask_user":
+        if d.get("action") == "answer" and d.get("answer"):
+            return f"The user answered: {d['answer']}"
+        return "The user dismissed the question. Continue with your best judgement or ask in plain text."
+    toolkit = str(args.get("toolkit", "")).upper()
+    if not d:  # the gate skipped the pause: it was connected already
+        return f"{toolkit} is already connected. Continue the task."
+    if d.get("action") != "connected":
+        return f"The user chose not to connect {toolkit} for now. Tell them what you can do without it."
+    if toolkit not in (tm.get("allowed_toolkits") or []):
+        tm["allowed_toolkits"] = [*(tm.get("allowed_toolkits") or []), toolkit]
+        await db.update("teammates", {"id": f"eq.{tm['id']}"}, {"allowed_toolkits": tm["allowed_toolkits"]})
+    ctx._tools.pop(tm["id"], None)  # rebuild with the new app's tools on the next model call
+    return f"The user connected {toolkit}. Its tools are available now; continue the task."
 
 
 async def _handoff(ctx: RunCtx, tm: dict, args: dict, handoffs: int) -> tuple[str, dict | None]:

@@ -20,11 +20,14 @@ READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "
 INTERNAL = {
     "remember": "read", "recall": "read", "handoff_to": "read", "spawn_helper": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
+    "ask_user": "read", "connect_app": "read",
 }
+# Tools that pause the run for the user (question card / connect card). The graph intercepts them.
+PROMPTS = {"ask_user", "connect_app"}
 LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "handoff_to": "Handing off",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits",
+    "git_push": "Pushing commits", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
 
@@ -162,6 +165,25 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         StructuredTool.from_function(
             coroutine=recall, name="recall", description="Search long-term memory (yours, the project's and the user's profile)."),
     ]
+
+    if not helper:
+        async def ask_user(question: str, options: list[str], allow_other: bool = True) -> str:
+            return "handled by the graph"
+
+        async def connect_app(toolkit: str, reason: str = "") -> str:
+            return "handled by the graph"
+
+        tools += [
+            StructuredTool.from_function(
+                coroutine=ask_user, name="ask_user",
+                description="Ask the user to choose before you continue, when the right next step depends on their "
+                            "preference. Give 2 to 4 short, distinct options (a few words each); they can also type "
+                            "their own answer. Use it for real forks, not for yes/no confirmations of approved actions."),
+            StructuredTool.from_function(
+                coroutine=connect_app, name="connect_app",
+                description="Ask the user to connect an app you need (GMAIL, GITHUB, LINEAR or NOTION) when it is not "
+                            "connected yet. They get a Connect button in the chat; after they connect, continue the task."),
+        ]
 
     if not helper and ctx.project and len(ctx.members) > 1:
         async def handoff_to(handle: str, note: str = "") -> str:

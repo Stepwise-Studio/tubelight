@@ -181,3 +181,38 @@ def test_view_names_other_teammates():
     view = graph.view_for(tess, [HumanMessage("fix login"), d], [dev, tess])
     assert view[1].content == "[Dev · developer]: I fixed it." and isinstance(view[1], HumanMessage)
     assert graph.view_for(dev, [HumanMessage("x"), d], [dev, tess])[1] is d
+
+
+async def test_ask_user_pauses_and_answer_resumes(api, env):
+    fdb, fake = env
+    sol = teammate(fdb, "sol", "social")
+    fake.script = [ai(calls=[("ask_user", {"question": "Which tone?", "options": ["Playful", "Formal"]})]),
+                   ai("Going playful.")]
+    r = await api.post(f"/threads/dm:{sol['id']}/messages", json={"text": "draft a launch post"})
+    await settle()
+    [q] = fdb.rows("approvals", kind="question")
+    [card] = fdb.rows("messages", kind="question")
+    assert card["meta"]["options"] == ["Playful", "Formal"] and card["meta"]["approval_id"] == q["id"]
+    assert fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "waiting_approval"
+    assert (await api.post(f"/approvals/{q['id']}", json={"action": "approve"})).status_code == 400
+
+    r = await api.post(f"/approvals/{q['id']}", json={"action": "answer", "answer": "Playful"})
+    assert r.json()["status"] == "approved"
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="user")] == ["draft a launch post", "Playful"]
+    tool_msg = [m for m in fake.calls[-1] if isinstance(m, ToolMessage)][-1]
+    assert tool_msg.content == "The user answered: Playful"
+    assert fdb.rows("messages", kind="text", sender_type="teammate")[0]["text"] == "Going playful."
+
+
+async def test_reply_to_quotes_the_message(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    fake.script = [ai("First."), ai("Second.")]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "hi"})
+    await settle()
+    first = fdb.rows("messages", kind="text", sender_type="teammate")[0]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "why?", "reply_to": first["id"]})
+    await settle()
+    human = [m for m in fake.calls[-1] if isinstance(m, HumanMessage)][-1]
+    assert human.content.startswith('[Replying to Dev\'s message: "First."]') and human.content.endswith("why?")

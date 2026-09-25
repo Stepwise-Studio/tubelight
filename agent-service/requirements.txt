@@ -18,3 +18,5 @@ croniter>=6.2
 # tests
 pytest>=9
 pytest-asyncio>=1.4
+pypdf
+python-multipart

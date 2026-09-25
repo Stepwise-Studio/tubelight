@@ -26,7 +26,12 @@ PROVIDERS: dict[str, dict[str, str]] = {
                "name": "Google Gemini", "default": "gemini:gemini-2.5-flash"},
     "mistral": {"base": "https://api.mistral.ai/v1", "key": "MISTRAL_API_KEY", "name": "Mistral",
                 "default": "mistral:mistral-small-latest"},
+    # Workers AI (OpenAI-compatible). Model ids look like cloudflare:@cf/openai/gpt-oss-120b.
+    "cloudflare": {"base": f"https://api.cloudflare.com/client/v4/accounts/{config.env('CF_ACCOUNT_ID')}/ai/v1",
+                   "key": "CF_API_TOKEN", "name": "Cloudflare Workers AI", "default": "cloudflare:@cf/openai/gpt-oss-120b"},
 }
+# With CF_GATEWAY_ID set, every provider goes through Cloudflare AI Gateway (retries, caching, logs, rate limits).
+GATEWAY_PATH = {"openrouter": "openrouter", "groq": "groq", "mistral": "mistral/v1", "cloudflare": "workers-ai/v1"}
 NOT_CHAT = re.compile(r"whisper|tts|embed|guard|imagen|veo|aqa|moderation|ocr|audio|image|orpheus|allam|prompt-guard", re.I)
 _models: tuple[float, list[dict[str, Any]]] = (0.0, [])
 
@@ -37,7 +42,23 @@ def parse(model_id: str) -> tuple[str, str]:
 
 
 def key(provider: str) -> str:
+    if provider == "cloudflare" and not config.env("CF_ACCOUNT_ID"):
+        return ""
     return config.env(PROVIDERS[provider]["key"])
+
+
+def base_url(provider: str) -> str:
+    gw, acct = config.env("CF_GATEWAY_ID"), config.env("CF_ACCOUNT_ID")
+    if gw and acct and provider in GATEWAY_PATH:
+        return f"https://gateway.ai.cloudflare.com/v1/{acct}/{gw}/{GATEWAY_PATH[provider]}"
+    return PROVIDERS[provider]["base"]
+
+
+def _headers(provider: str) -> dict[str, str] | None:
+    h = {"HTTP-Referer": config.APP_URL, "X-Title": "Tubelight"} if provider == "openrouter" else {}
+    if config.env("CF_GATEWAY_ID") and config.env("CF_AIG_TOKEN") and provider in GATEWAY_PATH:
+        h["cf-aig-authorization"] = f"Bearer {config.env('CF_AIG_TOKEN')}"  # authenticated gateways only
+    return h or None
 
 
 def fallbacks() -> list[str]:
@@ -48,9 +69,8 @@ def fallbacks() -> list[str]:
 
 def _one(model_id: str) -> ChatOpenAI:
     provider, model = parse(model_id)
-    headers = {"HTTP-Referer": config.APP_URL, "X-Title": "Tubelight"} if provider == "openrouter" else None
-    return ChatOpenAI(model=model, base_url=PROVIDERS[provider]["base"], api_key=key(provider) or "missing",
-                      default_headers=headers, timeout=120, max_retries=1)
+    return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
+                      default_headers=_headers(provider), timeout=120, max_retries=1)
 
 
 def chat_model(model: str | None = None, tools: list[BaseTool] | None = None) -> Runnable:
@@ -64,7 +84,25 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None) ->
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
 
 
+async def _list_cloudflare(c: httpx.AsyncClient) -> list[dict[str, Any]]:
+    r = await c.get(f"https://api.cloudflare.com/client/v4/accounts/{config.env('CF_ACCOUNT_ID')}/ai/models/search",
+                    params={"task": "Text Generation", "per_page": 100},
+                    headers={"Authorization": f"Bearer {key('cloudflare')}"})
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("result", []):
+        props = {p.get("property_id"): p.get("value") for p in m.get("properties") or []}
+        if str(props.get("function_calling")).lower() != "true":
+            continue
+        ctx = props.get("context_window") or props.get("max_input_tokens")
+        out.append({"id": f"cloudflare:{m['name']}", "name": m["name"].split("/")[-1], "provider": "cloudflare",
+                    "context_length": int(ctx) if str(ctx).isdigit() else None})
+    return out
+
+
 async def _list(provider: str, c: httpx.AsyncClient) -> list[dict[str, Any]]:
+    if provider == "cloudflare":
+        return await _list_cloudflare(c)
     p = PROVIDERS[provider]
     headers = {"Authorization": f"Bearer {key(provider)}"} if provider != "openrouter" else {}
     r = await c.get(p["base"].rstrip("/") + "/models", headers=headers)
