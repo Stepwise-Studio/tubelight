@@ -44,6 +44,14 @@ class TubeRenderer extends Renderer {
   code(text: string, language?: string): ReactNode {
     return <CodeBlock key={this.getKey()} code={text} language={language} />
   }
+  codespan(text: string): ReactNode {
+    // Upright mono on a panel2 wash; thin spaces stand in for padding (inline Text can't pad).
+    return (
+      <RNText key={this.getKey()} style={[typeScale.mono, { fontSize: 13.5, fontStyle: 'normal', fontWeight: 'normal', color: this.c.ink, backgroundColor: this.c.panel2 }]}>
+        {`\u2009${text}\u2009`}
+      </RNText>
+    )
+  }
   link(children: string | ReactNode[], href: string, styles?: TextStyle): ReactNode {
     return (
       <RNText
@@ -70,7 +78,6 @@ function useStyles(c: Palette): MarkedStyles {
     h2: { ...typeScale.headline, color: c.ink, marginTop: 4, marginBottom: 6 },
     h3: { ...typeScale.bodyMedium, color: c.ink, marginBottom: 4 },
     h4: { ...typeScale.bodyMedium, color: c.ink2 },
-    codespan: { ...typeScale.mono, fontSize: 13.5, color: c.ink, backgroundColor: c.panel2 },
     blockquote: { borderLeftWidth: 2, borderLeftColor: c.lineStrong, paddingLeft: 10, marginBottom: 8 },
     hr: { height: 1, backgroundColor: c.line, marginVertical: 10 },
     list: { marginBottom: 8 },

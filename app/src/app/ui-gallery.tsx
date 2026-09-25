@@ -1,3 +1,4 @@
+import { Redirect } from 'expo-router'
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 import { Add01Icon, Delete02Icon, Edit02Icon, Mail01Icon, Search01Icon, Settings01Icon } from '@hugeicons/core-free-icons'
@@ -23,6 +24,11 @@ const states = [
 
 /** Dev-only gallery of every src/ui primitive, both themes. Open /ui-gallery. */
 export default function UiGallery() {
+  if (!__DEV__) return <Redirect href="/" />
+  return <Gallery />
+}
+
+function Gallery() {
   const { preference, setPreference } = useTheme()
   const [q, setQ] = useState('')
   const [on, setOn] = useState(true)

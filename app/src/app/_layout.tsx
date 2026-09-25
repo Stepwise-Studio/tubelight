@@ -50,7 +50,7 @@ function Root() {
   if (!ready) return <View style={{ flex: 1, backgroundColor: c.canvas }} />
   return (
     <NavThemeProvider value={navTheme}>
-      <WorkspaceProvider userId={session?.user.id ?? null}>
+      <WorkspaceProvider key={session?.user.id ?? 'signed-out'} userId={session?.user.id ?? null}>
         <View style={{ flex: 1, backgroundColor: c.canvas }}>
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.canvas } }}>
             <Stack.Protected guard={!signedIn}>

@@ -6,7 +6,7 @@ import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import type { Teammate } from '@/lib/types'
 import { motion, radius, useTheme } from '@/theme'
-import { Icon, IconButton, Press, TeammateAvatar, Text, haptic } from '@/ui'
+import { Icon, IconButton, Press, TeammateAvatar, Text, Toggle, haptic } from '@/ui'
 
 /** Header for a formSheet route: title, optional subtitle, close. */
 export function SheetHeader({ title, subtitle, onClose }: { title: string; subtitle?: string; onClose: () => void }) {
@@ -41,7 +41,7 @@ export function FormSection({ title, hint, action, children }: { title: string; 
 export function ColorSwatches({ colors, value, onChange }: { colors: { value: string; name: string }[]; value: string; onChange: (v: string) => void }) {
   const { c } = useTheme()
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Colour">
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 4 }} accessibilityRole="radiogroup" accessibilityLabel="Colour">
       {colors.map((col) => {
         const on = col.value.toLowerCase() === value.toLowerCase()
         return (
@@ -51,10 +51,10 @@ export function ColorSwatches({ colors, value, onChange }: { colors: { value: st
             accessibilityLabel={col.name}
             accessibilityState={{ checked: on }}
             onPress={() => { if (!on) { haptic.tap(); onChange(col.value) } }}
-            style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
-            hitSlop={2}
+            style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
+            hitSlop={4}
           >
-            <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: col.value, borderWidth: 1, borderColor: c.imageOutline }} />
+            <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: col.value, borderWidth: 1, borderColor: c.imageOutline }} />
           </Pressable>
         )
       })}
@@ -125,6 +125,64 @@ export function CodeBlock({ value, label, onCopy, tone = 'panel2' }: { value: st
         </View>
       )}
       <Text variant="mono" selectable style={{ color: ink, padding: 12, fontSize: 12, lineHeight: 18 }}>{value}</Text>
+    </View>
+  )
+}
+
+/** A row whose whole surface is one switch: tile, title, status, and the toggle as its visual. */
+export function SwitchRow({ title, subtitle, leading, value, onChange, hint }: {
+  title: string
+  subtitle?: string
+  leading?: ReactNode
+  value: boolean
+  onChange: (v: boolean) => void
+  hint?: string
+}) {
+  return (
+    <Press
+      radius={radius.md}
+      static
+      onPress={() => { haptic.tap(); onChange(!value) }}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
+      accessibilityHint={hint}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 8, paddingHorizontal: 12 }}
+    >
+      {leading}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text variant="caption" color="ink3" numberOfLines={1}>{subtitle}</Text> : null}
+      </View>
+      <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        <Toggle value={value} onChange={() => {}} />
+      </View>
+    </Press>
+  )
+}
+
+/** A tappable row with a separate trailing control, so screen readers reach both. */
+export function RowWithAction({ onPress, action, children, accessibilityLabel, accessibilityHint }: {
+  onPress: () => void
+  action: ReactNode
+  children: ReactNode
+  accessibilityLabel: string
+  accessibilityHint?: string
+}) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+      <Press
+        radius={radius.md}
+        static
+        onPress={onPress}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint={accessibilityHint}
+        outerStyle={{ flex: 1 }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 8, paddingHorizontal: 12 }}
+      >
+        {children}
+      </Press>
+      {action}
     </View>
   )
 }

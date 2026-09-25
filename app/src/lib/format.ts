@@ -32,3 +32,12 @@ export const fullTime = (iso: string) =>
 /** Timestamps come back from Postgres and from the client in different ISO shapes; compare as dates. */
 export const isUnread = (t: { last_message_at: string | null; last_read_at: string }) =>
   !!t.last_message_at && Date.parse(t.last_message_at) > Date.parse(t.last_read_at)
+
+/** Timeline time: "Now", "4 min", "2 h", then the chat-list style ("Yesterday", "12 Sep"). */
+export function ago(iso: string, now = new Date()) {
+  const s = (now.getTime() - new Date(iso).getTime()) / 1000
+  if (s < 60) return 'Now'
+  if (s < 3600) return `${Math.floor(s / 60)} min`
+  if (s < 6 * 3600) return `${Math.floor(s / 3600)} h`
+  return relativeTime(iso, now)
+}

@@ -35,7 +35,7 @@ export interface SheetProps {
  */
 export function Sheet({ open, onClose, title, children, accessibilityLabel }: SheetProps) {
   const [mounted, setMounted] = useState(open)
-  useEffect(() => { if (open) setMounted(true) }, [open])
+  if (open && !mounted) setMounted(true)
   if (!mounted) return null
   return (
     <Portal>
@@ -76,10 +76,10 @@ function SheetBody({ open, onClose, onGone, title, children, accessibilityLabel 
   const pan = Gesture.Pan()
     .activeOffsetY(8)
     .failOffsetX([-20, 20])
-    .onUpdate((e) => { y.value = Math.max(0, e.translationY) + Math.min(0, e.translationY) * 0.1 })
+    .onUpdate((e) => { y.set(Math.max(0, e.translationY) + Math.min(0, e.translationY) * 0.1) })
     .onEnd((e) => {
       if (e.translationY > 110 || e.velocityY > 900) runOnJS(onClose)()
-      else y.value = withSpring(0, motion.spring)
+      else y.set(withSpring(0, motion.spring))
     })
 
   const scrim = useAnimatedStyle(() => ({ opacity: shown.value }))

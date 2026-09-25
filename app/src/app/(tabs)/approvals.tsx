@@ -22,11 +22,9 @@ export default function Approvals() {
   const [history, setHistory] = useState<Approval[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
-  const loadHistory = async () => {
-    const { data } = await supabase.from('approvals').select('*').neq('status', 'pending')
-      .order('decided_at', { ascending: false, nullsFirst: false }).limit(50)
-    setHistory((data as Approval[]) ?? [])
-  }
+  const loadHistory = () => supabase.from('approvals').select('*').neq('status', 'pending')
+    .order('decided_at', { ascending: false, nullsFirst: false }).limit(50)
+    .then(({ data }) => setHistory((data as Approval[]) ?? []))
   // Decisions move cards from Pending to History; refetch when the pending set changes.
   const pendingIds = ws.pendingApprovals.map((a) => a.id).join()
   useEffect(() => { if (tab === 'history') loadHistory() }, [tab, pendingIds])

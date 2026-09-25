@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Platform, View, type LayoutChangeEvent, type StyleProp, type TextStyle, type ViewStyle } from 'react-native'
 import Animated, {
-  FadeIn, FadeOut, Keyframe, ReduceMotion, useAnimatedProps, useAnimatedStyle, useReducedMotion, useSharedValue,
+  FadeIn, FadeOut, Keyframe, LayoutAnimationConfig, ReduceMotion, useAnimatedProps, useAnimatedStyle, useReducedMotion, useSharedValue,
   withDelay, withRepeat, withSequence, withTiming,
 } from 'react-native-reanimated'
 import Svg, { Circle, Path } from 'react-native-svg'
@@ -27,14 +27,14 @@ const iconOut = new Keyframe({
 
 /** Cross-fades two icons in one slot. Change `swapKey` to swap. First render doesn't animate. */
 export function IconSwap({ swapKey, children }: { swapKey: string; children: ReactNode }) {
-  const [first, setFirst] = useState(true)
-  useEffect(() => setFirst(false), [])
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Animated.View key={swapKey} entering={first ? undefined : iconIn} exiting={iconOut}>
-        {children}
-      </Animated.View>
-    </View>
+    <LayoutAnimationConfig skipEntering>
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View key={swapKey} entering={iconIn} exiting={iconOut}>
+          {children}
+        </Animated.View>
+      </View>
+    </LayoutAnimationConfig>
   )
 }
 
@@ -51,14 +51,14 @@ const textOut = new Keyframe({
 
 /** Swaps a text label in place ("Thinking" → "Searching inbox"). */
 export function TextSwap({ children, style, ...props }: Omit<TextProps, 'children'> & { children: string; style?: StyleProp<TextStyle> }) {
-  const [first, setFirst] = useState(true)
-  useEffect(() => setFirst(false), [])
   return (
-    <View style={{ overflow: 'hidden' }}>
-      <Animated.View key={children} entering={first ? undefined : textIn} exiting={textOut}>
-        <Text numberOfLines={1} style={style} {...props}>{children}</Text>
-      </Animated.View>
-    </View>
+    <LayoutAnimationConfig skipEntering>
+      <View style={{ overflow: 'hidden' }}>
+        <Animated.View key={children} entering={textIn} exiting={textOut}>
+          <Text numberOfLines={1} style={style} {...props}>{children}</Text>
+        </Animated.View>
+      </View>
+    </LayoutAnimationConfig>
   )
 }
 
@@ -71,20 +71,20 @@ const digitKeyframes = [0, 70].map((stagger) => new Keyframe({
 const digitIn = (stagger: number) => digitKeyframes[stagger ? 1 : 0]
 
 export function NumberPop({ value, style, ...props }: Omit<TextProps, 'children'> & { value: number | string }) {
-  const [first, setFirst] = useState(true)
-  useEffect(() => setFirst(false), [])
   const chars = String(value).split('')
   return (
+    <LayoutAnimationConfig skipEntering>
     <View style={{ flexDirection: 'row' }} accessible accessibilityLabel={String(value)}>
       {chars.map((ch, i) => {
         const fromEnd = chars.length - 1 - i
         return (
-          <Animated.View key={`${i}-${ch}`} entering={first ? undefined : digitIn(fromEnd < 2 ? (1 - fromEnd) * 70 : 0)}>
+          <Animated.View key={`${i}-${ch}`} entering={digitIn(fromEnd < 2 ? (1 - fromEnd) * 70 : 0)}>
             <Text tabular style={style} {...props}>{ch}</Text>
           </Animated.View>
         )
       })}
     </View>
+    </LayoutAnimationConfig>
   )
 }
 

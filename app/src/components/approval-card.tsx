@@ -167,23 +167,27 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
         })}
       </View>
 
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+      {/* Primary action on its own row so three labels never wrap unevenly on a 360pt phone. */}
+      <View style={{ gap: 8, marginTop: 2 }}>
         <Button
           label={edited ? `${approveLabel[shape]} edited` : approveLabel[shape]}
-          size="sm"
+          fullWidth
           loading={busy === 'approve'}
           disabled={!!busy}
           onPress={() => decide('approve')}
         />
-        <Button
-          label={editing ? 'Done editing' : 'Edit'}
-          size="sm"
-          variant="soft"
-          icon={editing ? undefined : Edit02Icon}
-          disabled={!!busy || !keys.some((k) => typeof approval.draft[k] === 'string')}
-          onPress={() => { haptic.tap(); setEditing((e) => !e) }}
-        />
-        <Button label="Reject" size="sm" variant="ghost" disabled={!!busy} onPress={() => setRejecting(true)} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Button
+            label={editing ? 'Done editing' : 'Edit'}
+            variant="soft"
+            icon={editing ? undefined : Edit02Icon}
+            fullWidth
+            style={{ flex: 1 }}
+            disabled={!!busy || !keys.some((k) => typeof approval.draft[k] === 'string')}
+            onPress={() => { haptic.tap(); setEditing((e) => !e) }}
+          />
+          <Button label="Reject" variant="outline" fullWidth style={{ flex: 1 }} disabled={!!busy} onPress={() => setRejecting(true)} />
+        </View>
       </View>
 
       <Sheet open={rejecting} onClose={() => setRejecting(false)} title="Reject this request?">

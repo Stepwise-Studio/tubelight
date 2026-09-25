@@ -87,12 +87,10 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   }, [userId])
 
   useEffect(() => {
-    if (!userId) {
-      loaded.current = false
-      setLoading(true)
-      setTeammates([]); setProjects([]); setMembers([]); setThreads([]); setPending([]); setLiveRuns([]); setPreviews({})
-      return
-    }
+    // The root layout keys this provider by user, so signing out remounts it with empty state.
+    if (!userId) return
+    // refresh() only sets state after its first await; the rule can't see through the callback.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
 
     let channel: ReturnType<typeof supabase.channel> | null = null

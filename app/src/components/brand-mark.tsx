@@ -18,9 +18,11 @@ export function BrandMark({ toolkit, size = 18, color }: { toolkit: string; size
   const d = PATHS[toolkit]
   if (!d) return <Text variant="label" color={color ?? 'ink2'} style={{ width: size, textAlign: 'center' }}>{toolkit.charAt(0)}</Text>
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no">
-      <Path d={d} fill={color ?? c.ink} />
-    </Svg>
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Svg width={size} height={size} viewBox="0 0 24 24">
+        <Path d={d} fill={color ?? c.ink} />
+      </Svg>
+    </View>
   )
 }
 
@@ -29,7 +31,7 @@ export function BrandTile({ toolkit, size = 36 }: { toolkit: string; size?: numb
   const { c } = useTheme()
   return (
     <Squircle style={{ width: size, height: size, borderRadius: radius.md - 2, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center' }}>
-      <View><BrandMark toolkit={toolkit} size={Math.round(size * 0.5)} /></View>
+      <BrandMark toolkit={toolkit} size={Math.round(size * 0.5)} />
     </Squircle>
   )
 }

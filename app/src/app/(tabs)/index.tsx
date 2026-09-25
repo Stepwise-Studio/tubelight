@@ -122,7 +122,7 @@ export default function Chats() {
 
 function previewText(p: Preview | undefined, thread: Thread, name: (id: string | null) => string | undefined) {
   if (!p) return thread.kind === 'dm' ? 'No messages yet' : 'No messages yet. Say hello to the team.'
-  const who = p.sender_type === 'user' ? 'You: ' : thread.kind === 'project' && p.sender_type === 'teammate' ? `${name(p.teammate_id) ?? 'Teammate'}: ` : ''
+  const who = p.sender_type === 'user' ? 'You: ' : thread.kind === 'project' && p.sender_type === 'teammate' && p.kind === 'text' ? `${name(p.teammate_id) ?? 'Teammate'}: ` : ''
   const body = p.kind === 'error' ? 'A run failed' : p.text.replace(/[`*_#>]/g, '').replace(/\s+/g, ' ').trim()
   return who + body
 }
@@ -176,7 +176,7 @@ function ChatRow({ thread }: { thread: Thread }) {
           )}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text variant="caption" color={subtitleColor} numberOfLines={2} style={{ flex: 1 }}>{sub}</Text>
+          <Text variant="caption" color={subtitleColor} numberOfLines={1} style={{ flex: 1 }}>{sub}</Text>
           {(unread || pending > 0) && (
             <View style={{ minWidth: 10, height: 10, borderRadius: 5, backgroundColor: c.tube }} accessibilityElementsHidden />
           )}

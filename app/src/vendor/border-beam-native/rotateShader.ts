@@ -180,6 +180,7 @@ half4 main(float2 position) {
 
 /** Pads a float array to a fixed uniform length. */
 export function padTo(values: number[], length: number): number[] {
+  'worklet'; // Tubelight patch: called from LineBeam's UI-thread useDerivedValue.
   if (values.length >= length) return values.slice(0, length);
   return values.concat(new Array(length - values.length).fill(0));
 }

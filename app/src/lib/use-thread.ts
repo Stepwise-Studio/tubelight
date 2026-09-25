@@ -29,7 +29,6 @@ export function useThread(threadId: string, ownerId: string | undefined) {
   const oldest = useRef<string | null>(null)
 
   const load = useCallback(async () => {
-    setError(null)
     const [m, a] = await Promise.all([
       supabase.from('messages').select('*').eq('thread_id', threadId).order('created_at', { ascending: false }).limit(PAGE),
       supabase.from('approvals').select('*').eq('thread_id', threadId),
@@ -39,6 +38,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
       setLoading(false)
       return
     }
+    setError(null)
     const rows = m.data as Message[]
     setMessages((prev) => [...prev.filter((x) => x.local), ...rows])
     oldest.current = rows.at(-1)?.created_at ?? null
@@ -73,11 +73,10 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     if (sid) setGhosts((g) => { if (!g[sid]) return g; const { [sid]: _, ...rest } = g; return rest })
   }, [])
 
+  // One hook instance per thread screen (the route remounts per threadId), so no reset here.
   useEffect(() => {
-    setLoading(true)
-    setMessages([])
-    setStatuses({})
-    setGhosts({})
+    // load() only sets state after its first await; the rule can't see through the callback.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
 
     let cancelled = false

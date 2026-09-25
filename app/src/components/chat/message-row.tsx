@@ -77,8 +77,11 @@ function Body({ item, ctx }: { item: ChatItem; ctx: RowContext }) {
   }
   if (item.type === 'ghost') {
     const t = ws.teammate(item.g.teammate_id)
+    const trigger = ws.liveRuns.find((r) => r.id === item.g.run_id)?.trigger
     return (
       <TeammateBlock teammate={t} first={ctx.firstInGroup} paused={false} working>
+        {/* Same label the final row carries, so the swap doesn't shift the text. */}
+        {(trigger === 'event' || trigger === 'schedule') && <EventLabel />}
         <View accessibilityLiveRegion="none"><Markdown value={item.g.text} /></View>
       </TeammateBlock>
     )
@@ -93,11 +96,11 @@ function Body({ item, ctx }: { item: ChatItem; ctx: RowContext }) {
       const a = m.meta.approval_id ? ctx.approvals[m.meta.approval_id] : undefined
       return (
         <TeammateBlock teammate={t} first={ctx.firstInGroup} paused={ctx.pauseAvatar}>
-          {m.text ? <View style={{ marginBottom: 8 }}><Markdown value={m.text} /></View> : null}
+          {/* The card already names who asks and what; the row's text only shows until it loads. */}
           {a ? (
             <ApprovalCard approval={a} teammate={t} beam={a.status === 'pending'} onDecided={ctx.onApprovalDecided} />
           ) : (
-            <Text variant="caption" color="ink3">Loading the request…</Text>
+            <Text variant="caption" color="ink3">{m.text || 'Loading the request…'}</Text>
           )}
         </TeammateBlock>
       )
@@ -143,17 +146,21 @@ function TeammateText({ m, first, paused }: { m: ChatMessage; first: boolean; pa
   const calls = m.meta.tool_calls ?? []
   return (
     <TeammateBlock teammate={t} first={first} paused={paused}>
-      {m.proactive && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-          <Icon icon={FlashIcon} size={13} color="ink3" />
-          <Text variant="footnote" color="ink3">Started by an event{m.meta.event_type ? `: ${String(m.meta.event_type)}` : ''}</Text>
-        </View>
-      )}
+      {m.proactive && <EventLabel type={m.meta.event_type} />}
       <Pressable onLongPress={() => copyMenu(m)} delayLongPress={350} accessibilityHint="Long press for time and copy">
         <Markdown value={m.text} />
       </Pressable>
       {calls.length > 0 && <ToolCalls calls={calls} />}
     </TeammateBlock>
+  )
+}
+
+function EventLabel({ type }: { type?: string }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+      <Icon icon={FlashIcon} size={13} color="ink3" />
+      <Text variant="footnote" color="ink3" numberOfLines={1}>Started by an event{type ? `: ${type}` : ''}</Text>
+    </View>
   )
 }
 
@@ -247,7 +254,7 @@ function HandoffRow({ m }: { m: ChatMessage }) {
       <Icon icon={ArrowRight02Icon} size={13} color="ink3" />
       {to && <TeammateAvatar teammate={to} size={18} interactive={false} paused />}
       <Text variant="footnote" color="ink2">{to?.name ?? 'Teammate'}</Text>
-      {(note || m.text) && <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>{` · “${note ?? m.text}”`}</Text>}
+      {note ? <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>{` · “${note}”`}</Text> : null}
     </View>
   )
 }

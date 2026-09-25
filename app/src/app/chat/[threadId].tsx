@@ -49,7 +49,8 @@ export default function Thread() {
   // (same slot); a run waiting on an approval card already on screen shows nothing extra.
   const liveItems: ChatItem[] = [
     ...[...statusFor.values()]
-      .filter((s) => !ghosts.some((g) => g.run_id === s.run_id && !g.done))
+      // Hide while text streams, and keep hiding "writing" after `done` until the DB row swaps in.
+      .filter((s) => !ghosts.some((g) => g.run_id === s.run_id && (!g.done || s.state === 'writing')))
       .filter((s) => s.state !== 'waiting' || !Object.values(t.approvals).some((a) => a.run_id === s.run_id && a.status === 'pending'))
       .map((s) => ({ type: 'status' as const, key: `r:${s.run_id}`, s })),
     ...ghosts.map((g) => ({ type: 'ghost' as const, key: `s:${g.stream_id}`, g })),
@@ -145,8 +146,7 @@ export default function Thread() {
   }
 
   const empty = (
-    // Inverted list: the empty state is flipped back upright.
-    <View style={{ transform: [{ scaleY: -1 }], flex: 1, justifyContent: 'center', paddingVertical: 48 }}>
+    <View style={{ flex: 1, justifyContent: 'center', paddingBottom: 24 }}>
       <EmptyState
         art={dmMate ? <TeammateAvatar teammate={dmMate} size={72} /> : <ThreadAvatar threadId={threadId} size={72} interactive />}
         title={isDm ? `Message ${dmMate?.name ?? 'your teammate'}` : `Talk to the ${title} team`}
@@ -174,6 +174,9 @@ export default function Thread() {
           <View style={{ flex: 1, justifyContent: 'center' }}>
             <EmptyState title="Unable to load this chat" body={t.error} action={<Button label="Try again" variant="soft" onPress={t.reload} />} />
           </View>
+        ) : items.length === 0 ? (
+          // Rendered outside the inverted list, which flips its children on Android.
+          empty
         ) : (
           <FlatList
             data={items}
@@ -181,7 +184,6 @@ export default function Thread() {
             keyExtractor={(i) => i.key}
             renderItem={({ item, index }) => <ChatRow item={item} ctx={ctxFor(index)} />}
             contentContainerStyle={{ paddingTop: 12, paddingBottom: 8, flexGrow: 1 }}
-            ListEmptyComponent={empty}
             onEndReached={t.loadOlder}
             onEndReachedThreshold={0.4}
             ListFooterComponent={t.loadingOlder ? <ActivityIndicator style={{ padding: 16 }} color={c.ink3} /> : null}

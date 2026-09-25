@@ -77,7 +77,7 @@ export function confirm(opts: ConfirmOpts): Promise<boolean> {
 export function ConfirmHost() {
   const p = useSyncExternalStore((l) => { listeners.add(l); return () => { listeners.delete(l) } }, () => pending, () => pending)
   const [last, setLast] = useState<ConfirmOpts | null>(null)
-  useEffect(() => { if (p) setLast(p) }, [p])
+  if (p && p !== last) setLast(p)
   const done = (ok: boolean) => { p?.resolve(ok); pending = null; emit() }
   const o = p ?? last
   if (!o) return null

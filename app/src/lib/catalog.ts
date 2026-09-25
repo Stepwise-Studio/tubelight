@@ -29,6 +29,7 @@ export interface Connection {
 
 export const DEFAULT_MODEL = 'groq:openai/gpt-oss-120b'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
+export const REPO_RE = /^https?:\/\/\S+\.\S+/
 
 export const SHAPES: BotShape[] = [
   'clover', 'flower', 'star', 'ghost', 'mech', 'circle', 'hexagon', 'square', 'triangle',
@@ -49,7 +50,10 @@ export const COLORS = [
 
 /** Toolkits a teammate can be given. Order matches the Connections screen. */
 export const TOOLKITS = ['GMAIL', 'GITHUB', 'LINEAR', 'NOTION'] as const
-export const TOOLKIT_NAMES: Record<string, string> = { GMAIL: 'Gmail', GITHUB: 'GitHub', LINEAR: 'Linear', NOTION: 'Notion' }
+export const TOOLKIT_NAMES: Record<string, string> = {
+  GMAIL: 'Gmail', GITHUB: 'GitHub', LINEAR: 'Linear', NOTION: 'Notion', LINKEDIN: 'LinkedIn', SLACK: 'Slack',
+  GOOGLECALENDAR: 'Google Calendar', GOOGLEDRIVE: 'Google Drive', TWITTER: 'X', COMPOSIO: 'Composio',
+}
 export const toolkitName = (t: string) => TOOLKIT_NAMES[t] ?? t.charAt(0) + t.slice(1).toLowerCase()
 
 const ROLE_NAMES: Record<string, string> = { developer: 'Developer', tester: 'QA engineer', social: 'Social media lead', email: 'Inbox chief of staff' }
@@ -60,7 +64,7 @@ export const PROVIDERS: Record<string, string> = { groq: 'Groq', openrouter: 'Op
 /** "groq:openai/gpt-oss-120b" → "GPT OSS 120B". Uses the service's name when we have it. */
 export function modelName(id: string, models?: Model[] | null) {
   const known = models?.find((m) => m.id === id)
-  if (known) return known.name.replace(/^[^:]+:\s*/, '').replace(/\s*\(free\)\s*$/i, '').replace(/\s+/g, ' ').trim()
+  if (known) return known.name.replace(/^[^:]+:\s*/, '').replace(/^[^/\s]+\//, '').replace(/\s*\(free\)\s*$/i, '').replace(/\s+/g, ' ').trim()
   const slug = id.split('/').pop()!.split(':').filter((p) => p !== 'free').pop() ?? id
   return slug.split('-').map((w) =>
     /^\d/.test(w) || w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -109,12 +113,19 @@ export function useModels() {
 export function useConnections() {
   const [list, setList] = useState<Connection[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const reload = useCallback(async () => {
-    try { setList(await api<Connection[]>('/connections')); setError(null) } catch (e) { setError((e as Error).message) }
-  }, [])
-  useEffect(() => { reload() }, [reload])
+  const apply = useCallback((p: Promise<Connection[]>) =>
+    p.then((l) => { setList(l); setError(null) }, (e: Error) => setError(e.message)), [])
+  const reload = useCallback(() => apply(api<Connection[]>('/connections')), [apply])
+  useEffect(() => { apply(api<Connection[]>('/connections')) }, [apply])
   return { connections: list, error, reload }
 }
 
 export const randomHex = (bytes: number) =>
   Array.from(Crypto.getRandomBytes(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
+
+/** A handle that isn't taken yet: dev, dev-2, dev-3… */
+export function freeHandle(base: string, taken: Teammate[]) {
+  const used = new Set(taken.map((t) => t.handle))
+  if (!used.has(base)) return base
+  for (let i = 2; ; i++) if (!used.has(`${base}-${i}`)) return `${base}-${i}`
+}

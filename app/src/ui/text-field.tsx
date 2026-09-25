@@ -24,7 +24,7 @@ export function useShake() {
   const shake = () => {
     if (reduced) return
     const t = (v: number, d: number) => withTiming(v, { duration: d, easing: ease.smoothOut })
-    x.value = withSequence(t(distance.small, 80), t(-distance.small, 80), t(distance.micro, 60), t(0, 60))
+    x.set(withSequence(t(distance.small, 80), t(-distance.small, 80), t(distance.micro, 60), t(0, 60)))
   }
   return { style, shake }
 }
