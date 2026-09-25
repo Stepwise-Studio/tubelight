@@ -67,7 +67,9 @@ async def init(embed_fn=embed) -> None:
         max_size=10,
         open=False,
         configure=use_langgraph_schema,
-        kwargs={"autocommit": True, "prepare_threshold": prepare, "row_factory": dict_row},
+        check=AsyncConnectionPool.check_connection,  # drop connections that died (e.g. a network change)
+        kwargs={"autocommit": True, "prepare_threshold": prepare, "row_factory": dict_row, "connect_timeout": 10,
+                "keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3},
     )
     await _pool.open(wait=True, timeout=20)
     async with _pool.connection() as conn:  # never let the tables fall through to `public`

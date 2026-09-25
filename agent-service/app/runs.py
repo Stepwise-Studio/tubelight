@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
 _locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 docker_ok = False  # set at startup
+RUN_TIMEOUT_S = 15 * 60  # a run past this is hung, not slow (sandbox commands cap at 10 minutes)
 
 
 async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, event_type: str | None = None) -> graph.RunCtx:
@@ -37,6 +38,13 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         user_name=(profile or {}).get("display_name") or "the user", trigger=trigger, event_type=event_type,
         docker=docker_ok,
     )
+
+
+async def sweep_orphans() -> None:
+    """Runs still marked running at startup died with the previous process; close them out."""
+    for run in await db.select("runs", {"status": "eq.running"}):
+        await _finish(run["id"], run["owner_id"], run["thread_id"], "error", "Interrupted by a server restart.",
+                      teammate_id=run["teammate_id"])
 
 
 async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str] | None = None,
@@ -96,7 +104,7 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
     ctx: graph.RunCtx | None = None
     active, paused = None, False
     try:
-        async with _locks[thread_id]:
+        async with _locks[thread_id], asyncio.timeout(RUN_TIMEOUT_S):
             ctx = await load_ctx(run_id, owner_id, thread_id, trigger, event_type)
             app = graph.build(ctx, memory.checkpointer)
             cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
@@ -120,7 +128,8 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
         await _finish(run_id, owner_id, thread_id, "cancelled", teammate_id=active)
     except Exception as e:
         log.exception("run %s failed", run_id)
-        text = str(e) if isinstance(e, LookupError) else (
+        text = str(e) if isinstance(e, LookupError) else "This took too long, so I stopped. Try again." if isinstance(
+            e, TimeoutError) else (
             "I stopped because this took too many steps. Try splitting the request into smaller parts."
             if isinstance(e, GraphRecursionError) else llm.human_error(e))
         try:

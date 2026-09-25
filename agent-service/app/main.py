@@ -1,5 +1,8 @@
 import asyncio
+import faulthandler
 import logging
+import signal
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -31,12 +34,21 @@ async def lifespan(_: FastAPI):
         memory.config.SUPABASE_DB_URL = ""
         await memory.init()
     runs.docker_ok = await asyncio.to_thread(sandbox.available)
+    await runs.sweep_orphans()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
     scheduler = asyncio.create_task(events.schedule_loop())
     yield
     scheduler.cancel()
     for t in list(runs.tasks.values()):
         t.cancel()
     await memory.close()
+
+
+def _dump_stacks() -> None:
+    """`kill -USR1 <pid>` prints every asyncio task and thread stack to stderr, for diagnosing hangs."""
+    for task in asyncio.all_tasks():
+        task.print_stack(limit=40, file=sys.stderr)
+    faulthandler.dump_traceback(all_threads=True)
 
 
 app = FastAPI(title="Tubelight agent service", lifespan=lifespan)
