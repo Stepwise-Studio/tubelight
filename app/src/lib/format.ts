@@ -1,0 +1,34 @@
+const DAY = 86_400_000
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+
+/** Chat-list time: "09:41" today, "Yesterday", weekday this week, else "12 Sep". */
+export function relativeTime(iso: string, now = new Date()) {
+  const d = new Date(iso)
+  const days = Math.round((startOfDay(now) - startOfDay(d)) / DAY)
+  if (days <= 0) return clock(d)
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'short' })
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) })
+}
+
+export const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+/** Day separator label: "Today", "Yesterday", "Monday 22 September". */
+export function dayLabel(iso: string, now = new Date()) {
+  const d = new Date(iso)
+  const days = Math.round((startOfDay(now) - startOfDay(d)) / DAY)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) })
+}
+
+export const sameDay = (a: string, b: string) => startOfDay(new Date(a)) === startOfDay(new Date(b))
+
+/** Full timestamp for long-press menus. */
+export const fullTime = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/** Timestamps come back from Postgres and from the client in different ISO shapes; compare as dates. */
+export const isUnread = (t: { last_message_at: string | null; last_read_at: string }) =>
+  !!t.last_message_at && Date.parse(t.last_message_at) > Date.parse(t.last_read_at)
