@@ -17,9 +17,9 @@ const light = {
   ink2: '#52525b', // zinc-600
   ink3: '#71717a', // zinc-500
   ink4: '#a1a1aa', // zinc-400, placeholders
-  tube: '#1f7ea8',
-  tubeSoft: 'rgba(31,126,168,0.10)',
-  tubeGlow: 'rgba(120,200,230,0.45)',
+  tube: '#0284c7', // sky-600: sky-500 is under 3:1 as text on white, so light mode steps down one
+  tubeSoft: 'rgba(14,165,233,0.12)',
+  tubeGlow: 'rgba(56,189,248,0.45)',
   onTube: '#ffffff',
   danger: '#d02f4b',
   dangerSoft: 'rgba(208,47,75,0.08)',
@@ -58,10 +58,10 @@ const dark: Palette = {
   ink2: '#a1a1aa', // zinc-400
   ink3: '#71717a', // zinc-500
   ink4: '#52525b',
-  tube: '#9fe3f0',
-  tubeSoft: 'rgba(159,227,240,0.10)',
-  tubeGlow: 'rgba(159,227,240,0.35)',
-  onTube: '#09090b',
+  tube: '#0ea5e9', // sky-500
+  tubeSoft: 'rgba(14,165,233,0.14)',
+  tubeGlow: 'rgba(56,189,248,0.40)',
+  onTube: '#ffffff',
   danger: '#f27a8c',
   dangerSoft: 'rgba(242,122,140,0.10)',
   success: '#74d19a',

@@ -12,7 +12,7 @@ import { fullTime } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
-import { useWorkspace } from '@/lib/workspace'
+import { useTeammate } from '@/lib/workspace'
 import { motion, radius, useTheme } from '@/theme'
 import {
   Button, Collapse, Icon, Markdown, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, toast, useFlip,
@@ -65,6 +65,10 @@ export interface ChatRowProps {
   /** The message this one replies to; `null` when it isn't loaded. */
   replyTo?: ChatMessage | null
   highlighted?: boolean
+  /** This row's teammate is running right now (animates its avatar). */
+  working?: boolean
+  /** The live run was started by an event or schedule. */
+  proactive?: boolean
 }
 
 const payload = (i: ChatItem) => (i.type === 'message' ? i.m : i.type === 'ghost' ? i.g : `${i.s.run_id}|${i.s.state}|${i.s.label ?? ''}`)
@@ -79,7 +83,7 @@ export const ChatRow = memo(function ChatRow(p: ChatRowProps) {
   )
 }, (a, b) => payload(a.item) === payload(b.item) && a.firstInGroup === b.firstInGroup && a.lastInGroup === b.lastInGroup
   && a.dayBreak === b.dayBreak && a.pauseAvatar === b.pauseAvatar && a.approval === b.approval && a.replyTo === b.replyTo
-  && a.highlighted === b.highlighted)
+  && a.highlighted === b.highlighted && a.working === b.working && a.proactive === b.proactive)
 
 function DaySeparator({ label }: { label: string }) {
   return (
@@ -89,12 +93,12 @@ function DaySeparator({ label }: { label: string }) {
   )
 }
 
-function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, approval, replyTo, highlighted }: ChatRowProps) {
-  const ws = useWorkspace()
+function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, approval, replyTo, highlighted, working, proactive }: ChatRowProps) {
   const actions = useActions()
+  const t = useTeammate(item.type === 'status' ? item.s.teammate_id : item.type === 'ghost' ? item.g.teammate_id : item.m.teammate_id)
   if (item.type === 'status') {
     return (
-      <TeammateBlock teammate={ws.teammate(item.s.teammate_id)} first={first} paused={false} working>
+      <TeammateBlock teammate={t} first={first} paused={false} working>
         <Bubble side="left" first={first} last={last} style={{ paddingVertical: 10 }}>
           <ThinkingIndicator state={item.s.state} label={item.s.label} />
         </Bubble>
@@ -102,11 +106,10 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     )
   }
   if (item.type === 'ghost') {
-    const trigger = ws.liveRuns.find((r) => r.id === item.g.run_id)?.trigger
     return (
-      <TeammateBlock teammate={ws.teammate(item.g.teammate_id)} first={first} paused={false} working>
+      <TeammateBlock teammate={t} first={first} paused={false} working>
         {/* Same label and bubble the final row carries, so the swap doesn't shift anything. */}
-        {(trigger === 'event' || trigger === 'schedule') && <EventLabel />}
+        {proactive && <EventLabel />}
         <Bubble side="left" first={first} last={last}>
           <View accessibilityLiveRegion="none"><Markdown value={item.g.text} /></View>
         </Bubble>
@@ -121,9 +124,8 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     case 'approval':
     case 'question':
     case 'connect': {
-      const t = ws.teammate(m.teammate_id)
       return (
-        <TeammateBlock teammate={t} first={first} paused={pauseAvatar}>
+        <TeammateBlock teammate={t} first={first} paused={pauseAvatar} working={working}>
           {/* The card carries the whole ask; the row's text only shows until the approval row loads. */}
           {!approval ? (
             <Bubble side="left" first={first} last={last}><Text color="ink2">{m.text || 'Loading…'}</Text></Bubble>
@@ -140,7 +142,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     default:
       return m.sender_type === 'user'
         ? <UserMessage m={m} first={first} last={last} replyTo={replyTo} highlighted={highlighted} />
-        : <TeammateMessage m={m} first={first} last={last} paused={pauseAvatar} replyTo={replyTo} highlighted={highlighted} />
+        : <TeammateMessage m={m} teammate={t} first={first} last={last} paused={pauseAvatar} working={working} replyTo={replyTo} highlighted={highlighted} />
   }
 }
 
@@ -178,8 +180,7 @@ function Bubble({ side, first, last, tone = 'panel', highlighted, style, childre
 function TeammateBlock({ teammate, first, paused, working, children }: {
   teammate?: Teammate; first: boolean; paused: boolean; working?: boolean; children: React.ReactNode
 }) {
-  const ws = useWorkspace()
-  const live = working || (teammate ? ws.isWorking(teammate.id) : false)
+  const live = !!working
   return (
     <View style={{ marginTop: first ? 14 : 2 }}>
       {first && (
@@ -206,15 +207,14 @@ function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void) {
   })
 }
 
-function TeammateMessage({ m, first, last, paused, replyTo, highlighted }: {
-  m: ChatMessage; first: boolean; last: boolean; paused: boolean; replyTo?: ChatMessage | null; highlighted?: boolean
+function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, highlighted }: {
+  m: ChatMessage; teammate?: Teammate; first: boolean; last: boolean; paused: boolean; working?: boolean; replyTo?: ChatMessage | null; highlighted?: boolean
 }) {
-  const ws = useWorkspace()
   const { onReply } = useActions()
   const calls = m.meta.tool_calls ?? []
   return (
     <SwipeToReply onReply={() => onReply(m)}>
-      <TeammateBlock teammate={ws.teammate(m.teammate_id)} first={first} paused={paused}>
+      <TeammateBlock teammate={teammate} first={first} paused={paused} working={working}>
         {m.proactive && <EventLabel type={m.meta.event_type} />}
         <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={{ maxWidth: '100%' }}>
           <Bubble side="left" first={first} last={last} highlighted={highlighted}>
@@ -267,9 +267,9 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
 
 /** Who a message is from, for quotes and the composer's reply bar. */
 export function useSenderName(m?: ChatMessage | null) {
-  const ws = useWorkspace()
+  const t = useTeammate(m?.teammate_id)
   if (!m) return ''
-  return m.sender_type === 'user' ? 'You' : ws.teammate(m.teammate_id)?.name ?? 'Teammate'
+  return m.sender_type === 'user' ? 'You' : t?.name ?? 'Teammate'
 }
 
 /** Quoted message at the top of a reply bubble; tap to jump to it. */
@@ -410,9 +410,8 @@ function renderMentions(text: string, handles: Set<string>) {
 }
 
 function HandoffRow({ m }: { m: ChatMessage }) {
-  const ws = useWorkspace()
-  const from = ws.teammate(m.teammate_id)
-  const to = ws.teammate(m.meta.to_teammate_id)
+  const from = useTeammate(m.teammate_id)
+  const to = useTeammate(m.meta.to_teammate_id)
   const note = m.meta.note
   return (
     <View

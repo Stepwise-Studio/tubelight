@@ -34,6 +34,9 @@ export interface Workspace {
 }
 
 const Ctx = createContext<Workspace | null>(null)
+/** Teammate lookup alone. Changes only when teammates do, so chat rows don't re-render on every message or run update. */
+const TeammatesCtx = createContext<(id: string | null | undefined) => Teammate | undefined>(() => undefined)
+export const useTeammate = (id: string | null | undefined) => use(TeammatesCtx)(id)
 
 const LIVE = ['running', 'waiting_approval']
 
@@ -165,7 +168,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
       loading, error, teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
       refresh, markRead, teammate, project, thread, membersOf, threadTeammates, threadTitle, isWorking, isThreadLive,
     }}>
-      {children}
+      <TeammatesCtx value={teammate}>{children}</TeammatesCtx>
     </Ctx>
   )
 }

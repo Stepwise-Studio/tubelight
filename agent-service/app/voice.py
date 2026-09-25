@@ -43,6 +43,18 @@ def speakable(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()[:3000]
 
 
+def parts(text: str) -> list[str]:
+    """Sentence groups to speak one after another: a short first part so playback starts fast, then ~250 chars each."""
+    out: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", speakable(text)):
+        limit = 120 if len(out) <= 1 else 250
+        if out and len(out[-1]) + len(sentence) < limit:
+            out[-1] += " " + sentence
+        else:
+            out.append(sentence)
+    return [p for p in out if p.strip()]
+
+
 async def transcribe(audio: bytes, filename: str) -> str:
     if not audio:
         raise HTTPException(400, "No audio was recorded.")
@@ -55,7 +67,7 @@ async def transcribe(audio: bytes, filename: str) -> str:
 
 
 async def speak(text: str, teammate_id: str | None) -> bytes:
-    words = speakable(text)
+    words = speakable(text)[:1000]
     if not words:
         raise HTTPException(400, "Nothing to say.")
     async with httpx.AsyncClient(timeout=60) as c:

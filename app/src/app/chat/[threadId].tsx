@@ -148,6 +148,8 @@ export default function Thread() {
     )
   }
 
+  const workingIds = liveRuns.filter((r) => r.status === 'running').map((r) => r.teammate_id)
+  const proactiveRuns = liveRuns.filter((r) => r.trigger === 'event' || r.trigger === 'schedule').map((r) => r.id)
   const rowProps = (index: number) => {
     const item = items[index]
     const older = items[index + 1]
@@ -166,6 +168,8 @@ export default function Thread() {
       approval: m?.meta.approval_id ? t.approvals[m.meta.approval_id] : undefined,
       replyTo: m?.reply_to ? byId.get(m.reply_to) ?? null : undefined,
       highlighted: !!m && m.id === highlight,
+      working: workingIds.includes(senderOf(item).slice(3)),
+      proactive: item.type === 'ghost' && proactiveRuns.includes(item.g.run_id),
     }
   }
 

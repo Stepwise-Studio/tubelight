@@ -155,7 +155,7 @@ export interface SearchFieldProps extends Omit<TextInputProps, 'style' | 'onChan
 export function SearchField({ value, onChangeText, placeholder = 'Search', style, ...props }: SearchFieldProps) {
   const { c, scheme } = useTheme()
   return (
-    <AnimatedSquircle style={[{ height: 40, borderRadius: radius.md, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', paddingLeft: 12 }, style]}>
+    <AnimatedSquircle style={[{ height: 40, borderRadius: 20, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', paddingLeft: 12 }, style]}>
       <Icon icon={Search01Icon} size={18} color="ink3" />
       <TextInput
         value={value}

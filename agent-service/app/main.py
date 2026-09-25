@@ -208,6 +208,22 @@ async def speak(body: SpeakIn, user: User = Depends(current_user)):
     return Response(await voice.speak(body.text, body.teammate_id), media_type="audio/wav")
 
 
+@app.get("/voice/messages/{message_id}")
+async def speech_parts(message_id: str, user: User = Depends(current_user)):
+    """How many audio parts a reply has; the app plays /voice/messages/{id}/{n} in order, prefetching the next."""
+    return {"parts": len(voice.parts((await owned("messages", message_id, user, "message"))["text"]))}
+
+
+@app.get("/voice/messages/{message_id}/{n}")
+async def speech_part(message_id: str, n: int, user: User = Depends(current_user)):
+    m = await owned("messages", message_id, user, "message")
+    chunks = voice.parts(m["text"])
+    if not 0 <= n < len(chunks):
+        raise HTTPException(404, "No such part.")
+    return Response(await voice.speak(chunks[n], m.get("teammate_id")), media_type="audio/wav",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
 # ------------------------------------------------------------------ memories
 class MemoryIn(BaseModel):
     scope: Literal["teammate", "project", "user"]

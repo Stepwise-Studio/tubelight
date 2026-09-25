@@ -44,13 +44,13 @@ export function Segment<T extends string>({ value, onChange, options, accessibil
     <Squircle
       accessibilityRole="tablist"
       accessibilityLabel={accessibilityLabel}
-      style={{ flexDirection: 'row', padding: 3, borderRadius: 12, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }}
+      style={{ flexDirection: 'row', padding: 3, borderRadius: 21, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }}
       onLayout={(e) => { setWidth(e.nativeEvent.layout.width); requestAnimationFrame(() => setPlaced(true)) }}
     >
       <Animated.View
         pointerEvents="none"
         style={[
-          { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 9, backgroundColor: scheme === 'dark' ? c.panel3 : c.panel },
+          { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 17, backgroundColor: scheme === 'dark' ? c.panel3 : c.panel },
           scheme === 'light' && elevation('light'),
           pill,
         ]}
