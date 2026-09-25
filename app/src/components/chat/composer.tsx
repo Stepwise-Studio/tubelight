@@ -18,6 +18,8 @@ import { useSenderName } from './message-row'
 
 const MENTION = /(^|\s)@([a-z0-9_-]*)$/i
 const MAX_FILES = 6
+// Half the one-line height (36 button + 2×4 padding + 2×1 border): a capsule at rest, soft corners as it grows.
+const PILL = 23
 
 export interface ComposerProps {
   placeholder: string
@@ -112,7 +114,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
       : { icon: ArrowUp02Icon, key: 'send', label: 'Send', variant: canSend ? 'tube' as const : 'soft' as const }
 
   const field = (
-    <Squircle style={{ borderRadius: radius.xl, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
+    <Squircle cornerSmoothing={0} style={{ borderRadius: PILL, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
       {replyTo && <ReplyStrip m={replyTo} onCancel={onCancelReply} />}
       {files.length > 0 && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
@@ -122,7 +124,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
         </Animated.View>
       )}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: 4 }}>
-        <IconButton icon={Add01Icon} accessibilityLabel="Attach photos or files" size={36} iconSize={20} color={c.ink2} disabled={files.length >= MAX_FILES} onPress={attachMenu} />
+        <IconButton icon={Add01Icon} round accessibilityLabel="Attach photos or files" size={36} iconSize={20} color={c.ink2} disabled={files.length >= MAX_FILES} onPress={attachMenu} />
         <TextInput
           ref={input}
           value={text}
@@ -140,6 +142,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
         />
         <IconButton
           icon={action.icon}
+          round
           swapKey={action.key}
           accessibilityLabel={action.label}
           variant={action.variant}
@@ -185,7 +188,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
       )}
       {/* Always wrapped, so a run starting never remounts the input (keeps focus). */}
       <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>
-        <Beam radius={radius.xl} active={live}>{field}</Beam>
+        <Beam radius={PILL} active={live}>{field}</Beam>
       </Animated.View>
     </Animated.View>
   )

@@ -20,17 +20,14 @@ const iconIn = new Keyframe({
   0: { opacity: 0, transform: [{ scale: 0.25 }] },
   100: { opacity: 1, transform: [{ scale: 1 }], easing: ease.icon },
 }).duration(duration.fast).reduceMotion(ReduceMotion.System)
-const iconOut = new Keyframe({
-  0: { opacity: 1, transform: [{ scale: 1 }] },
-  100: { opacity: 0, transform: [{ scale: 0.25 }], easing: ease.icon },
-}).duration(duration.fast).reduceMotion(ReduceMotion.System)
 
-/** Cross-fades two icons in one slot. Change `swapKey` to swap. First render doesn't animate. */
+/** Swaps icons in one slot: the new one scales in. Change `swapKey` to swap. First render doesn't animate.
+ *  Enter only: an exiting copy can linger under the new icon (it left send drawn over mic). */
 export function IconSwap({ swapKey, children }: { swapKey: string; children: ReactNode }) {
   return (
     <LayoutAnimationConfig skipEntering>
       <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <Animated.View key={swapKey} entering={iconIn} exiting={iconOut}>
+        <Animated.View key={swapKey} entering={iconIn}>
           {children}
         </Animated.View>
       </View>

@@ -104,18 +104,21 @@ export interface IconButtonProps extends Omit<PressProps, 'children' | 'style' |
   iconSize?: number
   color?: keyof Palette | (string & {})
   style?: StyleProp<ViewStyle>
-  /** Change it with the icon to cross-fade the swap (transitions.dev icon swap). */
+  /** Change it with the icon to animate the swap (transitions.dev icon swap). */
   swapKey?: string
+  /** A true circle instead of the squircle. */
+  round?: boolean
 }
 
 /** Icon-only button, 44pt by default. Circular-ish squircle. */
-export function IconButton({ icon, variant = 'ghost', size = 44, iconSize = 20, color, style, disabled, swapKey, ...props }: IconButtonProps) {
+export function IconButton({ icon, variant = 'ghost', size = 44, iconSize = 20, color, style, disabled, swapKey, round, ...props }: IconButtonProps) {
   const { c } = useTheme()
   const bg = variant === 'soft' ? c.panel2 : variant === 'solid' ? c.solidTo : variant === 'tube' ? c.tube : 'transparent'
   const ink = color ?? (variant === 'solid' ? c.solidInk : variant === 'tube' ? c.onTube : c.ink2)
   return (
     <Press
-      radius={size * 0.42}
+      radius={round ? size / 2 : size * 0.42}
+      smoothing={round ? 0 : undefined}
       disabled={disabled}
       outerStyle={[{ opacity: disabled ? 0.45 : 1 }, style]}
       style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', backgroundColor: bg }}

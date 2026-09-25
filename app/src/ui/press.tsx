@@ -34,6 +34,8 @@ export interface PressProps extends Omit<PressableProps, 'style' | 'children'> {
   /** No scale on press, for places where motion would distract. */
   static?: boolean
   haptic?: keyof typeof haptics
+  /** Corner smoothing; 0 for a true circle or capsule. Defaults to the squircle's. */
+  smoothing?: number
 }
 
 /**
@@ -41,7 +43,7 @@ export interface PressProps extends Omit<PressableProps, 'style' | 'children'> {
  * The wash is clipped by the squircle; elevation lives on `outerStyle` so the clip never cuts it.
  */
 export function Press({
-  children, radius = 12, style, outerStyle, wash, static: isStatic, haptic, disabled,
+  children, radius = 12, style, outerStyle, wash, static: isStatic, haptic, disabled, smoothing,
   onPressIn, onPressOut, onPress, accessibilityRole = 'button', accessibilityState, ...props
 }: PressProps) {
   const { c } = useTheme()
@@ -58,7 +60,7 @@ export function Press({
         onPress={(e) => { if (haptic) haptics[haptic](); onPress?.(e) }}
         {...props}
       >
-        <AnimatedSquircle style={[{ borderRadius: radius, overflow: 'hidden' }, style]}>
+        <AnimatedSquircle cornerSmoothing={smoothing} style={[{ borderRadius: radius, overflow: 'hidden' }, style]}>
           {washColor && (
             <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: washColor }, fb.washStyle]} />
           )}

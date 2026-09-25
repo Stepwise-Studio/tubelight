@@ -3,31 +3,40 @@ import {
   type AudioPlayer,
 } from 'expo-audio'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from 'react-native'
+import { BackHandler, Pressable, StyleSheet, View } from 'react-native'
 import Animated, { FadeIn, FadeOut, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Cancel01Icon, KeyboardIcon, StopIcon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { Cancel01Icon, KeyboardIcon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
 
 import { ApiError, BASE, api, authHeaders } from '@/lib/api'
 import { stripCues } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
+import { VoiceBeam, type VoiceBeamMode } from '@/vendor/voice-glow-native/VoiceBeam'
 import { motion, useTheme } from '@/theme'
 import { IconButton, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
 
-import { VoiceGlow } from './voice-glow'
-
-type Phase = 'starting' | 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'stopped'
+type Phase = 'starting' | 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'muted' | 'stopped'
 
 const SPEECH = 0.32 // minimum level that counts as talking
-const CALIBRATE_MS = 400 // listen to the room first; talking must rise clearly above it
+const CALIBRATE_MS = 400 // listen to the room (or the teammate's own voice) first; talking must rise clearly above it
 const MIN_TALK_MS = 300 // a cough or a door isn't a turn
-const SILENCE_MS = 1100 // this long below it after talking ends the turn
+const BARGE_IN_MS = 250 // this much of your voice over the teammate's interrupts it
+const SILENCE_MS = 1000 // this long quiet after talking ends your turn
 const MAX_TURN_MS = 60_000
-// Module constant: useAudioRecorder recreates (and releases) the recorder whenever its options object changes.
-const RECORDING = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true }
 
+// Module constant: useAudioRecorder recreates (and releases) the recorder whenever its options object changes.
+// `voice_communication` turns on Android's echo cancellation, so the mic can stay open while the teammate speaks.
+const RECORDING = {
+  ...RecordingPresets.HIGH_QUALITY,
+  isMeteringEnabled: true,
+  android: { ...RecordingPresets.HIGH_QUALITY.android, audioSource: 'voice_communication' as const },
+}
+
+/** dBFS → the 0–1 level the turn detection uses. */
 const toLevel = (db?: number) => (db === undefined ? 0 : Math.max(0, Math.min(1, (db + 55) / 45)))
+/** dBFS → the raw level voice-glow's driver expects (RMS × its base gain 5 × default sensitivity 3.1). */
+const toBeam = (db?: number) => (db === undefined ? 0 : Math.min(1, Math.pow(10, db / 20) * 15.5))
 const plain = (s: string) => stripCues(s).replace(/```[\s\S]*?```/g, ' (code in the chat) ').replace(/[*_`#>[\]]/g, '').replace(/\s+/g, ' ').trim()
 
 export interface VoiceModeProps {
@@ -41,15 +50,15 @@ export interface VoiceModeProps {
 }
 
 /**
- * Hands-free conversation over the thread: listen → (you stop talking) → transcribe → send → the teammate's
- * reply is spoken part by part → listen again. Tap anywhere to interrupt or to end your turn early.
+ * Hands-free conversation, like Claude's voice mode: just talk; a pause ends your turn, the reply is spoken
+ * sentence by sentence, and talking over it (or tapping) interrupts. The mic stays open throughout.
  */
 export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: VoiceModeProps) {
-  const { c } = useTheme()
+  const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const recorder = useAudioRecorder(RECORDING)
   const rec = useAudioRecorderState(recorder, 80)
-  const level = useSharedValue(0)
+  const beamLevel = useSharedValue(0)
   const [phase, setPhase] = useState<Phase>('starting')
   const [caption, setCaption] = useState('')
   const [note, setNote] = useState('')
@@ -60,42 +69,41 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
   const closed = useRef(false)
 
   const go = (p: Phase) => { phaseRef.current = p; setPhase(p) }
-
   const stopPlayers = () => {
     for (const p of players.current) { try { p.remove() } catch {} }
     players.current = []
   }
-
   const close = () => { closed.current = true; stopPlayers(); onClose() }
 
-  const listen = async () => {
+  /** A fresh recording with the turn detection recalibrated; monitored as `listening`, or `speaking` for barge-in. */
+  const record = async (then: 'listening' | 'speaking') => {
     if (closed.current) return
-    stopPlayers()
     try {
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true })
+      if (recorder.isRecording) await recorder.stop()
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldRouteThroughEarpiece: false })
       await recorder.prepareToRecordAsync()
       recorder.record()
       const now = Date.now()
       turn.current = { ...turn.current, startedAt: now, spoke: false, lastLoud: 0, floor: 0, loudMs: 0, lastTick: now }
-      setNote('')
-      go('listening')
+      if (then === 'listening') { setNote(''); go('listening') }
     } catch (e) {
       setNote(`The microphone is busy. Tap to try again.${__DEV__ ? ` (${(e as Error).message})` : ''}`)
       go('stopped')
     }
   }
+  const listen = () => { stopPlayers(); return record('listening') }
 
   const endTurn = async () => {
     if (phaseRef.current !== 'listening') return
     go('transcribing')
-    level.value = 0
+    beamLevel.set(0)
     try {
       await recorder.stop()
       const uri = recorder.uri
       if (!uri) throw new Error('No recording')
       const audio = await (await fetch(uri)).arrayBuffer()
       const { text } = await api<{ text: string }>('/voice/transcribe', { method: 'POST', body: audio, headers: { 'Content-Type': 'audio/m4a' } })
-      if (!text.trim()) { setNote('I didn’t catch that.'); return listen() }
+      if (!text.trim()) return listen()
       setCaption(text)
       turn.current = { ...turn.current, sent: text, sawLive: false }
       go('thinking')
@@ -106,15 +114,26 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
     }
   }
 
+  /** You talked over the reply: stop it and keep this recording going as your new turn. */
+  const bargeIn = () => {
+    haptic.light()
+    stopPlayers()
+    const now = Date.now()
+    turn.current = { ...turn.current, startedAt: now, spoke: true, lastLoud: now }
+    setNote('')
+    go('listening')
+  }
+
   const speak = async (m: ChatMessage) => {
     go('speaking')
     setCaption(plain(m.text))
     try {
       const [{ parts }, headers] = await Promise.all([api<{ parts: number }>(`/voice/messages/${m.id}`), authHeaders()])
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true })
+      if (parts === 0) return listen()
+      await record('speaking') // mic open for barge-in; echo cancellation keeps the reply out of it
       const load = (k: number) => createAudioPlayer({ uri: `${BASE}/voice/messages/${m.id}/${k}`, headers })
       const play = (k: number, player: AudioPlayer) => {
-        if (phaseRef.current !== 'speaking' || closed.current) return
+        if (phaseRef.current !== 'speaking' || closed.current) { player.remove(); return }
         // Fetch the next part while this one plays, so there's no gap between sentences.
         const next = k + 1 < parts ? load(k + 1) : null
         players.current = next ? [player, next] : [player]
@@ -123,19 +142,18 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
           sub.remove()
           player.remove()
           if (next) play(k + 1, next)
-          else listen()
+          else if (phaseRef.current === 'speaking') listen() // a fresh recording, without the reply in it
         })
         player.play()
       }
-      if (parts > 0) play(0, load(0))
-      else listen()
+      play(0, load(0))
     } catch (e) {
       setNote(e instanceof ApiError ? e.message : 'Couldn’t play the reply. It’s in the chat.')
       go('stopped')
     }
   }
 
-  // Start listening on open; release everything on close.
+  // Start on open; release everything on close.
   useEffect(() => {
     (async () => {
       const perm = await requestRecordingPermissionsAsync()
@@ -152,21 +170,21 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mic level drives the glow; a pause after talking ends the turn.
+  // The mic: drives the glow while you talk, ends your turn on a pause, and interrupts the reply if you talk over it.
   useEffect(() => {
-    if (phaseRef.current !== 'listening') return
+    const p = phaseRef.current
+    if (p !== 'listening' && p !== 'speaking') return
     const l = toLevel(rec.metering)
+    if (p === 'listening') beamLevel.set(toBeam(rec.metering))
     const now = Date.now()
     const t = turn.current
     const dt = now - t.lastTick
     t.lastTick = now
     if (now - t.startedAt < CALIBRATE_MS) { t.floor = Math.max(t.floor, l); return }
-    level.value = Math.max(0, l - t.floor) / (1 - Math.min(t.floor, 0.9)) // the glow shows your voice, not the room
-    if (l > Math.max(SPEECH, t.floor + 0.18)) {
-      t.lastLoud = now
-      t.loudMs += dt
-      if (t.loudMs >= MIN_TALK_MS) t.spoke = true
-    }
+    const loud = l > Math.max(SPEECH, t.floor + (p === 'speaking' ? 0.25 : 0.18))
+    if (loud) { t.lastLoud = now; t.loudMs += dt } else if (p === 'speaking') t.loudMs = Math.max(0, t.loudMs - dt)
+    if (p === 'speaking') { if (t.loudMs >= BARGE_IN_MS) bargeIn(); return }
+    if (t.loudMs >= MIN_TALK_MS) t.spoke = true
     if ((t.spoke && now - t.lastLoud > SILENCE_MS) || now - t.startedAt > MAX_TURN_MS) endTurn()
   }, [rec.metering, rec.durationMillis]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -183,46 +201,48 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
     else if (t.sawLive) { setNote('No reply came back. Tap to try again.'); go('stopped') }
   }, [live, messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
-
   const tap = () => {
+    const p = phaseRef.current
+    if (p === 'speaking') { haptic.tap(); listen() } // interrupt
+    else if (p === 'stopped') listen()
+  }
+
+  const toggleMute = async () => {
     haptic.tap()
-    if (phaseRef.current === 'listening') endTurn()
-    else if (phaseRef.current === 'speaking') listen() // interrupt
-    else if (phaseRef.current === 'stopped') listen()
+    if (phaseRef.current === 'muted') return listen()
+    stopPlayers()
+    go('muted')
+    beamLevel.set(0)
+    if (recorder.isRecording) await recorder.stop().catch(() => {})
   }
 
   const label = {
     starting: 'Starting…',
     listening: 'Listening',
-    transcribing: 'Got it',
+    transcribing: 'Listening',
     thinking: `${teammate?.name ?? title} is thinking`,
-    speaking: 'Tap to interrupt',
+    speaking: 'Talk or tap to interrupt',
+    muted: 'Microphone off',
     stopped: 'Paused',
   }[phase]
-  const glow = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking' : phase === 'thinking' || phase === 'transcribing' ? 'thinking' : 'idle'
-  const action = phase === 'listening'
-    ? { icon: Tick02Icon, label: 'Done talking' }
-    : phase === 'speaking' ? { icon: StopIcon, label: 'Interrupt' } : null
+  const beam: VoiceBeamMode = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking'
+    : phase === 'thinking' || phase === 'transcribing' ? 'processing' : 'idle'
 
   return (
     <Animated.View
       entering={FadeIn.duration(motion.duration.fast)}
       exiting={FadeOut.duration(motion.duration.quick)}
-      style={[StyleSheet.absoluteFill, { backgroundColor: c.canvas, zIndex: 20 }]}
+      style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? '#000' : c.canvas, zIndex: 20 }]}
       accessibilityViewIsModal
     >
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}><VoiceGlow state={glow} level={level} height={340} /></View>
+      <VoiceBeam mode={beam} level={beamLevel} theme={scheme} />
 
-      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center' }}>
-        <IconButton icon={Cancel01Icon} accessibilityLabel="End voice mode" onPress={close} />
-        <View style={{ flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
-          {teammate && <TeammateAvatar teammate={teammate} size={28} state={phase === 'thinking' ? 'working' : 'default'} live interactive={false} />}
-          <Text variant="headline" numberOfLines={1}>{title}</Text>
-        </View>
-        <View style={{ width: 44 }} />
+      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        {teammate && <TeammateAvatar teammate={teammate} size={28} state={phase === 'thinking' ? 'working' : 'default'} live interactive={false} />}
+        <Text variant="headline" numberOfLines={1}>{title}</Text>
       </View>
 
-      <Pressable onPress={tap} style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingBottom: 120 }} accessibilityRole="button" accessibilityLabel={label}>
+      <Pressable onPress={tap} style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingBottom: 140 }} accessibilityRole="button" accessibilityLabel={label}>
         <View style={{ alignItems: 'center', gap: 14 }}>
           <TextSwap variant="label" color="ink3">{label}</TextSwap>
           {!!caption && (
@@ -234,14 +254,19 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
         </View>
       </Pressable>
 
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
-        <IconButton icon={KeyboardIcon} variant="soft" size={52} iconSize={22} accessibilityLabel="Type instead" onPress={close} />
-        <View style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}>
-          {action ? (
-            <IconButton icon={action.icon} swapKey={action.label} variant="solid" size={72} iconSize={28} accessibilityLabel={action.label} onPress={tap} />
-          ) : phase === 'stopped' ? null : <ActivityIndicator color={c.ink2} />}
-        </View>
-        <View style={{ width: 52 }} />
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+        <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={close} />
+        <IconButton
+          icon={phase === 'muted' ? MicOff01Icon : Mic01Icon}
+          swapKey={phase === 'muted' ? 'off' : 'on'}
+          variant={phase === 'muted' ? 'solid' : 'soft'}
+          size={56}
+          iconSize={22}
+          round
+          accessibilityLabel={phase === 'muted' ? 'Turn microphone on' : 'Mute microphone'}
+          onPress={toggleMute}
+        />
+        <IconButton icon={Cancel01Icon} variant="soft" size={56} iconSize={22} round accessibilityLabel="End voice mode" onPress={close} />
       </View>
     </Animated.View>
   )
