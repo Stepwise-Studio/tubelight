@@ -1,0 +1,141 @@
+"""Run lifecycle: background tasks, per-thread locks, cancel, approval resume."""
+import asyncio
+import logging
+from collections import defaultdict
+from typing import Any
+
+from langchain_core.messages import HumanMessage
+from langgraph.errors import GraphRecursionError
+from langgraph.types import Command
+
+from . import db, graph, llm, memory, sandbox
+
+log = logging.getLogger(__name__)
+tasks: dict[str, asyncio.Task] = {}
+_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+docker_ok = False  # set at startup
+
+
+async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, event_type: str | None = None) -> graph.RunCtx:
+    thread = await db.one("threads", {"id": f"eq.{thread_id}", "owner_id": f"eq.{owner_id}"})
+    if not thread:
+        raise LookupError("This conversation no longer exists.")
+    project = None
+    if thread["kind"] == "dm":
+        members = await db.select("teammates", {"id": f"eq.{thread['teammate_id']}"})
+    else:
+        project = await db.one("projects", {"id": f"eq.{thread['project_id']}"})
+        links = await db.select("project_members", {"project_id": f"eq.{thread['project_id']}", "order": "added_at"})
+        ids = [l["teammate_id"] for l in links]
+        rows = {t["id"]: t for t in await db.select("teammates", {"id": f"in.({','.join(ids)})"})} if ids else {}
+        members = [rows[i] for i in ids if i in rows]
+    if not members:
+        raise LookupError("Add a teammate to this project first.")
+    profile = await db.one("profiles", {"id": f"eq.{owner_id}"})
+    return graph.RunCtx(
+        run_id=run_id, owner_id=owner_id, thread_id=thread_id, members=members, project=project,
+        user_name=(profile or {}).get("display_name") or "the user", trigger=trigger, event_type=event_type,
+        docker=docker_ok,
+    )
+
+
+async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str] | None = None,
+                trigger: str = "message", teammate_id: str | None = None, event_type: str | None = None,
+                sender: str | None = None) -> str:
+    """Insert a runs row and start the graph in the background. Returns run_id."""
+    run = await db.insert("runs", {"owner_id": owner_id, "thread_id": thread_id, "trigger": trigger,
+                                   "teammate_id": teammate_id, "status": "running"})
+    await db.activity(owner_id, "run_start", trigger, run_id=run["id"], thread_id=thread_id, teammate_id=teammate_id)
+    queue = [teammate_id] if teammate_id else list(mentions or [])
+    state = {"messages": [HumanMessage(text, name=sender) if sender else HumanMessage(text)],
+             "queue": queue, "active": None, "handoffs": 0, "pending": [], "decisions": {}}
+    _spawn(run["id"], _execute(run["id"], owner_id, thread_id, trigger, state, event_type))
+    return run["id"]
+
+
+async def resume(run: dict[str, Any], decision: dict[str, Any]) -> None:
+    await db.update("runs", {"id": f"eq.{run['id']}"}, {"status": "running"})
+    _spawn(run["id"], _execute(run["id"], run["owner_id"], run["thread_id"], run["trigger"], Command(resume=decision)))
+
+
+async def cancel(run: dict[str, Any]) -> None:
+    task = tasks.get(run["id"])
+    if task:
+        task.cancel()
+    elif run["status"] in ("running", "waiting_approval"):
+        await db.update("approvals", {"run_id": f"eq.{run['id']}", "status": "eq.pending"}, {"status": "expired"})
+        await _finish(run["id"], run["owner_id"], run["thread_id"], "cancelled")
+        sandbox.cleanup_workdir(run["id"])
+
+
+def _spawn(run_id: str, coro) -> None:
+    task = asyncio.create_task(coro)
+    tasks[run_id] = task
+    task.add_done_callback(lambda _: tasks.pop(run_id, None))
+
+
+async def _finish(run_id: str, owner_id: str, thread_id: str, status: str, error: str | None = None,
+                  teammate_id: str | None = None) -> None:
+    await db.update("runs", {"id": f"eq.{run_id}"}, {"status": status, "error": error, "ended_at": db.now()})
+    await db.activity(owner_id, "run_end", status, run_id=run_id, thread_id=thread_id, teammate_id=teammate_id,
+                      status="error" if status == "error" else "ok", output={"error": error} if error else None)
+    await db.broadcast(thread_id, "status", {"run_id": run_id, "teammate_id": teammate_id, "state": "idle"})
+
+
+async def _supersede(thread_id: str) -> None:
+    """A new message arrived while the thread waited for approval: the old request is void."""
+    await db.update("approvals", {"thread_id": f"eq.{thread_id}", "status": "eq.pending"}, {"status": "expired"})
+    stale = await db.update("runs", {"thread_id": f"eq.{thread_id}", "status": "eq.waiting_approval"},
+                            {"status": "cancelled", "error": "Superseded by a newer message.", "ended_at": db.now()})
+    for r in stale:
+        sandbox.cleanup_workdir(r["id"])
+
+
+async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, graph_input: Any,
+                   event_type: str | None = None) -> None:
+    ctx: graph.RunCtx | None = None
+    active, paused = None, False
+    try:
+        async with _locks[thread_id]:
+            ctx = await load_ctx(run_id, owner_id, thread_id, trigger, event_type)
+            app = graph.build(ctx, memory.checkpointer)
+            cfg = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
+            state = await app.aget_state(cfg)
+            if isinstance(graph_input, Command):
+                if not state.interrupts:
+                    await db.update("approvals", {"run_id": f"eq.{run_id}", "status": "eq.approved"}, {"status": "expired"})
+                    await _finish(run_id, owner_id, thread_id, "cancelled", "This approval was no longer active.")
+                    return
+            elif state.interrupts:
+                await _supersede(thread_id)
+            await app.ainvoke(graph_input, cfg)
+            state = await app.aget_state(cfg)
+            active = state.values.get("active")
+            paused = bool(state.interrupts)
+            if paused:
+                await db.update("runs", {"id": f"eq.{run_id}"}, {"status": "waiting_approval"})
+            else:
+                await _finish(run_id, owner_id, thread_id, "done", teammate_id=active)
+    except asyncio.CancelledError:
+        await _finish(run_id, owner_id, thread_id, "cancelled", teammate_id=active)
+    except Exception as e:
+        log.exception("run %s failed", run_id)
+        text = str(e) if isinstance(e, LookupError) else (
+            "I stopped because this took too many steps. Try splitting the request into smaller parts."
+            if isinstance(e, GraphRecursionError) else llm.human_error(e))
+        try:
+            await db.insert("messages", {"thread_id": thread_id, "owner_id": owner_id, "sender_type": "system",
+                                         "text": text, "kind": "error", "run_id": run_id})
+            await db.activity(owner_id, "error", type(e).__name__, run_id=run_id, thread_id=thread_id,
+                              output={"error": str(e)[:1000]}, status="error")
+            await _finish(run_id, owner_id, thread_id, "error", text, teammate_id=active)
+        except Exception:
+            log.exception("could not record failure of run %s", run_id)
+    finally:
+        for tm_id, box in (ctx.sandboxes.items() if ctx else []):
+            diff = await box.close()
+            if diff:
+                await db.activity(owner_id, "sandbox", "diff", run_id=run_id, thread_id=thread_id,
+                                  teammate_id=tm_id, output={"diff": diff})
+        if not paused:  # the workdir outlives an approval pause (git_push needs it)
+            sandbox.cleanup_workdir(run_id)

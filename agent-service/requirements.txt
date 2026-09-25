@@ -1,0 +1,20 @@
+# Versions verified on Python 3.14 (2026-09). Install: uv pip install -p .venv -r requirements.txt
+fastapi>=0.141,<1
+uvicorn[standard]>=0.54
+httpx>=0.28
+python-dotenv>=1.2
+pyyaml>=6
+langchain-core>=1.6,<2
+langchain-openai>=1.6,<2
+openai>=3.19
+langgraph>=1.2,<2
+langgraph-checkpoint-postgres>=3.1
+psycopg[binary,pool]>=3.3
+fastembed>=0.8
+composio>=0.24
+composio-langchain>=0.24
+docker>=7.2
+croniter>=6.2
+# tests
+pytest>=9
+pytest-asyncio>=1.4

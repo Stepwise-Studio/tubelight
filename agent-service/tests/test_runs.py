@@ -1,0 +1,183 @@
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import StructuredTool
+
+from app import connectors, graph
+from tests.conftest import ai, project, settle, teammate
+
+
+async def test_dm_run_posts_message_and_streams(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    fake.script = [ai("Hello from Dev.")]
+
+    r = await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "hi"})
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+    await settle()
+
+    msgs = fdb.rows("messages", sender_type="teammate")
+    assert [m["text"] for m in msgs] == ["Hello from Dev."]
+    stream_id = msgs[0]["meta"]["stream_id"]
+    deltas = [p for _, e, p in fdb.broadcasts if e == "delta"]
+    assert deltas and deltas[-1] == {"run_id": run_id, "teammate_id": dev["id"], "stream_id": stream_id, "text": "Hello from Dev."}
+    assert ("dm:" + dev["id"], "done", {"run_id": run_id, "teammate_id": dev["id"], "stream_id": stream_id}) in fdb.broadcasts
+    assert fdb.rows("runs", id=run_id)[0]["status"] == "done"
+    states = [p["state"] for _, e, p in fdb.broadcasts if e == "status"]
+    assert states[0] == "thinking" and states[-1] == "idle"
+    # the system preamble names the teammate and the date
+    assert "You are Dev (@dev)" in fake.calls[0][0].content
+
+
+async def test_rate_limit_error_posts_human_message(api, env):
+    import httpx
+    import openai
+
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    resp = httpx.Response(429, request=httpx.Request("POST", "https://openrouter.ai"))
+
+    def boom(_):
+        raise openai.RateLimitError("Rate limit exceeded: free-models-per-day", response=resp, body=None)
+
+    fake.script = [boom]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "hi"})
+    await settle()
+    err = fdb.rows("messages", kind="error")
+    assert err[0]["text"] == "Daily free model limit reached. It resets at 00:00 UTC."
+    assert fdb.rows("runs")[0]["status"] == "error"
+
+
+async def test_project_routes_by_mention(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+    fake.script = [ai("Tess checking in.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "@tess test it", "mentions": [tess["id"]]})
+    await settle()
+    [m] = fdb.rows("messages", sender_type="teammate")
+    assert m["teammate_id"] == tess["id"]
+    assert len(fake.calls) == 1  # no router call when mentioned
+
+
+async def test_project_routes_by_router_model(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+    fake.script = [ai('{"handle": "tess"}'), ai("On it.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "does login still work?"})
+    await settle()
+    [m] = fdb.rows("messages", sender_type="teammate")
+    assert m["teammate_id"] == tess["id"]
+
+
+async def test_router_falls_back_to_first_member(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+    fake.script = [ai("no idea"), ai("Dev here.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "hmm"})
+    await settle()
+    assert fdb.rows("messages", sender_type="teammate")[0]["teammate_id"] == dev["id"]
+
+
+async def test_handoff_loop_guard(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+
+    def ping_pong(messages):
+        me = "dev" if "(@dev)" in messages[0].content else "tess"
+        last = messages[-1]
+        if isinstance(last, ToolMessage) and "limit reached" in last.content:
+            return ai("Fine, I will finish it myself.")
+        return ai(calls=[("handoff_to", {"handle": "tess" if me == "dev" else "dev", "note": "your turn"})])
+
+    fake.script = [ping_pong] * 20
+    r = await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "go", "mentions": [dev["id"]]})
+    await settle()
+    assert len(fdb.rows("messages", kind="handoff")) == 6
+    assert fdb.rows("runs", id=r.json()["run_id"])[0]["handoffs"] == 6
+    assert fdb.rows("messages", kind="text", sender_type="teammate")[0]["text"] == "Fine, I will finish it myself."
+    # tess sees dev's handoff note as a named message, never dev's tool traffic
+    tess_view = next(c for c in fake.calls if "(@tess)" in c[0].content)
+    assert any(isinstance(m, HumanMessage) and m.content.startswith("[Dev · developer handed off to @tess]") for m in tess_view)
+    assert not any(isinstance(m, ToolMessage) for m in tess_view)
+
+
+def _gmail_tool(sent: list):
+    def send(recipient_email: str, subject: str, body: str) -> str:
+        sent.append({"recipient_email": recipient_email, "subject": subject, "body": body})
+        return "sent"
+
+    return StructuredTool.from_function(send, name="GMAIL_SEND_EMAIL", description="Send an email")
+
+
+async def _approval_setup(api, env, monkeypatch, final: str):
+    fdb, fake = env
+    sent: list = []
+
+    async def tools_for(user_id, toolkits):
+        return [_gmail_tool(sent)]
+
+    monkeypatch.setattr(connectors, "tools_for", tools_for)
+    ivy = teammate(fdb, "ivy", "email", allowed_toolkits=["GMAIL"])
+    fake.script = [ai(calls=[("GMAIL_SEND_EMAIL", {"recipient_email": "jane@acme.com", "subject": "Hi", "body": "Hello"})]),
+                   ai(final)]
+    r = await api.post(f"/threads/dm:{ivy['id']}/messages", json={"text": "email jane"})
+    await settle()
+    return fdb, fake, sent, r.json()["run_id"]
+
+
+async def test_act_tool_waits_then_approve_with_edits(api, env, monkeypatch):
+    fdb, fake, sent, run_id = await _approval_setup(api, env, monkeypatch, "Sent it.")
+    [appr] = fdb.rows("approvals")
+    assert appr["title"] == "Send email to jane@acme.com: Hi" and appr["status"] == "pending"
+    [card] = fdb.rows("messages", kind="approval")
+    assert card["meta"]["approval_id"] == appr["id"] and appr["message_id"] == card["id"]
+    assert fdb.rows("runs", id=run_id)[0]["status"] == "waiting_approval"
+    assert ("waiting" in [p["state"] for _, e, p in fdb.broadcasts if e == "status"])
+    assert sent == []
+
+    edited = {"recipient_email": "jane@acme.com", "subject": "Hi", "body": "Hello Jane"}
+    r = await api.post(f"/approvals/{appr['id']}", json={"action": "approve", "args": edited})
+    assert r.json() == {"ok": True, "status": "approved"}
+    await settle()
+    assert sent == [edited]
+    assert fdb.rows("messages", kind="text", sender_type="teammate")[0]["text"] == "Sent it."
+    assert fdb.rows("runs", id=run_id)[0]["status"] == "done"
+    r = await api.post(f"/approvals/{appr['id']}", json={"action": "approve"})
+    assert r.status_code == 409
+
+
+async def test_act_tool_reject_tells_the_model(api, env, monkeypatch):
+    fdb, fake, sent, run_id = await _approval_setup(api, env, monkeypatch, "Understood, not sending.")
+    [appr] = fdb.rows("approvals")
+    await api.post(f"/approvals/{appr['id']}", json={"action": "reject", "note": "wrong person"})
+    await settle()
+    assert sent == []
+    last_tool_msg = [m for m in fake.calls[-1] if isinstance(m, ToolMessage)][-1]
+    assert "rejected" in last_tool_msg.content and "wrong person" in last_tool_msg.content
+    assert fdb.rows("messages", kind="text", sender_type="teammate")[0]["text"] == "Understood, not sending."
+    assert fdb.rows("approvals")[0]["status"] == "rejected"
+
+
+async def test_new_message_supersedes_pending_approval(api, env, monkeypatch):
+    fdb, fake, sent, run_id = await _approval_setup(api, env, monkeypatch, "unused")
+    fake.script = [ai("Okay, new topic.")]
+    ivy = fdb.rows("teammates")[0]
+    await api.post(f"/threads/dm:{ivy['id']}/messages", json={"text": "never mind"})
+    await settle()
+    assert fdb.rows("approvals")[0]["status"] == "expired"
+    assert fdb.rows("runs", id=run_id)[0]["status"] == "cancelled"
+    # the dangling tool call got a synthetic result so the provider accepts the history
+    assert any(isinstance(m, ToolMessage) and "not completed" in m.content for m in fake.calls[-1])
+
+
+def test_view_names_other_teammates():
+    dev = {"id": "1", "handle": "dev", "name": "Dev", "role": "developer"}
+    tess = {"id": "2", "handle": "tess", "name": "Tess", "role": "tester"}
+    d = ai("I fixed it.")
+    d.name = "dev"
+    view = graph.view_for(tess, [HumanMessage("fix login"), d], [dev, tess])
+    assert view[1].content == "[Dev · developer]: I fixed it." and isinstance(view[1], HumanMessage)
+    assert graph.view_for(dev, [HumanMessage("x"), d], [dev, tess])[1] is d
