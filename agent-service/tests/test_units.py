@@ -169,6 +169,7 @@ def test_model_ids_and_fallback_chain(monkeypatch):
     from langchain_core.runnables import RunnableWithFallbacks
 
     from app import llm
+    monkeypatch.delenv("CF_GATEWAY_ID", raising=False)  # the developer's .env may route through a gateway
 
     assert llm.parse("nvidia/nemotron-3-super-120b-a12b:free") == ("openrouter", "nvidia/nemotron-3-super-120b-a12b:free")
     assert llm.parse("openrouter:qwen/qwen3.8-27b:free") == ("openrouter", "qwen/qwen3.8-27b:free")

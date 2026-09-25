@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
 import { Composer } from '@/components/chat/composer'
+import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
 import { ThreadAvatar } from '@/components/thread-avatar'
@@ -77,6 +78,7 @@ export default function Thread() {
 
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
+  const [voice, setVoice] = useState(false)
   const list = useRef<FlatList<ChatItem>>(null)
 
   const send = async (text: string, mentions: string[], opts: SendOptions = {}) => {
@@ -234,9 +236,20 @@ export default function Thread() {
           onStop={stop}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
+          onVoice={() => setVoice(true)}
         />
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
+      {voice && (
+        <VoiceMode
+          teammate={dmMate}
+          title={title}
+          messages={t.messages}
+          live={live}
+          onSend={(text) => send(text, [], { voice: true })}
+          onClose={() => setVoice(false)}
+        />
+      )}
     </View>
   )
 }

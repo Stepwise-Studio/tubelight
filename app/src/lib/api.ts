@@ -1,6 +1,12 @@
 import { supabase } from '@/lib/supabase'
 
-const BASE = process.env.EXPO_PUBLIC_AGENT_URL ?? 'http://localhost:8787'
+export const BASE = process.env.EXPO_PUBLIC_AGENT_URL ?? 'http://localhost:8787'
+
+/** For native players that fetch by URL themselves (voice replies). */
+export async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession()
+  return data.session ? { Authorization: `Bearer ${data.session.access_token}` } : {}
+}
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message) }
