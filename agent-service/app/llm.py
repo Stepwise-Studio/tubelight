@@ -27,7 +27,7 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "mistral": {"base": "https://api.mistral.ai/v1", "key": "MISTRAL_API_KEY", "name": "Mistral",
                 "default": "mistral:mistral-small-latest"},
 }
-NOT_CHAT = re.compile(r"whisper|tts|embed|guard|imagen|veo|aqa|moderation|ocr|audio|image", re.I)
+NOT_CHAT = re.compile(r"whisper|tts|embed|guard|imagen|veo|aqa|moderation|ocr|audio|image|orpheus|allam|prompt-guard", re.I)
 _models: tuple[float, list[dict[str, Any]]] = (0.0, [])
 
 
