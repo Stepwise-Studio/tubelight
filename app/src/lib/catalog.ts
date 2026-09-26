@@ -1,10 +1,13 @@
 // Engine-side catalogues (templates, models, connections) plus the fixed choices the editors offer.
 import * as Crypto from 'expo-crypto'
+import * as Linking from 'expo-linking'
+import * as WebBrowser from 'expo-web-browser'
 import { useCallback, useEffect, useState } from 'react'
 
 import { api } from '@/lib/api'
 import { FALLBACK_TEMPLATES } from '@/lib/templates'
 import type { BotShape, Teammate } from '@/lib/types'
+import { haptic, toast } from '@/ui'
 
 export interface Template {
   role: string
@@ -130,6 +133,15 @@ export function useConnections() {
   const reload = useCallback(() => apply(api<Connection[]>('/connections')), [apply])
   useEffect(() => { apply(api<Connection[]>('/connections')) }, [apply])
   return { connections: list, error, reload }
+}
+
+/** Sign in to an app in the system browser (Composio's page), then come back. */
+export async function connectApp(toolkit: string, name: string) {
+  const callback = Linking.createURL('connections')
+  const { redirect_url } = await api<{ redirect_url: string }>(`/connections/${toolkit}`, { method: 'POST', json: { callback_url: callback } })
+  await WebBrowser.openAuthSessionAsync(redirect_url, callback)
+  haptic.success()
+  toast({ title: `${name}: finish signing in?`, body: 'If you completed it, it shows as connected in a moment.' })
 }
 
 let toolkitsCache: Toolkit[] | null = null

@@ -9,7 +9,7 @@ import { Icon } from './icon'
 import { AnimatedSquircle } from './squircle'
 import { Text } from './text'
 
-const t = (v: number | string) => withTiming(v as number, { duration: motion.duration.fast, easing: motion.ease.smoothOut })
+const t = (v: number | string) => { 'worklet'; return withTiming(v as number, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) }
 
 export interface ToggleProps {
   value: boolean

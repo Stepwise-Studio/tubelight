@@ -5,22 +5,23 @@ import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
-import { Platform, RefreshControl, ScrollView, View } from 'react-native'
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
   Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
+import { BrandTile } from '@/components/brand-mark'
 import { FormSection } from '@/components/form-bits'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ApiError, api } from '@/lib/api'
-import { randomHex, useConnections } from '@/lib/catalog'
+import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type Toolkit } from '@/lib/catalog'
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
-  Button, Divider, ListRow, Segment, Skeleton, Surface, Text, TextField, Toggle,
+  Button, Chip, Divider, ListRow, Press, Segment, Skeleton, Surface, Text, TextField, Toggle,
   confirm, haptic, toast,
 } from '@/ui'
 
@@ -60,11 +61,9 @@ export default function ProfileScreen() {
       <TabHeader title="Profile" />
       <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 36 }}>
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
+        <AppsSection />
         <Appearance />
         <PushSection />
-        <FormSection title="Apps">
-          <ConnectionsRow />
-        </FormSection>
         <WebhookSection profile={profile} onChanged={setProfile} />
         <ServiceStatus key={healthKey} />
         <View style={{ gap: 12 }}>
@@ -214,20 +213,86 @@ function PushSection() {
   )
 }
 
-function ConnectionsRow() {
-  const { connections } = useConnections()
-  const n = connections?.filter((x) => x.connected).length
+/** Connected apps, a grid of popular ones to connect in a tap, and the way into all of Composio's catalog. */
+function AppsSection() {
+  const { c } = useTheme()
+  const { connections, reload } = useConnections()
+  const { toolkits } = useToolkits()
+  const [busy, setBusy] = useState<string | null>(null)
+  const connected = (connections ?? []).filter((x) => x.connected)
+  const have = new Set(connected.map((x) => x.toolkit))
+  const popular = (toolkits ?? []).filter((t) => t.auth !== 'none' && !have.has(t.toolkit)).slice(0, 8)
+
+  const connect = async (t: Toolkit) => {
+    if (busy) return
+    setBusy(t.toolkit)
+    try { await connectApp(t.toolkit, t.name); await reload() } catch (e) {
+      toast({ title: `Unable to connect ${t.name}`, body: (e as Error).message, tone: 'error' })
+    } finally { setBusy(null) }
+  }
+
   return (
-    <Surface style={{ overflow: 'hidden' }}>
-      <ListRow
-        title="Connections"
-        subtitle="Gmail, GitHub, Linear, Notion"
-        icon={Plug01Icon}
-        accessory={n != null ? <Text variant="caption" color="ink3" tabular>{n ? `${n} connected` : 'None yet'}</Text> : null}
-        chevron
-        onPress={() => router.push('/connections')}
-      />
-    </Surface>
+    <FormSection
+      title="Apps"
+      hint="Sign in once and every teammate you allow can use it."
+      action={<Button label="See all" size="sm" variant="ghost" onPress={() => router.push('/connections')} />}
+    >
+      {connected.length > 0 && (
+        <Surface style={{ overflow: 'hidden' }}>
+          {connected.map((x, i) => (
+            <View key={x.toolkit}>
+              {i > 0 && <Divider inset={60} />}
+              <Press radius={0} static onPress={() => router.push('/connections')} accessibilityLabel={`${x.name}, connected`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
+                <BrandTile toolkit={x.toolkit} size={34} />
+                <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{x.name || toolkitName(x.toolkit)}</Text>
+                <Chip label="Connected" tone="success" dot />
+              </Press>
+            </View>
+          ))}
+        </Surface>
+      )}
+      <Surface style={{ paddingVertical: 12, paddingHorizontal: 6 }}>
+        <Text variant="label" color="ink3" style={{ paddingHorizontal: 8, paddingBottom: 6 }}>{connected.length ? 'Add more' : 'Popular'}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {toolkits === null
+            ? Array.from({ length: 8 }, (_, i) => (
+                <View key={i} style={{ width: '25%', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
+                  <Skeleton width={48} height={48} radius={14} /><Skeleton width={44} height={10} />
+                </View>
+              ))
+            : popular.map((t) => (
+                <Press
+                  key={t.toolkit}
+                  radius={16}
+                  onPress={() => connect(t)}
+                  accessibilityLabel={`Connect ${t.name}`}
+                  outerStyle={{ width: '25%' }}
+                  style={{ alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 4 }}
+                >
+                  <View>
+                    <BrandTile toolkit={t.toolkit} size={48} />
+                    {busy === t.toolkit && (
+                      <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: c.scrim, borderRadius: 12 }}>
+                        <ActivityIndicator color="#fff" size="small" />
+                      </View>
+                    )}
+                  </View>
+                  <Text variant="footnote" color="ink2" numberOfLines={1}>{t.name}</Text>
+                </Press>
+              ))}
+        </View>
+      </Surface>
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow
+          title={toolkits ? `Browse all ${toolkits.length.toLocaleString()} apps` : 'Browse all apps'}
+          subtitle="Search by name or category"
+          icon={Plug01Icon}
+          chevron
+          onPress={() => router.push('/connections')}
+        />
+      </Surface>
+    </FormSection>
   )
 }
 

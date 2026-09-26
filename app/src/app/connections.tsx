@@ -8,19 +8,10 @@ import { BrandTile } from '@/components/brand-mark'
 import { ScreenHeader } from '@/components/screen-header'
 import { connectionStatus } from '@/components/teammate-form'
 import { api } from '@/lib/api'
-import { toolkitName, useConnections, useToolkits, type Connection, type Toolkit } from '@/lib/catalog'
+import { connectApp, toolkitName, useConnections, useToolkits, type Connection, type Toolkit } from '@/lib/catalog'
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import { AvatarStack, Button, Chip, Divider, Press, SearchField, Skeleton, Surface, Text, confirm, haptic, toast } from '@/ui'
-
-/** Sign in to an app in the system browser (Composio's page), then come back. */
-async function connectApp(toolkit: string, name: string) {
-  const callback = Linking.createURL('connections')
-  const { redirect_url } = await api<{ redirect_url: string }>(`/connections/${toolkit}`, { method: 'POST', json: { callback_url: callback } })
-  await WebBrowser.openAuthSessionAsync(redirect_url, callback)
-  haptic.success()
-  toast({ title: `${name}: finish signing in?`, body: 'If you completed it, it shows as connected in a moment.' })
-}
 
 export default function Connections() {
   const { c } = useTheme()
