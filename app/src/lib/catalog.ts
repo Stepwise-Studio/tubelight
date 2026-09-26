@@ -27,6 +27,18 @@ export interface Connection {
   account?: string
 }
 
+/** One app from Composio's catalog (GET /toolkits), most used first. */
+export interface Toolkit {
+  toolkit: string
+  name: string
+  logo: string
+  description: string
+  categories: string[]
+  tools: number
+  /** none: works without signing in · oauth: one-tap sign-in · key: Composio's page asks for an API key */
+  auth: 'none' | 'oauth' | 'key'
+}
+
 export const DEFAULT_MODEL = 'groq:openai/gpt-oss-120b'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
 export const REPO_RE = /^https?:\/\/\S+\.\S+/
@@ -118,6 +130,17 @@ export function useConnections() {
   const reload = useCallback(() => apply(api<Connection[]>('/connections')), [apply])
   useEffect(() => { apply(api<Connection[]>('/connections')) }, [apply])
   return { connections: list, error, reload }
+}
+
+let toolkitsCache: Toolkit[] | null = null
+/** GET /toolkits: ~1.5k apps, fetched once per session. */
+export function useToolkits() {
+  const [list, setList] = useState<Toolkit[] | null>(toolkitsCache)
+  const [error, setError] = useState<string | null>(null)
+  const fetchAll = useCallback(() =>
+    api<Toolkit[]>('/toolkits').then((t) => { toolkitsCache = t; setList(t); setError(null) }, (e: Error) => setError(e.message)), [])
+  useEffect(() => { if (!toolkitsCache) fetchAll() }, [fetchAll])
+  return { toolkits: list, error, reload: fetchAll }
 }
 
 export const randomHex = (bytes: number) =>

@@ -126,7 +126,9 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     case 'connect': {
       return (
         <TeammateBlock teammate={t} first={first} paused={pauseAvatar} working={working}>
-          {/* The card carries the whole ask; the row's text only shows until the approval row loads. */}
+          {/* The card carries the whole ask; the row's text only shows until the approval row loads.
+              Cards take the full width (the block hugs its content for bubbles). */}
+          <View style={{ alignSelf: 'stretch' }}>
           {!approval ? (
             <Bubble side="left" first={first} last={last}><Text color="ink2">{m.text || 'Loading…'}</Text></Bubble>
           ) : m.kind === 'question' ? (
@@ -136,6 +138,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
           ) : (
             <ApprovalCard approval={approval} teammate={t} beam={approval.status === 'pending'} onDecided={actions.onDecided} />
           )}
+          </View>
         </TeammateBlock>
       )
     }

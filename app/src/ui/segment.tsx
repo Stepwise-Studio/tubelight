@@ -42,6 +42,7 @@ export function Segment<T extends string>({ value, onChange, options, accessibil
 
   return (
     <Squircle
+      cornerSmoothing={0}
       accessibilityRole="tablist"
       accessibilityLabel={accessibilityLabel}
       style={{ flexDirection: 'row', padding: 3, borderRadius: 21, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }}

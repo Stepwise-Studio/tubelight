@@ -174,7 +174,7 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
         raise HTTPException(400, "Pick an option or write an answer.")
     if body.action == "connected":
         toolkit = approval["draft"].get("toolkit", "")
-        if not any(c["toolkit"] == toolkit and c["connected"] for c in await connectors.list_connections(user["id"])):
+        if toolkit not in await connectors.ready(user["id"]):
             raise HTTPException(409, f"{approval['draft'].get('name', toolkit)} isn't connected yet. Finish signing in, then try again.")
     status = "approved" if body.action in ("approve", "answer", "connected") else "rejected"
     await db.update("approvals", {"id": f"eq.{approval_id}"}, {
@@ -272,6 +272,15 @@ class ConnectIn(BaseModel):
 def _need_composio() -> None:
     if not connectors.enabled():
         raise HTTPException(503, "Connectors are not set up on this server yet (COMPOSIO_API_KEY is missing).")
+
+
+@app.get("/toolkits")
+async def toolkits(user: User = Depends(current_user)):
+    try:
+        return await connectors.catalog()
+    except Exception:
+        log.exception("composio catalog failed")
+        raise HTTPException(502, "Could not load the app list from Composio. Try again in a moment.")
 
 
 @app.get("/connections")

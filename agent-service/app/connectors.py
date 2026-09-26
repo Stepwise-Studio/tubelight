@@ -18,6 +18,8 @@ from . import config
 log = logging.getLogger(__name__)
 DEFAULT_TOOLKITS = {"GMAIL": "Gmail", "GITHUB": "GitHub", "LINEAR": "Linear", "NOTION": "Notion"}
 SESSION_TTL = 3600
+CATALOG_TTL = 6 * 3600
+_catalog: tuple[float, list[dict[str, Any]]] = (0.0, [])
 _sessions: dict[tuple[str, tuple[str, ...]], tuple[float, Any]] = {}
 
 
@@ -70,6 +72,56 @@ async def list_connections(user_id: str) -> list[dict[str, Any]]:
         return list(rows.values())
 
     return await asyncio.to_thread(fetch)
+
+
+def _auth(t: dict[str, Any]) -> str:
+    """none: works without signing in. oauth: one-tap sign-in Composio manages. key: Composio's hosted page asks for a key."""
+    if t.get("no_auth"):
+        return "none"
+    return "oauth" if t.get("composio_managed_auth_schemes") else "key"
+
+
+async def catalog() -> list[dict[str, Any]]:
+    """Every Composio toolkit, most used first. Cached: it's ~1.5k rows and changes slowly."""
+    global _catalog
+    if _catalog[1] and _catalog[0] > time.time():
+        return _catalog[1]
+    if not enabled():
+        return [{"toolkit": s, "name": n, "logo": "", "description": "", "categories": [], "tools": 0, "auth": "oauth"}
+                for s, n in DEFAULT_TOOLKITS.items()]
+
+    def fetch() -> list[dict[str, Any]]:
+        rows, cursor = [], None
+        while True:
+            page = _client().toolkits.list(limit=1000, cursor=cursor, sort_by="usage")
+            for item in page.items:
+                t = item.model_dump()
+                if t.get("is_local_toolkit") or t["slug"] == "composio":
+                    continue
+                meta = t.get("meta") or {}
+                rows.append({
+                    "toolkit": t["slug"].upper(), "name": t["name"], "logo": meta.get("logo") or "",
+                    "description": " ".join((meta.get("description") or "").split())[:160],
+                    "categories": [c["name"] for c in meta.get("categories") or [] if c.get("name")],
+                    "tools": int(meta.get("tools_count") or 0), "auth": _auth(t),
+                })
+            cursor = page.next_cursor
+            if not cursor or not page.items:
+                return rows
+
+    rows = await asyncio.to_thread(fetch)
+    _catalog = (time.time() + CATALOG_TTL, rows)
+    return rows
+
+
+async def ready(user_id: str) -> set[str]:
+    """Toolkits a teammate can use right now: connected ones plus those that need no sign-in."""
+    connected = {c["toolkit"] for c in await list_connections(user_id) if c["connected"]}
+    return connected | {t["toolkit"] for t in await catalog() if t["auth"] == "none"}
+
+
+def name_of(toolkit: str) -> str:
+    return next((t["name"] for t in _catalog[1] if t["toolkit"] == toolkit), DEFAULT_TOOLKITS.get(toolkit, toolkit.title()))
 
 
 async def connect(user_id: str, toolkit: str, callback_url: str) -> str:

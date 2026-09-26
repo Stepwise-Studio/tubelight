@@ -1,3 +1,5 @@
+import { Image } from 'expo-image'
+import { useState } from 'react'
 import { View } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 
@@ -26,12 +28,28 @@ export function BrandMark({ toolkit, size = 18, color }: { toolkit: string; size
   )
 }
 
-/** Brand mark on a small squircle tile, for rows. */
+/** Composio's logo for any toolkit (the catalog's `logo` follows this pattern). */
+export const logoUrl = (toolkit: string) => `https://logos.composio.dev/api/${toolkit.toLowerCase()}`
+
+/** The app's own logo on a small white tile (like an app icon); the monochrome mark if the logo can't load. */
 export function BrandTile({ toolkit, size = 36 }: { toolkit: string; size?: number }) {
   const { c } = useTheme()
+  const [failed, setFailed] = useState(false)
   return (
-    <Squircle style={{ width: size, height: size, borderRadius: radius.md - 2, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center' }}>
-      <BrandMark toolkit={toolkit} size={Math.round(size * 0.5)} />
+    <Squircle style={{ width: size, height: size, borderRadius: radius.md - 2, backgroundColor: failed ? c.panel2 : '#fff', borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {failed ? (
+        <BrandMark toolkit={toolkit} size={Math.round(size * 0.5)} />
+      ) : (
+        <Image
+          source={logoUrl(toolkit)}
+          style={{ width: Math.round(size * 0.62), height: Math.round(size * 0.62) }}
+          contentFit="contain"
+          cachePolicy="disk"
+          recyclingKey={toolkit}
+          onError={() => setFailed(true)}
+          accessibilityIgnoresInvertColors
+        />
+      )}
     </Squircle>
   )
 }

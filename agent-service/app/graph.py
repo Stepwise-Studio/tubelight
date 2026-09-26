@@ -311,7 +311,7 @@ def make_gate(ctx: RunCtx):
             if tc["name"] in T.PROMPTS:
                 if tc["name"] == "connect_app":
                     if connected is None:
-                        connected = {c["toolkit"] for c in await connectors.list_connections(ctx.owner_id) if c["connected"]}
+                        connected = await connectors.ready(ctx.owner_id)
                     if str(tc["args"].get("toolkit", "")).upper() in connected:
                         continue  # nothing to wait for; the tools node says it is already connected
                 pending.append(await _prompt(ctx, tm, tc))
@@ -355,7 +355,7 @@ async def _prompt(ctx: RunCtx, tm: dict, tc: dict) -> dict:
     else:
         kind = "connect"
         toolkit = str(args.get("toolkit", "")).upper()
-        name = connectors.DEFAULT_TOOLKITS.get(toolkit, toolkit.title())
+        name = connectors.name_of(toolkit)
         title = f"Connect {name}"
         draft = {"toolkit": toolkit, "name": name, "reason": str(args.get("reason") or "")}
     row = await db.insert("approvals", {

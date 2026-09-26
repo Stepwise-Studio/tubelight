@@ -80,8 +80,10 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
     if (closed.current) return
     try {
       if (recorder.isRecording) await recorder.stop()
+      if (closed.current) return
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, shouldRouteThroughEarpiece: false })
       await recorder.prepareToRecordAsync()
+      if (closed.current) return
       recorder.record()
       const now = Date.now()
       turn.current = { ...turn.current, startedAt: now, spoke: false, lastLoud: 0, floor: 0, loudMs: 0, lastTick: now }
@@ -94,11 +96,12 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
   const listen = () => { stopPlayers(); return record('listening') }
 
   const endTurn = async () => {
-    if (phaseRef.current !== 'listening') return
+    if (phaseRef.current !== 'listening' || closed.current) return
     go('transcribing')
     beamLevel.set(0)
     try {
       await recorder.stop()
+      if (closed.current) return
       const uri = recorder.uri
       if (!uri) throw new Error('No recording')
       const audio = await (await fetch(uri)).arrayBuffer()
@@ -165,7 +168,8 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
       back.remove()
       closed.current = true
       stopPlayers()
-      if (recorder.isRecording) recorder.stop().catch(() => {})
+      // No recorder calls here: useAudioRecorder has already released it (and stopped it), and touching a
+      // released recorder throws natively, which closed the app.
       setAudioModeAsync({ allowsRecording: false }).catch(() => {})
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -213,7 +217,7 @@ export function VoiceMode({ teammate, title, messages, live, onSend, onClose }: 
     stopPlayers()
     go('muted')
     beamLevel.set(0)
-    if (recorder.isRecording) await recorder.stop().catch(() => {})
+    try { if (recorder.isRecording) await recorder.stop() } catch {}
   }
 
   const label = {
