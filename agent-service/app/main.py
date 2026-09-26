@@ -11,6 +11,7 @@ import httpx
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -52,6 +53,8 @@ def _dump_stacks() -> None:
 
 
 app = FastAPI(title="Tubelight agent service", lifespan=lifespan)
+# The home server's uplink is slow: compress anything sizeable (the app catalog shrinks ~5x).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
