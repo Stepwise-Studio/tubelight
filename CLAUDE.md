@@ -20,6 +20,12 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 - adb: `~/Android/Sdk/platform-tools/adb`. Screenshot: `adb exec-out screencap -p > f.png` (black = phone locked). Deep link: `adb shell am start -a android.intent.action.VIEW -d "tubelight://chat/<threadId>" studio.stepwise.tubelight`.
 - Checks before done: `cd app && npx tsc --noEmit && npx expo lint`; `cd agent-service && .venv/bin/pytest -q`.
 
+## Deploy (home server)
+- Backend runs on the user's home server `akhil@192.168.0.4` (Ubuntu 24.04, Core 2 Duo, 3 GB; SSH key auth; user in `docker` group, no sudo for us).
+  Container `tubelight-agent` (`--restart unless-stopped -p 127.0.0.1:8787:8787 --env-file ~/tubelight/.env --memory 900m`), `EMBEDDINGS=cloudflare` (no AVX, little RAM). Server also runs Postiz/Temporal: keep it lean.
+- Public URL `https://tubelight.stepwise.studio` via the existing remote-managed tunnel `snoofy-home` (systemd cloudflared on the server). App `.env` `EXPO_PUBLIC_AGENT_URL` points there.
+- Redeploy: `cd agent-service && docker build -t tubelight-agent . && docker save tubelight-agent | gzip -1 | ssh akhil@192.168.0.4 docker load` (slow Wi-Fi, ~10 min; run as a systemd user unit), then re-run the container.
+
 ## Rules
 - Secrets live only in `agent-service/.env`, `app/.env`, `.env.test` (all gitignored). Never print or commit them.
 - Commit after each coherent chunk, with the Co-Authored-By line.
