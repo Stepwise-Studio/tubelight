@@ -22,8 +22,8 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 
 ## Deploy (home server)
 - Backend runs on the user's home server `akhil@192.168.0.4` (Ubuntu 24.04, Core 2 Duo, 3 GB; SSH key auth; user in `docker` group, no sudo for us).
-  Container `tubelight-agent` (`--restart unless-stopped -p 127.0.0.1:8787:8787 --env-file ~/tubelight/.env --memory 900m`), `EMBEDDINGS=cloudflare` (no AVX, little RAM). Server also runs Postiz/Temporal: keep it lean.
-- Public URL `https://tubelight.stepwise.studio` via the existing remote-managed tunnel `snoofy-home` (systemd cloudflared on the server). App `.env` `EXPO_PUBLIC_AGENT_URL` points there.
+  Container `tubelight-agent` (`--restart unless-stopped -p 127.0.0.1:8787:8787 --env-file ~/tubelight/.env --memory 1700m`), `EMBEDDINGS=cloudflare` (no AVX, little RAM). Postiz stack (compose project `snoofy`) is stopped with restart=no at the user's request; `files-webdav` must stay up.
+- Public URL `https://tubelight.stepwise.studio` via the existing remote-managed tunnel `snoofy-home` (systemd cloudflared on the server). App `.env` `EXPO_PUBLIC_AGENT_URL` points there. Gradle doesn't see `.env` changes: after editing it, `rm -rf android/app/build/generated/{assets,res}/react` before `assembleRelease`, then verify with `unzip -p <apk> assets/index.android.bundle | strings | grep stepwise`.
 - Redeploy: `cd agent-service && docker build -t tubelight-agent . && docker save tubelight-agent | gzip -1 | ssh akhil@192.168.0.4 docker load` (slow Wi-Fi, ~10 min; run as a systemd user unit), then re-run the container.
 
 ## Rules
