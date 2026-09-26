@@ -36,7 +36,20 @@ def _embed_sync(texts: list[str]) -> list[list[float]]:
     return [v.tolist() for v in _embedder().embed(texts)]
 
 
+async def _embed_cloudflare(texts: list[str]) -> list[list[float]]:
+    """The same bge-small-en-v1.5 on Workers AI: no local model in RAM (small servers, CPUs without AVX)."""
+    import httpx
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{config.env('CF_ACCOUNT_ID')}/ai/run/@cf/baai/bge-small-en-v1.5"
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(url, headers={"Authorization": f"Bearer {config.env('CF_API_TOKEN')}"}, json={"text": texts})
+    r.raise_for_status()
+    return r.json()["result"]["data"]
+
+
 async def embed(texts: list[str]) -> list[list[float]]:
+    if config.env("EMBEDDINGS") == "cloudflare":
+        return await _embed_cloudflare(texts)
     return await asyncio.to_thread(_embed_sync, texts)
 
 
