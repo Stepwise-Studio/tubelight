@@ -1,10 +1,10 @@
 import { router } from 'expo-router'
-import { useRef, useState } from 'react'
-import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated'
+import { useEffect, useRef, useState } from 'react'
+import { BackHandler, FlatList, Pressable, RefreshControl, TextInput, View, useWindowDimensions } from 'react-native'
+import Animated, { FadeIn, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, BubbleChatIcon, CheckListIcon, Settings01Icon, UserAdd01Icon, UserGroupIcon,
+  Add01Icon, BubbleChatIcon, Cancel01Icon, CheckListIcon, Search01Icon, Settings01Icon, UserAdd01Icon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
 import { CrewList } from '@/components/crew'
@@ -14,10 +14,71 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import { isUnread, relativeTime, stripCues } from '@/lib/format'
 import type { Thread } from '@/lib/types'
 import { useWorkspace, type Preview } from '@/lib/workspace'
-import { motion, useTheme } from '@/theme'
+import { motion, type as typeScale, useTheme } from '@/theme'
 import {
-  Button, EmptyState, Icon, ListRow, Logo, Press, SearchField, Segment, Sheet, Skeleton, TeammateAvatar, Text, showMenu,
+  Button, EmptyState, Icon, IconButton, ListRow, Logo, Press, Segment, Sheet, Skeleton, TeammateAvatar, Text, haptic, showMenu,
 } from '@/ui'
+
+/**
+ * Logo left, a search button right that morphs into the full search bar: the capsule grows leftward over
+ * the logo (250 ms open / 150 ms close, smooth-out), the field fades in and takes focus. Back or ✕ closes
+ * and clears it.
+ */
+function HeaderSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const { c, scheme } = useTheme()
+  const [open, setOpen] = useState(false)
+  const [width, setWidth] = useState(0)
+  const p = useSharedValue(0)
+  const input = useRef<TextInput>(null)
+
+  useEffect(() => {
+    p.value = withTiming(open ? 1 : 0, { duration: open ? motion.duration.fast : motion.duration.quick, easing: motion.ease.smoothOut })
+    if (!open) return
+    const focus = setTimeout(() => input.current?.focus(), motion.duration.fast / 2)
+    const back = BackHandler.addEventListener('hardwareBackPress', () => { setOpen(false); onChange(''); return true })
+    return () => { clearTimeout(focus); back.remove() }
+  }, [open, p, onChange])
+
+  const capsule = useAnimatedStyle(() => ({ width: width ? 40 + (width - 40) * p.value : 40 }))
+  const field = useAnimatedStyle(() => ({ opacity: p.value }))
+  const logo = useAnimatedStyle(() => ({ opacity: 1 - p.value, transform: [{ translateX: -12 * p.value }] }))
+
+  const close = () => { haptic.tap(); setOpen(false); onChange(''); input.current?.blur() }
+
+  return (
+    <View style={{ height: 44, justifyContent: 'center' }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      <Animated.View style={logo} pointerEvents={open ? 'none' : 'auto'}><Logo scale={1.2} /></Animated.View>
+      <Animated.View style={[{ position: 'absolute', right: 0, height: 40, borderRadius: 20, overflow: 'hidden', backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center' }, capsule]}>
+        <Pressable
+          onPress={() => { if (!open) { haptic.tap(); setOpen(true) } }}
+          disabled={open}
+          accessibilityRole="button"
+          accessibilityLabel="Search"
+          accessibilityState={{ expanded: open }}
+          style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Icon icon={Search01Icon} size={18} color={open ? 'ink3' : 'ink2'} />
+        </Pressable>
+        <Animated.View style={[{ flex: 1, flexDirection: 'row', alignItems: 'center' }, field]} pointerEvents={open ? 'auto' : 'none'}>
+          <TextInput
+            ref={input}
+            value={value}
+            onChangeText={onChange}
+            placeholder={placeholder}
+            placeholderTextColor={c.ink4}
+            selectionColor={c.tube}
+            cursorColor={c.tube}
+            keyboardAppearance={scheme}
+            returnKeyType="search"
+            accessibilityLabel={placeholder}
+            style={[typeScale.body, { flex: 1, color: c.ink, paddingVertical: 0 }]}
+          />
+          <IconButton icon={Cancel01Icon} round size={32} iconSize={16} color={c.ink3} accessibilityLabel="Close search" onPress={close} style={{ marginRight: 4 }} />
+        </Animated.View>
+      </Animated.View>
+    </View>
+  )
+}
 
 const openThread = (threadId: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId } })
 
@@ -40,10 +101,7 @@ export default function Chats() {
   return (
     <View style={{ flex: 1 }}>
       <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 12, paddingBottom: 8 }}>
-        <View style={{ height: 44, justifyContent: 'center' }}>
-          <Logo scale={1.2} />
-        </View>
-        <SearchField value={query} onChangeText={setQuery} placeholder={page === 'inbox' ? 'Search chats' : 'Search your crew'} />
+        <HeaderSearch value={query} onChange={setQuery} placeholder={page === 'inbox' ? 'Search chats' : 'Search your crew'} />
         <Segment
           value={page}
           onChange={go}

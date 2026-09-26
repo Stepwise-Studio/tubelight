@@ -106,6 +106,7 @@ export default function Thread() {
     onRetryRun: () => latest.current.retryRun(),
     onDecided: () => { latest.current.t.refreshApprovals(); latest.current.ws.refresh() },
     handles: new Set(handleKey.split(',')),
+    group: !isDm,
   }
   const byId = new Map(t.messages.map((m) => [m.id, m]))
 

@@ -50,6 +50,8 @@ export interface ChatActions {
   onRetryRun: () => void
   onDecided: () => void
   handles: Set<string>
+  /** Group chat (a project): name each teammate's replies. A DM needs no sender line. */
+  group: boolean
 }
 export const ChatActionsContext = createContext<ChatActions | null>(null)
 const useActions = () => useContext(ChatActionsContext)!
@@ -99,9 +101,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   if (item.type === 'status') {
     return (
       <TeammateBlock teammate={t} first={first} paused={false} working>
-        <Bubble side="left" first={first} last={last} style={{ paddingVertical: 10 }}>
-          <ThinkingIndicator state={item.s.state} label={item.s.label} />
-        </Bubble>
+        <ThinkingIndicator state={item.s.state} label={item.s.label} />
       </TeammateBlock>
     )
   }
@@ -184,9 +184,10 @@ function TeammateBlock({ teammate, first, paused, working, children }: {
   teammate?: Teammate; first: boolean; paused: boolean; working?: boolean; children: React.ReactNode
 }) {
   const live = !!working
+  const { group } = useActions()
   return (
     <View style={{ marginTop: first ? 14 : 2 }}>
-      {first && (
+      {first && group && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
           {teammate ? <TeammateAvatar teammate={teammate} size={AVATAR} state={live ? 'working' : 'default'} paused={paused && !live} /> : <View style={{ width: AVATAR }} />}
           <Text variant="label" numberOfLines={1} style={{ flexShrink: 1 }}>
@@ -195,7 +196,7 @@ function TeammateBlock({ teammate, first, paused, working, children }: {
           </Text>
         </View>
       )}
-      <View style={{ paddingLeft: GUTTER, paddingRight: 8, alignItems: 'flex-start' }}>{children}</View>
+      <View style={{ paddingLeft: group ? GUTTER : 0, paddingRight: group ? 8 : 48, alignItems: 'flex-start' }}>{children}</View>
     </View>
   )
 }
@@ -443,8 +444,9 @@ function SystemRow({ icon, text }: { icon: typeof FlashIcon; text: string }) {
 
 function ErrorRow({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
   const { c } = useTheme()
+  const { group } = useActions()
   return (
-    <Squircle style={{ marginTop: 10, marginLeft: GUTTER, borderRadius: radius.md, backgroundColor: c.dangerSoft, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+    <Squircle style={{ marginTop: 10, marginLeft: group ? GUTTER : 0, borderRadius: radius.md, backgroundColor: c.dangerSoft, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Icon icon={Alert02Icon} size={16} color="danger" />
       <Text variant="caption" color="ink2" style={{ flex: 1, paddingVertical: 6 }}>{m.text || 'The run stopped with an error.'}</Text>
       <Button label="Retry" size="sm" variant="ghost" icon={Refresh01Icon} onPress={onRetry} />

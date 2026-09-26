@@ -12,7 +12,7 @@ import { pickDocuments, pickPhotos, takePhoto, upload, type Draft } from '@/lib/
 import type { Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, SendOptions } from '@/lib/use-thread'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
-import { Beam, Icon, IconButton, ListRow, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast } from '@/ui'
+import { Icon, IconButton, ListRow, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast } from '@/ui'
 
 import { useSenderName } from './message-row'
 
@@ -186,10 +186,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           </Squircle>
         </Animated.View>
       )}
-      {/* Always wrapped, so a run starting never remounts the input (keeps focus). */}
-      <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>
-        <Beam radius={PILL} active={live}>{field}</Beam>
-      </Animated.View>
+      <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>{field}</Animated.View>
     </Animated.View>
   )
 }
