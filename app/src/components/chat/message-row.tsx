@@ -9,6 +9,7 @@ import {
 
 import { ApprovalCard } from '@/components/approval-card'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
+import { appToken, mentionParts } from '@/lib/mentions'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
@@ -317,7 +318,7 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
           <Bubble side="right" first={first} last={last} tone="mine" highlighted={highlighted} style={{ opacity: m.local === 'sending' ? 0.6 : 1 }}>
             {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
             <Attachments items={m.meta.attachments} />
-            {!!m.text && <Text selectable>{renderMentions(m.text, handles)}</Text>}
+            {!!m.text && <Text selectable>{renderMentions(m.text, m.meta.apps?.length ? new Set([...handles, ...m.meta.apps.map(appToken)]) : handles)}</Text>}
           </Bubble>
         </Pressable>
         {m.local === 'failed' && (
@@ -474,11 +475,9 @@ function ToolCalls({ calls }: { calls: { name: string; status: string }[] }) {
   )
 }
 
-function renderMentions(text: string, handles: Set<string>) {
-  return text.split(/(@[a-z0-9][a-z0-9_-]*)/gi).map((part, i) =>
-    part.startsWith('@') && handles.has(part.slice(1).toLowerCase())
-      ? <Text key={i} variant="bodyMedium" color="tube">{part}</Text>
-      : part)
+function renderMentions(text: string, known: Set<string>) {
+  return mentionParts(text, known).map((part, i) =>
+    part.mention ? <Text key={i} variant="bodyMedium" color="tube">{part.text}</Text> : part.text)
 }
 
 /** Older runs handed work over with a separate note; show it the way teammates talk now: an @mention in a message. */

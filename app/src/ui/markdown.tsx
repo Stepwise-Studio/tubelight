@@ -6,6 +6,7 @@ import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked'
 import { Highlight, themes } from 'prism-react-renderer'
 import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
+import { mentionParts } from '@/lib/mentions'
 import { type Palette, fonts, radius, type as typeScale, useTheme } from '@/theme'
 
 import { haptic } from './haptics'
@@ -33,7 +34,8 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           <Text variant="footnote" color="ink3">{copied ? 'Copied' : 'Copy'}</Text>
         </Press>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12 }}>
+      {/* Long lines wrap rather than scroll sideways: tidier on a phone, and the whole block is readable at a glance. */}
+      <View style={{ padding: 12 }}>
         <Highlight code={code.replace(/\n$/, '')} language={(language || 'text').toLowerCase()} theme={scheme === 'dark' ? themes.oneDark : themes.oneLight}>
           {({ tokens, getTokenProps }) => (
             <RNText selectable style={[typeScale.mono, { color: c.ink }]}>
@@ -49,7 +51,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
             </RNText>
           )}
         </Highlight>
-      </ScrollView>
+      </View>
     </Squircle>
   )
 }
@@ -106,10 +108,9 @@ class TubeRenderer extends Renderer {
   text(text: string | ReactNode[], styles?: TextStyle): ReactNode {
     if (typeof text !== 'string' || !this.mentions?.size || !text.includes('@')) return super.text(text, styles)
     // @handles of people in the chat, tinted like in your own messages.
-    return super.text(text.split(/(@[a-z0-9][a-z0-9_-]*)/gi).map((part, i) =>
-      part.startsWith('@') && this.mentions!.has(part.slice(1).toLowerCase())
-        ? <RNText key={i} style={{ color: this.c.tube, fontFamily: fonts.medium }}>{part}</RNText>
-        : part), styles)
+    return super.text(mentionParts(text, this.mentions).map((part, i) => part.mention
+      ? <RNText key={i} style={{ color: this.c.tube, fontFamily: fonts.medium }}>{part.text}</RNText>
+      : part.text), styles)
   }
   code(text: string, language?: string): ReactNode {
     return <CodeBlock key={this.getKey()} code={text} language={language} />

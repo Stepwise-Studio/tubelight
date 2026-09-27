@@ -10,7 +10,7 @@ const PAGE = 50
 export type ChatMessage = Message & { local?: 'sending' | 'failed' }
 export interface Ghost { stream_id: string; run_id: string; teammate_id: string; text: string; done: boolean }
 export interface LiveStatus { run_id: string; teammate_id: string; state: LiveState; label?: string }
-export interface SendOptions { reply_to?: string | null; attachments?: Attachment[]; voiceTask?: boolean }
+export interface SendOptions { reply_to?: string | null; attachments?: Attachment[]; voiceTask?: boolean; apps?: string[] }
 
 let localSeq = 0
 
@@ -130,7 +130,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     try {
       const res = await api<{ message: Message; run_id: string }>(`/threads/${encodeURIComponent(threadId)}/messages`, {
         method: 'POST',
-        json: { text: local.text, mentions, reply_to: local.reply_to ?? null, attachments: local.meta.attachments ?? [], voice_task: !!local.meta.voice_task },
+        json: { text: local.text, mentions, reply_to: local.reply_to ?? null, attachments: local.meta.attachments ?? [], apps: local.meta.apps ?? [], voice_task: !!local.meta.voice_task },
       })
       setMessages((prev) => {
         const withoutLocal = prev.filter((p) => p.id !== local.id)
@@ -148,7 +148,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     const local: ChatMessage = {
       id: `local-${++localSeq}`, thread_id: threadId, owner_id: ownerId ?? '', sender_type: 'user', teammate_id: null,
       text, mentions, kind: 'text',
-      meta: { ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.voiceTask ? { voice_task: true } : {}) },
+      meta: { ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.voiceTask ? { voice_task: true } : {}), ...(opts.apps?.length ? { apps: opts.apps } : {}) },
       reply_to: opts.reply_to ?? null, proactive: false, run_id: null, created_at: new Date().toISOString(), local: 'sending',
     }
     setMessages((prev) => [local, ...prev])

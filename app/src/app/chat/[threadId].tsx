@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { BlurTargetView } from 'expo-blur'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
@@ -102,6 +103,9 @@ export default function Thread() {
   const [highlight, setHighlight] = useState<string | null>(null)
   const [voice, setVoice] = useState(false)
   const list = useRef<FlatList<ChatItem>>(null)
+  // The composer floats over the chat (which scrolls under its blur): the list keeps its height clear.
+  const blurTarget = useRef<View>(null)
+  const [composerH, setComposerH] = useState(64)
 
   const send = async (text: string, mentions: string[], opts: SendOptions = {}) => {
     const err = await t.send(text, mentions, { ...opts, reply_to: replyTo?.id ?? null })
@@ -199,7 +203,7 @@ export default function Thread() {
   }
 
   const empty = (
-    <View style={{ flex: 1, justifyContent: 'center', paddingBottom: 24 }}>
+    <View style={{ flex: 1, justifyContent: 'center', paddingBottom: 24 + composerH }}>
       <EmptyState
         art={dmMate ? <TeammateAvatar teammate={dmMate} size={72} /> : <ThreadAvatar threadId={threadId} size={72} interactive />}
         title={isDm ? `Message ${dmMate?.name ?? 'your teammate'}` : `Talk to the ${title} team`}
@@ -218,14 +222,17 @@ export default function Thread() {
       {header}
       <ChatActionsContext.Provider value={ctx}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        {/* In flow, so it shrinks above the keyboard; the composer is pinned to its bottom (absolute children skip the padding). */}
+        <View style={{ flex: 1 }}>
+        <BlurTargetView ref={blurTarget} style={{ flex: 1, backgroundColor: c.canvas }}>
         {t.loading ? (
-          <View style={{ flex: 1, justifyContent: 'flex-end', padding: 16, gap: 18 }} accessible accessibilityLabel="Loading messages">
+          <View style={{ flex: 1, justifyContent: 'flex-end', padding: 16, paddingBottom: 16 + composerH, gap: 18 }} accessible accessibilityLabel="Loading messages">
             <View style={{ flexDirection: 'row', gap: 10 }}><Skeleton width={28} height={28} radius={14} /><View style={{ flex: 1, gap: 8 }}><Skeleton width="30%" /><Skeleton width="85%" /><Skeleton width="60%" /></View></View>
             <View style={{ alignItems: 'flex-end' }}><Skeleton width="55%" height={36} radius={18} /></View>
             <View style={{ flexDirection: 'row', gap: 10 }}><Skeleton width={28} height={28} radius={14} /><View style={{ flex: 1, gap: 8 }}><Skeleton width="25%" /><Skeleton width="70%" /></View></View>
           </View>
         ) : t.error ? (
-          <View style={{ flex: 1, justifyContent: 'center' }}>
+          <View style={{ flex: 1, justifyContent: 'center', paddingBottom: composerH }}>
             <EmptyState title="Unable to load this chat" body={t.error} action={<Button label="Try again" variant="soft" onPress={t.reload} />} />
           </View>
         ) : items.length === 0 ? (
@@ -242,7 +249,7 @@ export default function Thread() {
             initialNumToRender={14}
             maxToRenderPerBatch={8}
             windowSize={11}
-            contentContainerStyle={{ paddingTop: 12, paddingBottom: 8, flexGrow: 1 }}
+            contentContainerStyle={{ paddingTop: 12 + composerH, paddingBottom: 8, flexGrow: 1 }}
             onEndReached={t.loadOlder}
             onEndReachedThreshold={0.4}
             ListFooterComponent={t.loadingOlder ? <ActivityIndicator style={{ padding: 16 }} color={c.ink3} /> : null}
@@ -251,7 +258,10 @@ export default function Thread() {
             keyboardShouldPersistTaps="handled"
           />
         )}
+        </BlurTargetView>
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         <Composer
+          blurTarget={blurTarget}
           placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team, @ to mention' : 'Message the project'}
           members={isDm ? [] : people}
           live={live}
@@ -261,6 +271,8 @@ export default function Thread() {
           onCancelReply={() => setReplyTo(null)}
           onVoice={() => setVoice(true)}
         />
+        </View>
+        </View>
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
       {voice && (

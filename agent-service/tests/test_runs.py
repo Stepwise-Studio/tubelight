@@ -118,6 +118,7 @@ async def test_mentions_pass_the_turn_with_a_cap(api, env):
     # tess sees dev's words as a named message, never dev's tool traffic
     tess_view = next(c for c in fake.calls if "(@tess)" in c[0].content)
     assert any(isinstance(m, HumanMessage) and m.content.startswith("[Dev · developer]: Over to you, @tess") for m in tess_view)
+    assert "Dev @mentioned you" in tess_view[0].content
     assert not any(isinstance(m, ToolMessage) for m in tess_view)
 
 
@@ -130,6 +131,10 @@ async def test_at_all_asks_everyone(api, env):
     await settle()
     said = fdb.rows("messages", kind="text", sender_type="teammate")
     assert [m["teammate_id"] for m in said] == [dev["id"], tess["id"]]
+    # each knows the turn order, so nobody replies to someone who hasn't spoken yet
+    dev_sys, tess_sys = fake.calls[0][0].content, fake.calls[1][0].content
+    assert "Replying after you: Tess" in dev_sys and "Already replied" not in dev_sys
+    assert "Already replied to the latest message: Dev" in tess_sys and "Replying after you" not in tess_sys
 
 
 def _gmail_tool(sent: list):
@@ -244,3 +249,36 @@ async def test_reply_to_quotes_the_message(api, env):
     await settle()
     human = [m for m in fake.calls[-1] if isinstance(m, HumanMessage)][-1]
     assert human.content.startswith('[Replying to Dev\'s message: "First."]') and human.content.endswith("why?")
+
+
+async def test_mentioned_app_is_lent_for_the_request_through_approval(api, env, monkeypatch):
+    fdb, fake = env
+    sent: list = []
+    asked: list = []
+
+    async def tools_for(user_id, toolkits):
+        asked.append(list(toolkits))
+        return [_gmail_tool(sent)] if "GMAIL" in toolkits else []
+
+    async def resolve(name):
+        return {"gmail": "GMAIL", "notion": "NOTION"}.get(name.lower())
+
+    async def ready(user_id):
+        return {"GMAIL"}  # Notion isn't connected: dropped
+
+    monkeypatch.setattr(connectors, "tools_for", tools_for)
+    monkeypatch.setattr(connectors, "resolve", resolve)
+    monkeypatch.setattr(connectors, "ready", ready)
+    ivy = teammate(fdb, "ivy", "email")  # Gmail isn't one of Ivy's apps
+    fake.script = [ai(calls=[("GMAIL_SEND_EMAIL", {"recipient_email": "jane@acme.com", "subject": "Hi", "body": "Hello"})]),
+                   ai("Sent it.")]
+    r = await api.post(f"/threads/dm:{ivy['id']}/messages", json={"text": "@gmail email jane", "apps": ["gmail", "notion"]})
+    await settle()
+    assert fdb.rows("messages", sender_type="user")[0]["meta"]["apps"] == ["GMAIL"]
+    assert asked[0] == ["GMAIL"] and "@mentioned Gmail in this request" in fake.calls[0][0].content
+    [appr] = fdb.rows("approvals")
+    # resumed in a fresh run context: the lent app comes back from the saved message, so the call can run
+    await api.post(f"/approvals/{appr['id']}", json={"action": "approve"})
+    await settle()
+    assert sent and fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "done"
+    assert fdb.rows("teammates", id=ivy["id"])[0].get("allowed_toolkits") in (None, [])  # lent, not granted

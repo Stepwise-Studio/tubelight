@@ -122,6 +122,7 @@ class MessageIn(BaseModel):
     mentions: list[str] = []
     reply_to: str | None = None
     attachments: list[dict[str, Any]] = []
+    apps: list[str] = []  # toolkits the user @mentioned: the answering teammate gets them for this request
     voice_task: bool = False  # sent by live voice mode (run_task): hidden in the chat, where the spoken words show instead
 
 
@@ -140,19 +141,31 @@ async def _quoted(thread_id: str, reply_to: str | None) -> str:
     return f'[Replying to {who}: "{snippet}"]\n'
 
 
+async def _mentioned_apps(owner_id: str, asked: list[str]) -> list[str]:
+    """Catalog slugs of the @mentioned apps the user has connected (or that need no sign-in); others are dropped."""
+    if not asked:
+        return []
+    slugs = [s for s in [await connectors.resolve(a) for a in asked[:10]] if s]
+    ready = await connectors.ready(owner_id) if slugs else set()
+    return [s for s in dict.fromkeys(slugs) if s in ready]
+
+
 @app.post("/threads/{thread_id}/messages")
 async def post_message(thread_id: str, body: MessageIn, user: User = Depends(current_user)):
     if not body.text.strip() and not body.attachments:
         raise HTTPException(400, "Write a message first.")
     thread = await owned("threads", thread_id, user, "conversation")
     meta = {"attachments": body.attachments} if body.attachments else {}
+    apps = await _mentioned_apps(user["id"], body.apps)
+    if apps:
+        meta["apps"] = apps
     if body.voice_task:
         meta["voice_task"] = True
     message = await db.insert("messages", {"thread_id": thread_id, "owner_id": user["id"], "sender_type": "user",
                                            "text": body.text, "mentions": body.mentions, "reply_to": body.reply_to,
                                            "meta": meta})
     prompt = await _quoted(thread_id, body.reply_to) + body.text + await files.describe(user["id"], body.attachments)
-    run_id = await runs.start(user["id"], thread_id, prompt, mentions=body.mentions,
+    run_id = await runs.start(user["id"], thread_id, prompt, mentions=body.mentions, apps=apps,
                               teammate_id=thread.get("teammate_id"), message_id=message["id"])
     await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
     return {"message": {**message, "run_id": run_id}, "run_id": run_id}
@@ -171,6 +184,7 @@ async def retry_message(message_id: str, user: User = Depends(current_user)):
     attachments = (m.get("meta") or {}).get("attachments") or []
     prompt = await _quoted(m["thread_id"], m.get("reply_to")) + m["text"] + await files.describe(user["id"], attachments)
     run_id = await runs.start(user["id"], m["thread_id"], prompt, mentions=m.get("mentions") or [],
+                              apps=(m.get("meta") or {}).get("apps") or [],
                               teammate_id=thread.get("teammate_id"), message_id=message_id)
     await db.update("messages", {"id": f"eq.{message_id}"}, {"run_id": run_id})
     return {"run_id": run_id}

@@ -1,6 +1,7 @@
+import { BlurView } from 'expo-blur'
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native'
+import { ActivityIndicator, Platform, Text as RNText, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -9,7 +10,9 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { pickDocuments, pickPhotos, takePhoto, upload, type Draft } from '@/lib/attachments'
+import { useConnections } from '@/lib/catalog'
 import { plainText } from '@/lib/format'
+import { appToken, mentionParts, mentionsIn } from '@/lib/mentions'
 import type { Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, SendOptions } from '@/lib/use-thread'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
@@ -26,6 +29,8 @@ const PILL = 23
 
 export interface ComposerProps {
   placeholder: string
+  /** The chat behind the composer (a BlurTargetView), blurred where it scrolls under. */
+  blurTarget?: React.RefObject<View | null>
   /** Project members for @mentions. Empty in DMs (no picker). */
   members: Teammate[]
   live: boolean
@@ -43,7 +48,7 @@ type Item = Draft & { att?: Attachment }
  * Auto-growing input in a squircle: reply strip and attachment tray on top, + for files, then the
  * input and one trailing action (mic when empty, send when there's something, stop while a run is live).
  */
-export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice }: ComposerProps) {
+export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, blurTarget }: ComposerProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const kb = useReanimatedKeyboardAnimation()
@@ -56,10 +61,18 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
 
   useEffect(() => { if (replyTo) input.current?.focus() }, [replyTo])
 
+  // Connected apps can be @mentioned too (DMs included): the teammate who answers gets that app for the request.
+  const { connections } = useConnections()
+  const apps = (connections ?? []).filter((a) => a.connected).map((a) => ({ ...a, token: appToken(a.toolkit) }))
+  const known = new Set([...members.map((m) => m.handle.toLowerCase()), ...(members.length > 1 ? ['all', 'everyone'] : []), ...apps.map((a) => a.token)])
+
   const before = text.slice(0, sel)
-  const query = members.length ? before.match(MENTION)?.[2]?.toLowerCase() : undefined
+  const query = members.length || apps.length ? before.match(MENTION)?.[2]?.toLowerCase() : undefined
   const matches = query === undefined ? [] : members.filter((m) => m.handle.startsWith(query) || m.name.toLowerCase().startsWith(query))
+  const appMatches = query === undefined ? [] : apps.filter((a) => a.token.startsWith(query) || a.name.toLowerCase().startsWith(query))
   const offerAll = query !== undefined && members.length > 1 && ('all'.startsWith(query) || 'everyone'.startsWith(query))
+  const people = matches
+  const appRows = appMatches
 
   const pad = useAnimatedStyle(() => ({ paddingBottom: interpolate(kb.progress.value, [0, 1], [Math.max(insets.bottom, 10), 10]) }))
 
@@ -105,9 +118,10 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
     if (!canSend) return
     const body = text.trim()
     haptic.light()
-    const all = /(^|\s)@(all|everyone)\b/i.test(body)
-    const mentions = members.filter((m) => all || new RegExp(`(^|\\s)@${m.handle}\\b`, 'i').test(body)).map((m) => m.id)
-    onSend(body, mentions, { attachments: ready })
+    const said = mentionsIn(body, known)
+    const all = said.has('all') || said.has('everyone')
+    const mentions = members.filter((m) => all || said.has(m.handle.toLowerCase())).map((m) => m.id)
+    onSend(body, mentions, { attachments: ready, apps: apps.filter((a) => said.has(a.token)).map((a) => a.toolkit) })
     setText('')
     setSel(0)
     setFiles([])
@@ -143,7 +157,6 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
         <IconButton icon={Add01Icon} round accessibilityLabel="Attach photos or files" size={36} iconSize={20} color={c.ink2} disabled={files.length >= MAX_FILES} onPress={attachMenu} />
         <TextInput
           ref={input}
-          value={text}
           onChangeText={setText}
           onSelectionChange={(e) => setSel(e.nativeEvent.selection.end)}
           placeholder={placeholder}
@@ -155,7 +168,12 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           accessibilityLabel={placeholder}
           style={[typeScale.body, { flex: 1, color: c.ink, minHeight: 36, maxHeight: 140, paddingTop: 8, paddingBottom: 8, paddingHorizontal: 6, textAlignVertical: 'center' }]}
           maxFontSizeMultiplier={1.3}
-        />
+        >
+          {/* Finished @mentions tint as you type (the text itself stays plain: this only styles it). */}
+          {mentionParts(text, known, false).map((part, i) => part.mention
+            ? <RNText key={i} style={{ color: c.tube }}>{part.text}</RNText>
+            : part.text)}
+        </TextInput>
         <IconButton
           icon={action.icon}
           round
@@ -185,38 +203,68 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   )
 
   return (
-    <Animated.View style={[{ paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.canvas }, pad]}>
-      {(matches.length > 0 || offerAll) && (
+    <Animated.View style={[{ paddingHorizontal: 10, paddingTop: 14 }, pad]}>
+      {/* No solid band: the chat shows through a light blur that deepens into the canvas colour at the bottom. */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        {/* Chrome tints are near the canvas colour (no grey band); the blur starts under the fade so its edge doesn't show. */}
+        <BlurView
+          blurTarget={blurTarget}
+          blurMethod="dimezisBlurViewSdk31Plus"
+          intensity={Platform.OS === 'ios' ? 24 : 36}
+          tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+          style={[StyleSheet.absoluteFill, { top: '30%' }]}
+        />
+        <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}8C 45%, ${c.canvas}E6 100%)` }]} />
+      </View>
+      {(people.length > 0 || appRows.length > 0 || offerAll) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}
           exiting={FadeOut.duration(motion.duration.quick)}
           style={[{ position: 'absolute', left: 10, right: 10, bottom: '100%', borderRadius: radius.lg }, elevation(scheme, 2)]}
         >
           <Squircle style={{ borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 4 }} accessibilityRole="menu">
-            <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 }}>Mention a teammate</Text>
-            {offerAll && (
-              <ListRow
-                title="Everyone"
-                subtitle={`@all · all ${members.length} teammates reply`}
-                leading={
-                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon icon={UserGroupIcon} size={16} color={c.ink2} />
-                  </View>
-                }
-                onPress={() => insert('all')}
-                style={{ minHeight: 48 }}
-              />
-            )}
-            {matches.slice(0, offerAll ? 4 : 5).map((m) => (
-              <ListRow
-                key={m.id}
-                title={m.name}
-                subtitle={`@${m.handle} · ${m.role}`}
-                leading={<TeammateAvatar teammate={m} size={28} interactive={false} />}
-                onPress={() => insert(m.handle)}
-                style={{ minHeight: 48 }}
-              />
-            ))}
+            {/* Scrolls when there are many (all your apps); short enough to fit above the keyboard. */}
+            <ScrollView style={{ maxHeight: 252 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {(offerAll || people.length > 0) && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 }}>Teammates</Text>}
+              {offerAll && (
+                <ListRow
+                  title="Everyone"
+                  subtitle={`@all · all ${members.length} teammates reply`}
+                  leading={
+                    <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon icon={UserGroupIcon} size={16} color={c.ink2} />
+                    </View>
+                  }
+                  onPress={() => insert('all')}
+                  style={{ minHeight: 48 }}
+                />
+              )}
+              {people.map((m) => (
+                <ListRow
+                  key={m.id}
+                  title={m.name}
+                  subtitle={`@${m.handle} · ${m.role}`}
+                  leading={<TeammateAvatar teammate={m} size={28} interactive={false} />}
+                  onPress={() => insert(m.handle)}
+                  style={{ minHeight: 48 }}
+                />
+              ))}
+              {appRows.length > 0 && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 }}>Apps</Text>}
+              {appRows.map((a) => (
+                <ListRow
+                  key={a.toolkit}
+                  title={a.name}
+                  subtitle={`@${a.token} · connected app`}
+                  leading={
+                    <Squircle style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {a.logo ? <Image source={{ uri: a.logo }} style={{ width: 20, height: 20 }} contentFit="contain" /> : null}
+                    </Squircle>
+                  }
+                  onPress={() => insert(a.token)}
+                  style={{ minHeight: 48 }}
+                />
+              ))}
+            </ScrollView>
           </Squircle>
         </Animated.View>
       )}

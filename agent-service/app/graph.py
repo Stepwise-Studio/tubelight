@@ -58,6 +58,7 @@ class RunCtx:
     event_type: str | None = None
     docker: bool = False
     turn_tools: dict[str, list] = field(default_factory=dict)
+    apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
     sandboxes: dict[str, Sandbox] = field(default_factory=dict)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
@@ -77,9 +78,20 @@ class RunCtx:
             self.sandboxes[tm["id"]] = Sandbox(self.run_id, tm["id"], (self.project or {}).get("repo_url"))
         return self.sandboxes[tm["id"]]
 
+    def scope(self, msgs: list[BaseMessage]) -> None:
+        """Apps the user @mentioned in the request being answered; whoever answers it gets them, on top of their own."""
+        ask = next((m for m in reversed(msgs) if isinstance(m, HumanMessage) and not m.name), None)
+        apps = list((ask.additional_kwargs.get("apps") if ask else None) or [])
+        if apps != self.apps:
+            self.apps = apps
+            self._tools.clear()
+
+    def toolkits(self, tm: dict) -> list[str]:
+        return list(dict.fromkeys([*(tm.get("allowed_toolkits") or []), *self.apps]))
+
     async def tools_for(self, tm: dict) -> list[BaseTool]:
         if tm["id"] not in self._tools:
-            composio = await connectors.tools_for(self.owner_id, tm.get("allowed_toolkits") or [])
+            composio = await connectors.tools_for(self.owner_id, self.toolkits(tm))
             self._tools[tm["id"]] = T.build(self, tm, composio)
         return self._tools[tm["id"]]
 
@@ -189,13 +201,14 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append("Group members:\n" + "\n".join(
             f"- {m['name']} (@{m['handle']}, {m['role']}){' - that is you' if m['id'] == tm['id'] else ''}" for m in ctx.members))
         lines.append("Other members' messages appear as '[Name · role]: text'. Never prefix your own replies that way. "
-                     "This is a group chat: to bring in another member, @mention their handle in your reply (e.g. @dev) with "
-                     "what you need from them, and they answer next. Only mention someone when you want them to reply.")
+                     "This is a group chat. To ask another member something, @mention their handle (e.g. @dev) and they reply "
+                     "after you. Only @mention someone when you need an answer from them or you're answering what they "
+                     "actually said above; never address someone as if they had spoken when they haven't.")
     else:
         lines.append(f"This is a direct message between you and {ctx.user_name}.")
     lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results.")
     if T.MULTI in tool_names:
-        lines.append(f"Connected apps ({', '.join(tm.get('allowed_toolkits') or [])}): find the right app tool with "
+        lines.append(f"Connected apps ({', '.join(ctx.toolkits(tm))}): find the right app tool with "
                      "COMPOSIO_SEARCH_TOOLS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL using the exact slug and "
                      "arguments. Never invent slugs.")
     lines.append("If a request needs an app that is not connected (any of about 1,500: Google Calendar, Slack, Notion, "
@@ -211,7 +224,10 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         "approval card and may edit or reject it. Do not ask for permission in chat first. If an action is rejected, "
         "acknowledge it briefly and adjust.")
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
-    guides = [PLAYBOOKS[t] for t in tm.get("allowed_toolkits") or [] if t in PLAYBOOKS]
+    if ctx.apps:
+        lines.append(f"{ctx.user_name} @mentioned {', '.join(connectors.name_of(a) for a in ctx.apps)} in this request: "
+                     "use those apps for it.")
+    guides = [PLAYBOOKS[t] for t in ctx.toolkits(tm) if t in PLAYBOOKS]
     if guides:
         lines.append("\n\n".join(guides))
     if prefs:
@@ -307,9 +323,10 @@ def _ids(ctx: RunCtx, tm: dict) -> dict:
 
 def make_teammate(ctx: RunCtx, tm: dict):
     async def node(state: State) -> dict:
+        ctx.scope(state["messages"])
         updates, msgs = await compact(ctx, tm, state["messages"])
         tools = await ctx.tools_for(tm)
-        system = await preamble(ctx, tm, msgs, [t.name for t in tools])
+        system = await preamble(ctx, tm, msgs, [t.name for t in tools]) + turn_note(ctx, tm, state)
         view = shrink_old_results(view_for(tm, msgs, ctx.members))
         size = (len(system) + sum(len(t.description) + len(json.dumps(t.tool_call_schema if isinstance(t.tool_call_schema, dict)
                 else t.tool_call_schema.model_json_schema())) for t in tools)) // 4 + estimate_tokens(view)
@@ -396,6 +413,7 @@ def make_gate(ctx: RunCtx):
     """Side effects for approvals live here, before the interrupt node, so a resume never repeats them."""
 
     async def gate(state: State) -> dict:
+        ctx.scope(state["messages"])
         tm = ctx.member(state.get("active"))
         ai = state["messages"][-1]
         known = {t.name for t in await ctx.tools_for(tm)}
@@ -481,6 +499,7 @@ def _undecided(state: State) -> bool:
 
 def make_tools(ctx: RunCtx):
     async def tools_node(state: State) -> dict:
+        ctx.scope(state["messages"])
         tm = ctx.member(state.get("active"))
         ai = state["messages"][-1]
         by_name = {t.name: t for t in await ctx.tools_for(tm)}
@@ -530,6 +549,34 @@ async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) 
     if not d:
         return f"{toolkit} is already connected. Its tools are available now; continue the task."
     return f"The user connected {toolkit}. Its tools are available now; continue the task."
+
+
+def turn_note(ctx: RunCtx, tm: dict, state: State) -> str:
+    """In a group round, who has answered and who still will: without it, models invent replies from members who
+    haven't spoken yet, or answer for them."""
+    if not ctx.project:
+        return ""
+    msgs = state["messages"]
+    start = next((i for i in range(len(msgs) - 1, -1, -1) if isinstance(msgs[i], HumanMessage) and not msgs[i].name), 0)
+    spoke = list(dict.fromkeys(m.name for m in msgs[start:] if isinstance(m, AIMessage) and m.text.strip() and m.name != tm["handle"]))
+    later = [ctx.member(i)["name"] for i in state.get("queue") or [] if i != tm["id"]]
+    if not spoke and not later:
+        return ""
+    names = {m["handle"]: m["name"] for m in ctx.members}
+    lines = ["\n\n## This turn"]
+    if spoke:
+        lines.append("Already replied to the latest message: " + ", ".join(names.get(h, h) for h in spoke)
+                     + ". Build on or push back on what they said; don't repeat their points or wording.")
+    if later:
+        lines.append("Replying after you: " + ", ".join(later) + ". Leave them their own say: don't answer for them, "
+                     "and don't @mention them just to hand over the turn.")
+    tag = re.compile(rf"(?<![\w@])@{re.escape(tm['handle'])}\b", re.I)
+    callers = list(dict.fromkeys(m.name for m in msgs[start:] if isinstance(m, AIMessage) and m.name != tm["handle"]
+                                 and tag.search(m.text)))
+    if callers:
+        lines.append(", ".join(names.get(h, h) for h in callers) + " @mentioned you: answer what they said to you.")
+    lines.append("Give your own answer now, in your own voice.")
+    return "\n".join(lines)
 
 
 def mentioned(text: str, members: list[dict]) -> list[dict]:

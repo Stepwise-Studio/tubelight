@@ -25,6 +25,7 @@ export interface Model { id: string; name: string; provider: string; context_len
 export interface Connection {
   toolkit: string
   name: string
+  logo?: string
   connected: boolean
   status: string // unavailable | not_connected | active | initiated | expired | failed ...
   account?: string
@@ -135,12 +136,13 @@ export function useModels() {
   return { models: list, error }
 }
 
-/** GET /connections, reloadable. */
+let connectionsCache: Connection[] | null = null
+/** GET /connections, reloadable. Starts from the last list seen this session while it refreshes. */
 export function useConnections() {
-  const [list, setList] = useState<Connection[] | null>(null)
+  const [list, setList] = useState<Connection[] | null>(connectionsCache)
   const [error, setError] = useState<string | null>(null)
   const apply = useCallback((p: Promise<Connection[]>) =>
-    p.then((l) => { setList(l); setError(null) }, (e: Error) => setError(e.message)), [])
+    p.then((l) => { connectionsCache = l; setList(l); setError(null) }, (e: Error) => setError(e.message)), [])
   const reload = useCallback(() => apply(api<Connection[]>('/connections')), [apply])
   useEffect(() => { apply(api<Connection[]>('/connections')) }, [apply])
   return { connections: list, error, reload }

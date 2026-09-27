@@ -74,6 +74,8 @@ export interface Message {
     event_id?: string
     event_type?: string
     attachments?: Attachment[]
+    /** Apps (toolkit slugs) the user @mentioned: the answering teammate gets them for that request. */
+    apps?: string[]
     /** question cards */
     question?: string
     options?: string[]

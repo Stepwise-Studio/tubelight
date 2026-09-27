@@ -56,7 +56,8 @@ def _row(state) -> dict[str, Any]:
     account = getattr(conn, "connected_account", None) if conn else None
     active = bool(conn and conn.is_active)
     status = "active" if active else (str(getattr(account, "status", "") or "not_connected").lower())
-    row = {"toolkit": state.slug.upper(), "name": state.name, "connected": active, "status": status}
+    row = {"toolkit": state.slug.upper(), "name": state.name, "logo": getattr(state, "logo", "") or "",
+           "connected": active, "status": status}
     if account is not None and getattr(account, "id", None):
         row["account"] = account.id
     return row
