@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur'
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Platform, Text as RNText, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, Text as RNText, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -26,7 +26,9 @@ const MENTION = /(^|\s)@([a-z0-9_-]*)$/i
 const MAX_FILES = 6
 // Half the one-line height (36 button + 2×4 padding + 2×1 border): a capsule at rest, soft corners as it grows.
 const PILL = 23
-const ROW = 46 // one-line bar height: the round action matches it
+// [height from the screen's bottom edge, intensity]: thin steps, each a little stronger nearer the edge (a progressive
+// blur); everything above the tallest one stays fully clear.
+const BLUR_STEPS = [[30, 3], [22, 7], [14, 12], [7, 20]] as const
 
 export interface ComposerProps {
   placeholder: string
@@ -46,9 +48,9 @@ export interface ComposerProps {
 type Item = Draft & { att?: Attachment }
 
 /**
- * Telegram-style floating bar over the chat: a glass pill (reply strip and attachment tray on top, + for files, then
- * the input) and beside it one round action (mic when empty, send when there's something, stop while a run is live).
- * Behind them the chat just darkens smoothly toward the bottom edge: no bar, no line.
+ * Floating bar over the chat: a pill with the reply strip and attachment tray on top, + for files, the input and one
+ * trailing action (mic when empty, send when there's something, stop while a run is live). Behind it there's no solid
+ * band: the chat fades into the canvas and blurs more toward the bottom edge.
  */
 export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, blurTarget }: ComposerProps) {
   const { c, scheme } = useTheme()
@@ -138,7 +140,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
       : { icon: ArrowUp02Icon, key: 'send', label: 'Send', variant: canSend ? 'tube' as const : 'soft' as const }
 
   const field = (
-    <Glass blurTarget={blurTarget} radius={PILL}>
+    <Squircle cornerSmoothing={0} style={{ borderRadius: PILL, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
       {replyTo && <ReplyStrip m={replyTo} onCancel={onCancelReply} />}
       {files.length > 0 && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
@@ -180,49 +182,54 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
             ? <RNText key={i} style={{ color: c.tube }}>{part.text}</RNText>
             : part.text)}
         </TextInput>
+        <IconButton
+          icon={action.icon}
+          round
+          swapKey={action.key}
+          accessibilityLabel={action.label}
+          variant={action.variant}
+          size={36}
+          iconSize={18}
+          disabled={showStop ? stopping : showMic ? false : !canSend}
+          // Tap: voice mode. Hold: dictate into the message box.
+          onLongPress={showMic ? () => { haptic.medium(); setDictating(true) } : undefined}
+          delayLongPress={350}
+          accessibilityHint={showMic ? 'Hold to dictate instead' : undefined}
+          onPress={async () => {
+            if (showMic) { haptic.tap(); return onVoice?.() }
+            if (!showStop) return send()
+            haptic.medium()
+            setStopping(true)
+            await onStop()
+            setStopping(false)
+          }}
+          style={{ marginLeft: 4 }}
+        />
       </View>
       )}
-    </Glass>
-  )
-
-  const glassy = action.variant === 'soft'
-  const actionButton = (
-    <IconButton
-      icon={action.icon}
-      round
-      swapKey={action.key}
-      accessibilityLabel={action.label}
-      variant={glassy ? 'ghost' : action.variant}
-      size={ROW}
-      iconSize={20}
-      color={glassy ? c.ink : undefined}
-      disabled={showStop ? stopping : showMic ? false : !canSend}
-      // Tap: voice mode. Hold: dictate into the message box.
-      onLongPress={showMic ? () => { haptic.medium(); setDictating(true) } : undefined}
-      delayLongPress={350}
-      accessibilityHint={showMic ? 'Hold to dictate instead' : undefined}
-      onPress={async () => {
-        if (showMic) { haptic.tap(); return onVoice?.() }
-        if (!showStop) return send()
-        haptic.medium()
-        setStopping(true)
-        await onStop()
-        setStopping(false)
-      }}
-    />
+    </Squircle>
   )
 
   return (
     <Animated.View style={[{ paddingHorizontal: focused ? 8 : 16, paddingTop: 10 }, pad]}>
-      {/* The edge fade: starts well above the bar and eases into the canvas colour at the bottom (black-ish in dark,
-          white-ish in light), so messages sink under it with no visible start. */}
-      <View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, {
-          top: -36,
-          experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}1F 22%, ${c.canvas}66 45%, ${c.canvas}B3 68%, ${c.canvas}E0 86%, ${c.canvas}F2 100%)`,
-        }]}
-      />
+      {/* Behind the bar: transparent at the top, easing into the canvas colour, and blurred only along the screen's
+          bottom edge, more the nearer the edge. The chrome tints match the canvas (near-black in dark, near-white in
+          light), so the blur steps add no grey band. */}
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { top: -36 }]}>
+        {BLUR_STEPS.map(([height, intensity]) => (
+          <BlurView
+            key={height}
+            blurTarget={blurTarget}
+            blurMethod="dimezisBlurViewSdk31Plus"
+            intensity={intensity}
+            tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height }}
+          />
+        ))}
+        <View style={[StyleSheet.absoluteFill, {
+          experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}00 20%, ${c.canvas}40 45%, ${c.canvas}8C 70%, ${c.canvas}CC 100%)`,
+        }]} />
+      </View>
       {(people.length > 0 || appRows.length > 0 || offerAll) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}
@@ -275,33 +282,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           </Squircle>
         </Animated.View>
       )}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
-        <Animated.View style={{ flex: 1 }} layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>{field}</Animated.View>
-        {!dictating && (
-          <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
-            {glassy ? <Glass blurTarget={blurTarget} radius={ROW / 2}>{actionButton}</Glass> : actionButton}
-          </Animated.View>
-        )}
-      </View>
+      <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>{field}</Animated.View>
     </Animated.View>
-  )
-}
-
-/** Frosted glass: the chat blurred behind the control, a translucent fill and a hairline edge. */
-function Glass({ blurTarget, radius: r, children }: { blurTarget?: React.RefObject<View | null>; radius: number; children: React.ReactNode }) {
-  const { c, scheme } = useTheme()
-  return (
-    <Squircle cornerSmoothing={0} style={{ borderRadius: r, overflow: 'hidden', borderWidth: 1, borderColor: c.line }}>
-      <BlurView
-        blurTarget={blurTarget}
-        blurMethod="dimezisBlurViewSdk31Plus"
-        intensity={Platform.OS === 'ios' ? 40 : 60}
-        tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-        style={StyleSheet.absoluteFill}
-      />
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: c.panel2, opacity: 0.35 }]} />
-      {children}
-    </Squircle>
   )
 }
 
