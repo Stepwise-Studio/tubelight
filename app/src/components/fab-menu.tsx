@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { BackHandler, Pressable, StyleSheet, View } from 'react-native'
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { Add01Icon } from '@hugeicons/core-free-icons'
+import Animated, { FadeIn, FadeOut, Keyframe } from 'react-native-reanimated'
+import { Add01Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
 
 import { motion, useTheme } from '@/theme'
-import { Icon, type IconSvgElement, Press, Squircle, Text, elevation, haptic } from '@/ui'
+import { Icon, IconSwap, type IconSvgElement, Press, Squircle, Text, elevation, haptic } from '@/ui'
 
 import { useTabBarInset } from './tab-bar'
 
@@ -14,47 +14,45 @@ export interface FabItem { label: string; icon: IconSvgElement; onPress: () => v
  * Telegram-position compose button that morphs into a WhatsApp-style menu.
  * Open 250ms / close 150ms on smooth-out; the menu grows from the button's corner.
  */
+// The menu grows from the button's corner: 250ms in, 150ms out, smooth out.
+const menuIn = new Keyframe({
+  0: { opacity: 0, transform: [{ translateY: motion.distance.base }, { scale: motion.scale.medium }] },
+  100: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }], easing: motion.ease.smoothOut },
+}).duration(motion.duration.fast)
+const menuOut = new Keyframe({
+  0: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] },
+  100: { opacity: 0, transform: [{ translateY: motion.distance.base }, { scale: motion.scale.medium }], easing: motion.ease.smoothOut },
+}).duration(motion.duration.quick)
+
 export function FabMenu({ items, accessibilityLabel = 'New' }: { items: FabItem[]; accessibilityLabel?: string }) {
   const { c, scheme } = useTheme()
   const bottom = useTabBarInset() + 16
   const [open, setOpen] = useState(false)
-  const [mounted, setMounted] = useState(false)
-  const p = useSharedValue(0)
 
   useEffect(() => {
-    p.value = withTiming(open ? 1 : 0, {
-      duration: open ? motion.duration.fast : motion.duration.quick, easing: motion.ease.smoothOut,
-    })
-    if (!open) {
-      const t = setTimeout(() => setMounted(false), motion.duration.quick)
-      return () => clearTimeout(t)
-    }
+    if (!open) return
     const sub = BackHandler.addEventListener('hardwareBackPress', () => { setOpen(false); return true })
     return () => sub.remove()
-  }, [open, p])
-
-  const backdrop = useAnimatedStyle(() => ({ opacity: p.value }))
-  const panel = useAnimatedStyle(() => ({
-    opacity: p.value,
-    transform: [
-      { translateY: (1 - p.value) * motion.distance.base },
-      { scale: motion.scale.medium + (1 - motion.scale.medium) * p.value },
-    ],
-  }))
-  const plus = useAnimatedStyle(() => ({ transform: [{ rotate: `${p.value * 45}deg` }] }))
+  }, [open])
 
   const pick = (item: FabItem) => { setOpen(false); haptic.tap(); item.onPress() }
 
   return (
     <>
-      {mounted && (
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(9,9,11,0.18)' }, backdrop]}>
+      {open && (
+        <Animated.View
+          entering={FadeIn.duration(motion.duration.fast).easing(motion.ease.smoothOut)}
+          exiting={FadeOut.duration(motion.duration.quick)}
+          style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(9,9,11,0.18)' }]}
+        >
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} accessibilityLabel="Close menu" />
         </Animated.View>
       )}
-      {mounted && (
+      {open && (
         <Animated.View
-          style={[{ position: 'absolute', right: 16, bottom: bottom + 68, transformOrigin: 'bottom right' }, elevation(scheme), panel]}
+          entering={menuIn}
+          exiting={menuOut}
+          style={[{ position: 'absolute', right: 16, bottom: bottom + 68, transformOrigin: 'bottom right' }, elevation(scheme)]}
           accessibilityViewIsModal
         >
           <Squircle style={{ borderRadius: 20, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 6, minWidth: 220 }}>
@@ -77,12 +75,12 @@ export function FabMenu({ items, accessibilityLabel = 'New' }: { items: FabItem[
       <View style={[{ position: 'absolute', right: 16, bottom }, elevation(scheme)]}>
         <Press
           radius={28}
-          onPress={() => { haptic.tap(); if (!open) setMounted(true); setOpen(!open) }}
+          onPress={() => { haptic.tap(); setOpen(!open) }}
           accessibilityLabel={open ? 'Close menu' : accessibilityLabel}
           accessibilityState={{ expanded: open }}
           style={{ width: 56, height: 56, alignItems: 'center', justifyContent: 'center', backgroundColor: c.tube }}
         >
-          <Animated.View style={plus}><Icon icon={Add01Icon} size={24} color={c.onTube} strokeWidth={2} /></Animated.View>
+          <IconSwap swapKey={open ? 'close' : 'add'}><Icon icon={open ? Cancel01Icon : Add01Icon} size={24} color={c.onTube} strokeWidth={2} /></IconSwap>
         </Press>
       </View>
     </>

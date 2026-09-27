@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native'
 import { Gesture } from 'react-native-gesture-handler'
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
+import Animated, { FadeIn, Keyframe, interpolate, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
@@ -44,8 +44,15 @@ export function SheetScreen({ children }: { children: ReactNode }) {
   const { height } = useWindowDimensions()
   const top = insets.top + 12
   const travel = height - top
-  const y = useSharedValue(travel)
+  // The drag/close offset rests at 0 and the slide-in is an entering animation, so the resting state is the
+  // rendered one: in release builds a later React commit re-applied an animated style's first value
+  // (off screen), and the sheet vanished a moment after opening.
+  const y = useSharedValue(0)
   const [ready, setReady] = useState(false)
+  const slideIn = new Keyframe({
+    0: { transform: [{ translateY: travel }] },
+    100: { transform: [{ translateY: 0 }], easing: motion.ease.smoothOut },
+  }).duration(OPEN_MS)
 
   const leave = () => setCurrent(null)
   const slideOut = () => {
@@ -55,9 +62,9 @@ export function SheetScreen({ children }: { children: ReactNode }) {
   const close = (then?: () => void) => { then?.(); slideOut() }
 
   useEffect(() => {
-    y.set(withTiming(0, { duration: OPEN_MS, easing: motion.ease.smoothOut }, (done) => { if (done) scheduleOnRN(setReady, true) }))
+    const t = setTimeout(() => setReady(true), OPEN_MS)
     const back = BackHandler.addEventListener('hardwareBackPress', () => { close(); return true })
-    return () => back.remove()
+    return () => { clearTimeout(t); back.remove() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const drag = Gesture.Pan()
@@ -78,13 +85,17 @@ export function SheetScreen({ children }: { children: ReactNode }) {
   return (
     <Ctx value={{ drag, close, ready }}>
       <View style={StyleSheet.absoluteFill}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(9,9,11,0.32)' }, scrim]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => close()} accessibilityLabel="Close" />
+        <Animated.View entering={FadeIn.duration(OPEN_MS)} style={StyleSheet.absoluteFill}>
+          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(9,9,11,0.32)' }, scrim]}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => close()} accessibilityLabel="Close" />
+          </Animated.View>
         </Animated.View>
-        <Animated.View style={[{ position: 'absolute', left: 0, right: 0, top, bottom: 0 }, panel]} accessibilityViewIsModal>
-          <Squircle style={{ flex: 1, borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: c.panel, overflow: 'hidden', paddingBottom: insets.bottom }}>
-            {children}
-          </Squircle>
+        <Animated.View entering={slideIn} style={{ position: 'absolute', left: 0, right: 0, top, bottom: 0 }}>
+          <Animated.View style={[{ flex: 1 }, panel]} accessibilityViewIsModal>
+            <Squircle style={{ flex: 1, borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: c.panel, overflow: 'hidden', paddingBottom: insets.bottom }}>
+              {children}
+            </Squircle>
+          </Animated.View>
         </Animated.View>
       </View>
     </Ctx>
