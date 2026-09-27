@@ -8,6 +8,7 @@ teammates' words as named HumanMessages and never sees their tool traffic.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -16,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import openai
 from langchain_core.messages import (
     AIMessage, AnyMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage,
 )
@@ -27,6 +29,7 @@ from langgraph.types import interrupt
 from . import config, connectors, db, llm, memory, push, tools as T
 from .sandbox import Sandbox
 
+log = logging.getLogger(__name__)
 KEEP_TAIL = 12
 TRIM_AT, SUMMARIZE_AT = 0.65, 0.80
 STUB = "[output trimmed]"
@@ -134,6 +137,12 @@ PLAYBOOKS = {
 - Spot follow-ups: threads where they were asked something and haven't replied, or promised something. Offer to draft the reply.
 - Security alerts caused by their own recent actions (like connecting an app to Tubelight) are expected: mention them briefly and say so.""",
     "GOOGLECALENDAR": """Working with the calendar: lead with what's next and anything that clashes or needs prep; times in the user's local time; offer to move, decline or block time when it would help.""",
+    "MICROSOFT_TEAMS": """Working with Microsoft Teams: Teams can't list someone's scheduled meetings (its meeting API only
+fetches one by link or ID). Scheduled Teams meetings live in the Outlook calendar: list today's events there (events
+with an online meeting are the Teams calls). If Outlook isn't connected, call connect_app for Outlook and say why in
+one line. Never tell the user it can't be done.""",
+    "OUTLOOK": """Working with Outlook: for "what meetings do I have", list calendar events for the day in the user's time zone
+(Teams calls are the events with an online meeting link); lead with the next one and anything that clashes.""",
     "GITHUB": """Working with GitHub: lead with what needs them (reviews requested, failing checks, mentions); name PRs and issues by title and number; offer the next concrete step.""",
 }
 
@@ -291,7 +300,21 @@ def make_teammate(ctx: RunCtx, tm: dict):
         model = llm.chat_model(tm["model"], tools)
         stream_id = str(uuid.uuid4())
         await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
-        ai = await _stream(ctx, tm, model, [SystemMessage(system), *view_for(tm, msgs, ctx.members)], stream_id)
+        convo = [SystemMessage(system), *view_for(tm, msgs, ctx.members)]
+        for attempt in range(3):
+            try:
+                ai = await _stream(ctx, tm, model, convo, stream_id)
+                break
+            except openai.APIError as e:
+                # Groq rejects a call to a tool that isn't bound, or with arguments off-schema; a nudge and a
+                # second draw almost always fixes it.
+                if attempt == 2 or "tool call validation failed" not in str(e).lower():
+                    raise
+                log.warning("retrying after a rejected tool call: %s", str(e)[:200])
+                convo = [*convo, HumanMessage(
+                    "[Note: your last reply called a tool that does not exist or with invalid arguments. Use only the "
+                    f"tools you have ({', '.join(t.name for t in tools) or 'none'}) with exactly their parameters, "
+                    "or answer in text.]", name="system_note")]
         ai.name = tm["handle"]
         text = ai.text.strip()
         done = {**_ids(ctx, tm), "stream_id": stream_id}

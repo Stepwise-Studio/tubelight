@@ -7,11 +7,11 @@ import { ArrowDown01Icon, ArrowUpRight01Icon } from '@hugeicons/core-free-icons'
 
 import { CodeBlock } from '@/components/form-bits'
 import { describe, durationLabel } from '@/lib/activity'
-import { ago, fullTime } from '@/lib/format'
+import { ago, copied, fullTime } from '@/lib/format'
 import type { Activity } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { radius, useTheme } from '@/theme'
-import { Button, Chip, Collapse, Icon, Press, TeammateAvatar, Text, toast, useFlip } from '@/ui'
+import { Button, Chip, Collapse, Icon, Press, TeammateAvatar, Text, useFlip } from '@/ui'
 
 const MAX = 1600
 
@@ -92,7 +92,7 @@ function Details({ a }: { a: Activity }) {
   const ws = useWorkspace()
   const input = a.input as Record<string, unknown> | null
   const output = a.output as Record<string, unknown> | null
-  const copy = async (s: string) => { await Clipboard.setStringAsync(s); toast({ title: 'Copied' }) }
+  const copy = async (s: string) => { await Clipboard.setStringAsync(s); copied() }
 
   let body
   if (a.type === 'sandbox' && a.name === 'run_shell') {

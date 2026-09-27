@@ -193,13 +193,11 @@ function ConnectionRow({ conn, onChanged, disabled }: { conn: Connection; onChan
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 72 }}>
       <BrandTile toolkit={conn.toolkit} size={40} />
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text variant="bodyMedium" numberOfLines={1} style={{ flexShrink: 1 }}>{name}</Text>
-          {conn.connected && <Chip label="Connected" color="success" dot size="sm" />}
-          {needsFix && <Chip label="Needs reconnecting" color="warning" variant="soft" size="sm" />}
-        </View>
-        {!conn.connected && !needsFix && <Text variant="caption" color="ink3" numberOfLines={1}>{connectionStatus(conn)}</Text>}
-        {conn.connected && conn.account && <Text variant="caption" color="ink3" numberOfLines={1}>{conn.account}</Text>}
+        {/* The name gets the whole line; status sits under it (the account id means nothing to a person). */}
+        <Text variant="bodyMedium" numberOfLines={1}>{name}</Text>
+        {conn.connected ? <View style={{ flexDirection: 'row' }}><Chip label="Connected" color="success" dot size="sm" /></View>
+          : needsFix ? <View style={{ flexDirection: 'row' }}><Chip label="Needs reconnecting" color="warning" variant="soft" size="sm" /></View>
+          : <Text variant="caption" color="ink3" numberOfLines={1}>{connectionStatus(conn)}</Text>}
         {users.length > 0 ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <AvatarStack teammates={users} size={18} max={4} />

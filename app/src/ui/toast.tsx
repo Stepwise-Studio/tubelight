@@ -1,25 +1,30 @@
-import { useEffect, useSyncExternalStore } from 'react'
+// Port of Stepwise UI's Toast (ui.stepwise.studio/r/toast.json), docked at the top for phones:
+// squircle card (22), tone tint bleeding in from the top-left, filled status icon, pill action or ✕,
+// and a deck: up to three stacked, the older ones peeking out below the newest.
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { AccessibilityInfo, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { Keyframe, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
+import Animated, { Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Alert02Icon, CheckmarkCircle02Icon } from '@hugeicons/core-free-icons'
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
+import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
-import { motion, radius, useTheme } from '@/theme'
+import { fonts, motion, useTheme } from '@/theme'
 
 import { Icon } from './icon'
-import { elevation } from './surface'
 import { Press } from './press'
 import { Squircle } from './squircle'
 import { Text } from './text'
 
-const { duration, ease, distance } = motion
-
+export type ToastTone = 'success' | 'warning' | 'error' | 'info'
 export interface ToastOpts {
   title: string
   body?: string
-  tone?: 'neutral' | 'success' | 'error'
+  /** 'neutral' reads as info. */
+  tone?: ToastTone | 'neutral'
   action?: { label: string; onPress: () => void }
+  /** ms before it leaves on its own (default 5000). Toasts with an action stay until used or dismissed. */
+  duration?: number
 }
 interface Item extends ToastOpts { id: number }
 
@@ -28,81 +33,162 @@ let seq = 0
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 
-/** Queue a toast. Plain ones leave after 4s; errors and ones with an action stay until dismissed. */
+/** Queue a toast. It leaves after 5s unless it carries an action; swipe it away or tap ✕ any time. */
 export function toast(opts: ToastOpts) {
   queue = [...queue, { ...opts, id: ++seq }]
   emit()
 }
 const dismiss = (id: number) => { queue = queue.filter((t) => t.id !== id); emit() }
 
-// Enter: 8px drop + fade, 250ms. Exit is quicker and quieter: 150ms.
-const toastIn = new Keyframe({
-  0: { opacity: 0, transform: [{ translateY: -distance.base }, { scale: motion.scale.medium }] },
-  100: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }], easing: ease.smoothOut },
-}).duration(duration.fast)
-const toastOut = new Keyframe({
-  0: { opacity: 1, transform: [{ translateY: 0 }] },
-  100: { opacity: 0, transform: [{ translateY: -distance.base }], easing: ease.smoothOut },
-}).duration(duration.quick)
+const RADIUS = 22
+const MAX_VISIBLE = 3
+const PEEK = 10 // dp each older toast shows below the one in front
+const INSET = 10 // dp each older toast narrows by, per side
 
-/** Mount once at the root. Shows the head of the queue at the top, swipe up or sideways to dismiss. */
+// Only the tint and icon differ per tone (the Stepwise values).
+// Tints are the Stepwise rgba values split into colour + opacity (react-native-svg ignores alpha inside a stop colour).
+const TINT_OPACITY = 0.22
+// Filled status marks like the iconsax Bold set Stepwise uses: a coloured shape with the glyph knocked out in white.
+const TONES: Record<ToastTone, { tint: string; color: string; glyph: typeof Tick02Icon | string; square?: boolean }> = {
+  success: { tint: '#4ade80', color: '#22c55e', glyph: Tick02Icon },
+  warning: { tint: '#fbbf24', color: '#f59e0b', glyph: '!', square: true },
+  error: { tint: '#f87171', color: '#f43f5e', glyph: Cancel01Icon },
+  info: { tint: '#38bdf8', color: '#0ea5e9', glyph: 'i' },
+}
+const toneOf = (t: ToastOpts['tone']): ToastTone => (t && t !== 'neutral' ? t : 'info')
+
+// Enter from above with a slight scale (Stepwise: 44px + 0.9 from its edge), leave the same way, quicker.
+const toastIn = new Keyframe({
+  0: { opacity: 0, transform: [{ translateY: -28 }, { scale: 0.94 }] },
+  100: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }], easing: motion.ease.smoothOut },
+}).duration(300)
+const toastOut = new Keyframe({
+  0: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] },
+  100: { opacity: 0, transform: [{ translateY: -28 }, { scale: 0.94 }], easing: motion.ease.smoothOut },
+}).duration(motion.duration.quick)
+
+/** Mount once at the root. */
 export function ToastHost() {
   const list = useSyncExternalStore((l) => { listeners.add(l); return () => { listeners.delete(l) } }, () => queue, () => queue)
   const insets = useSafeAreaInsets()
-  const head = list[0]
+  const [frontHeight, setFrontHeight] = useState(0)
+  const deck = list.slice(-MAX_VISIBLE).reverse() // newest first
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', top: insets.top + 8, left: 12, right: 12, alignItems: 'center' }}>
-      {head && <ToastCard key={head.id} item={head} />}
+      <View pointerEvents="box-none" style={{ width: '100%', maxWidth: 440 }}>
+        {deck.map((item, depth) => (
+          <ToastCard
+            key={item.id}
+            item={item}
+            depth={depth}
+            height={frontHeight}
+            onHeight={depth === 0 ? setFrontHeight : undefined}
+          />
+        ))}
+      </View>
     </View>
   )
 }
 
-function ToastCard({ item }: { item: Item }) {
+function ToastCard({ item, depth, height, onHeight }: { item: Item; depth: number; height: number; onHeight?: (h: number) => void }) {
   const { c, scheme } = useTheme()
-  const sticky = item.tone === 'error' || !!item.action
+  const dark = scheme === 'dark'
+  const tone = TONES[toneOf(item.tone)]
+  const front = depth === 0
   const x = useSharedValue(0)
   const y = useSharedValue(0)
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  // CSS 135°: the gradient line runs corner to corner at 45°, so it spans (w + h) / 2 on each axis.
+  const span = (box.w + box.h) / 2
 
   useEffect(() => {
+    if (!front) return
     AccessibilityInfo.announceForAccessibility(item.body ? `${item.title}. ${item.body}` : item.title)
-    if (sticky) return
-    const t = setTimeout(() => dismiss(item.id), 4000)
+    if (item.action) return
+    const t = setTimeout(() => dismiss(item.id), item.duration ?? 5000)
     return () => clearTimeout(t)
-  }, [item, sticky])
+  }, [item, front])
 
   const pan = Gesture.Pan()
+    .enabled(front)
     .onUpdate((e) => { x.value = e.translationX; y.value = Math.min(0, e.translationY) })
     .onEnd((e) => {
       if (Math.abs(e.translationX) > 80 || e.translationY < -30 || Math.abs(e.velocityX) > 800) runOnJS(dismiss)(item.id)
       else { x.value = withSpring(0, motion.spring); y.value = withSpring(0, motion.spring) }
     })
+  // Rests at 0 (its first value), so a later React commit can't snap it anywhere else.
   const drag = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }],
     opacity: 1 - Math.min(Math.abs(x.value) / 240, 0.6),
   }))
 
-  const icon = item.tone === 'error' ? Alert02Icon : item.tone === 'success' ? CheckmarkCircle02Icon : null
+  // Older toasts sit behind as narrower cards peeking out below; position is layout, animated by the transition.
+  const place = front
+    ? { position: 'relative' as const }
+    : { position: 'absolute' as const, top: PEEK * depth, left: INSET * depth, right: INSET * depth, height: height || undefined, opacity: height ? 1 : 0 }
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View entering={toastIn} exiting={toastOut} style={[{ width: '100%', maxWidth: 440, borderRadius: radius.xl }, elevation(scheme, 2), drag]}>
+      <Animated.View
+        entering={toastIn}
+        exiting={toastOut}
+        layout={LinearTransition.duration(motion.duration.fast)}
+        onLayout={(e) => {
+          const { width: w, height: h } = e.nativeEvent.layout
+          setBox({ w, h })
+          onHeight?.(h)
+        }}
+        style={[place, { zIndex: MAX_VISIBLE - depth, borderRadius: RADIUS, boxShadow: dark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 24px rgba(9,9,11,0.10)' }, drag]}
+        pointerEvents={front ? 'auto' : 'none'}
+        importantForAccessibility={front ? 'auto' : 'no-hide-descendants'}
+      >
         <Squircle
           accessibilityRole={item.tone === 'error' ? 'alert' : 'summary'}
-          style={{ borderRadius: radius.xl, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingLeft: 14, paddingRight: item.action ? 8 : 14 }}
+          style={{
+            borderRadius: RADIUS, overflow: 'hidden', flex: front ? undefined : 1,
+            backgroundColor: dark ? '#1c1c1f' : '#fafafa', borderWidth: 1, borderColor: dark ? 'rgba(63,63,70,0.7)' : 'rgba(212,212,216,0.7)',
+          }}
         >
-          {icon && <Icon icon={icon} size={18} color={item.tone === 'error' ? 'danger' : 'success'} />}
-          <View style={{ flex: 1 }}>
-            <Text variant="bodyMedium" numberOfLines={2}>{item.title}</Text>
-            {item.body && <Text variant="caption" color="ink3" numberOfLines={3}>{item.body}</Text>}
+          {/* 135°: the tint bleeds in from the top-left corner */}
+          <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} width="100%" height="100%">
+            <Defs>
+              <LinearGradient id={`t${item.id}`} x1={0} y1={0} x2={span} y2={span} gradientUnits="userSpaceOnUse">
+                <Stop offset="0.04" stopColor={tone.tint} stopOpacity={TINT_OPACITY} />
+                <Stop offset="0.3" stopColor={tone.tint} stopOpacity={0} />
+              </LinearGradient>
+            </Defs>
+            {span > 0 && <Rect width="100%" height="100%" fill={`url(#t${item.id})`} />}
+          </Svg>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, opacity: front ? 1 : 0 }}>
+            <View style={{ width: 22, height: 22, borderRadius: tone.square ? 7 : 11, backgroundColor: tone.color, alignItems: 'center', justifyContent: 'center' }}>
+              {typeof tone.glyph === 'string'
+                ? <Text style={{ fontFamily: fonts.bold, fontSize: 13, lineHeight: 16, color: '#ffffff', includeFontPadding: false }}>{tone.glyph}</Text>
+                : <Icon icon={tone.glyph} size={13} color="#ffffff" strokeWidth={3} />}
+            </View>
+            <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+              <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#f4f4f5' : '#27272a' }}>
+                {item.title}
+              </Text>
+              {item.body ? (
+                <Text numberOfLines={3} style={{ fontFamily: fonts.regular, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#a1a1aa' : '#71717a' }}>
+                  {item.body}
+                </Text>
+              ) : null}
+            </View>
+            {item.action ? (
+              <Press
+                radius={17}
+                smoothing={0}
+                onPress={() => { dismiss(item.id); item.action!.onPress() }}
+                style={{ height: 34, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: dark ? '#3f3f46' : '#e4e4e7' }}
+              >
+                <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: -0.3, color: dark ? '#f4f4f5' : '#27272a' }}>{item.action.label}</Text>
+              </Press>
+            ) : (
+              <Press radius={14} smoothing={0} accessibilityLabel="Dismiss" hitSlop={8} onPress={() => dismiss(item.id)} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon icon={Cancel01Icon} size={16} color={c.ink3} strokeWidth={1.5} />
+              </Press>
+            )}
           </View>
-          {item.action ? (
-            <Press radius={14} onPress={() => { dismiss(item.id); item.action!.onPress() }} style={{ height: 36, paddingHorizontal: 12, justifyContent: 'center', backgroundColor: c.panel2 }}>
-              <Text variant="label">{item.action.label}</Text>
-            </Press>
-          ) : sticky ? (
-            <Press radius={14} accessibilityLabel="Dismiss" onPress={() => dismiss(item.id)} style={{ height: 36, paddingHorizontal: 10, justifyContent: 'center' }}>
-              <Text variant="label" color="ink3">Dismiss</Text>
-            </Press>
-          ) : null}
         </Squircle>
       </Animated.View>
     </GestureDetector>

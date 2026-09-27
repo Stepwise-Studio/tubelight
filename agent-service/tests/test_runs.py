@@ -47,6 +47,25 @@ async def test_rate_limit_error_posts_human_message(api, env):
     assert fdb.rows("runs")[0]["status"] == "error"
 
 
+async def test_rejected_tool_call_is_retried_with_a_nudge(api, env):
+    import httpx
+    import openai
+
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+
+    def rejected(_):
+        raise openai.APIError("Tool call validation failed: attempted to call tool 'COMPOSIO_SEARCH_TOOLS' which was "
+                              "not in request.tools", request=httpx.Request("POST", "https://api.groq.com"), body=None)
+
+    fake.script = [rejected, ai("Here you go.")]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "hi"})
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Here you go."]
+    assert "[Note: your last reply called a tool" in fake.calls[1][-1].content
+    assert not fdb.rows("messages", kind="error")
+
+
 async def test_project_routes_by_mention(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")

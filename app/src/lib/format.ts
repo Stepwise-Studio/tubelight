@@ -1,3 +1,7 @@
+import { Platform } from 'react-native'
+
+import { haptic, toast } from '@/ui'
+
 const DAY = 86_400_000
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
@@ -44,3 +48,9 @@ export function ago(iso: string, now = new Date()) {
 
 /** Voice replies carry Orpheus vocal cues like [cheerful] or [sigh]: spoken, never shown. Links ([x](url)) are left alone. */
 export const stripCues = (s: string) => s.replace(/\s?\[[a-z]+(?: [a-z]+)?\](?!\()/g, '')
+
+/** After copying: Android already shows its own clipboard confirmation, so only iOS gets our toast. */
+export function copied() {
+  if (Platform.OS === 'ios') toast({ title: 'Copied', tone: 'success' })
+  else haptic.light()
+}

@@ -2,20 +2,20 @@
 import { useState } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { AtIcon, SparklesIcon, Tick02Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, AtIcon, Cancel01Icon, SparklesIcon, Tick02Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
-import { ColorSwatches, FormSection } from '@/components/form-bits'
+import { ColorSwatches, FormSection, SwitchRow } from '@/components/form-bits'
 import { useSheet } from '@/components/sheet-screen'
 import { api } from '@/lib/api'
 import {
   COLORS, HANDLE_RE, MODEL_HINTS, PROVIDERS, connectApp, contextLabel, modelName, modelProvider, recommendedModel, toolkitName,
-  useConnections, useModels, useToolkits, type Connection, type Toolkit,
+  useConnections, useModels, useToolkits, type Connection,
 } from '@/lib/catalog'
 import type { Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
 import {
-  Button, Chip, Divider, FACE_SEEDS, Icon, ListRow, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
+  Button, Chip, Divider, FACE_SEEDS, Icon, IconButton, ListRow, Press, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
   haptic, toast,
 } from '@/ui'
 
@@ -234,66 +234,110 @@ export function connectionStatus(conn: Connection | undefined) {
   return 'Not connected'
 }
 
-const APP_ROWS = 5
+const SEARCH_ROWS = 8
 
 /**
- * Apps: the teammate's own first, then the most used, five at most; search reaches every app.
- * Each row is a name and either Connect or a Connected chip. Connecting one here also gives it to this teammate;
- * any other connected app they can pick up later by asking.
+ * The apps this teammate may use: every app you've connected, each with a switch, plus any it needs that
+ * aren't connected yet (Connect or remove). "Connect another app" searches the whole catalog; an app connected
+ * from here is switched on for this teammate.
  */
 function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const { c } = useTheme()
+  const { height } = useWindowDimensions()
   const { connections, reload } = useConnections()
   const { toolkits } = useToolkits()
-  const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
-  const byId = new Map((toolkits ?? []).map((t) => [t.toolkit, t]))
-  const q = query.trim().toLowerCase()
-  const picked = value.map((t): Toolkit => byId.get(t) ?? { toolkit: t, name: toolkitName(t), logo: '', description: '', categories: [], tools: 0, auth: 'oauth' })
-  const rest = (toolkits ?? []).filter((t) => !value.includes(t.toolkit))
-  const rows = q
-    ? (toolkits ?? []).filter((t) => t.name.toLowerCase().includes(q) || t.toolkit.toLowerCase().includes(q)).slice(0, APP_ROWS)
-    : picked.length >= APP_ROWS ? picked : [...picked, ...rest].slice(0, APP_ROWS)
-  const connect = async (t: Toolkit) => {
+  const [adding, setAdding] = useState(false)
+  const [query, setQuery] = useState('')
+  const nameOf = (t: string) => toolkits?.find((k) => k.toolkit === t)?.name ?? connections?.find((k) => k.toolkit === t)?.name ?? toolkitName(t)
+  const connected = (connections ?? []).filter((k) => k.connected).map((k) => k.toolkit)
+  const missing = value.filter((t) => !connected.includes(t) && toolkits?.find((k) => k.toolkit === t)?.auth !== 'none')
+  const rows = [...new Set([...connected, ...value.filter((t) => !missing.includes(t))])]
+    .sort((a, b) => Number(value.includes(b)) - Number(value.includes(a)) || nameOf(a).localeCompare(nameOf(b)))
+  const set = (t: string, on: boolean) => onChange(on ? [...new Set([...value, t])] : value.filter((x) => x !== t))
+
+  const connect = async (t: string) => {
     haptic.tap()
-    if (!value.includes(t.toolkit)) onChange([...value, t.toolkit])
-    setBusy(t.toolkit)
-    try { await connectApp(t.toolkit, t.name); await reload() } catch (e) {
-      toast({ title: `Unable to connect ${t.name}`, body: (e as Error).message, tone: 'error' })
+    setBusy(t)
+    try {
+      await connectApp(t, nameOf(t))
+      await reload()
+      set(t, true)
+      setAdding(false)
+    } catch (e) {
+      toast({ title: `Unable to connect ${nameOf(t)}`, body: (e as Error).message, tone: 'error' })
     } finally { setBusy(null) }
   }
 
+  const q = query.trim().toLowerCase()
+  const results = (toolkits ?? [])
+    .filter((t) => !connected.includes(t.toolkit) && (!q || t.name.toLowerCase().includes(q) || t.toolkit.toLowerCase().includes(q)))
+    .slice(0, SEARCH_ROWS)
+
   return (
     <>
-      <SearchField value={query} onChangeText={setQuery} placeholder={toolkits ? `Search ${toolkits.length.toLocaleString()} apps` : 'Search apps'} />
       <Surface style={{ overflow: 'hidden' }}>
-        {toolkits === null && rows.length === 0 && [0, 1, 2].map((i) => (
+        {connections === null && [0, 1].map((i) => (
           <View key={i}>
             {i > 0 && <Divider />}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, height: 60 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, height: 60 }}>
               <Skeleton width={32} height={32} radius={9} />
               <Skeleton width="36%" height={12} />
             </View>
           </View>
         ))}
-        {rows.map((t, i) => {
-          const conn = connections?.find((x) => x.toolkit === t.toolkit)
-          return (
-            <View key={t.toolkit}>
-              {i > 0 && <Divider />}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 14, paddingRight: 12, height: 60 }}>
-                <BrandTile toolkit={t.toolkit} size={32} />
-                <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{t.name}</Text>
-                {connections === null ? <Skeleton width={84} height={28} radius={14} />
-                  : t.auth === 'none' ? <Chip label="Ready" color="info" dot />
-                  : conn?.connected ? <Chip label="Connected" color="success" dot />
-                  : conn?.status === 'unavailable' ? null
-                  : <Button label={conn?.status === 'expired' || conn?.status === 'failed' ? 'Reconnect' : 'Connect'} size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t)} style={{ alignSelf: 'center' }} />}
+        {rows.map((t, i) => (
+          <View key={t}>
+            {i > 0 && <Divider />}
+            <SwitchRow title={nameOf(t)} leading={<BrandTile toolkit={t} size={32} />} value={value.includes(t)} onChange={(on) => { set(t, on) }} />
+          </View>
+        ))}
+        {missing.map((t, i) => (
+          <View key={t}>
+            {(rows.length > 0 || i > 0) && <Divider />}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 12, paddingRight: 8, minHeight: 56 }}>
+              <BrandTile toolkit={t} size={32} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="bodyMedium" numberOfLines={1}>{nameOf(t)}</Text>
+                <Text variant="caption" color="ink3" numberOfLines={1}>Not connected yet</Text>
               </View>
+              <Button label="Connect" size="sm" variant="soft" loading={busy === t} onPress={() => connect(t)} style={{ alignSelf: 'center' }} />
+              <IconButton icon={Cancel01Icon} size={36} iconSize={16} accessibilityLabel={`Remove ${nameOf(t)}`} onPress={() => { haptic.tap(); set(t, false) }} />
             </View>
-          )
-        })}
-        {q && toolkits && rows.length === 0 && <Text variant="caption" color="ink3" style={{ padding: 14 }}>No apps match “{query}”.</Text>}
+          </View>
+        ))}
+        {(rows.length > 0 || missing.length > 0) && <Divider />}
+        <Press radius={0} static onPress={() => { haptic.tap(); setQuery(''); setAdding(true) }} accessibilityLabel="Connect another app"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, minHeight: 56 }}>
+          <View style={{ width: 32, height: 32, borderRadius: 9, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.ink4, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon icon={Add01Icon} size={16} color="ink3" />
+          </View>
+          <Text variant="bodyMedium" color="ink2">Connect another app</Text>
+        </Press>
       </Surface>
+
+      <Sheet open={adding} onClose={() => setAdding(false)} title="Connect an app">
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8, gap: 12 }}>
+          <SearchField value={query} onChangeText={setQuery} placeholder={toolkits ? `Search ${toolkits.length.toLocaleString()} apps` : 'Search apps'} />
+          <ScrollView style={{ maxHeight: height * 0.5 }} keyboardShouldPersistTaps="handled">
+            <Surface style={{ overflow: 'hidden' }}>
+              {results.map((t, i) => (
+                <View key={t.toolkit}>
+                  {i > 0 && <Divider />}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 12, paddingRight: 12, height: 60 }}>
+                    <BrandTile toolkit={t.toolkit} size={32} />
+                    <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{t.name}</Text>
+                    {t.auth === 'none'
+                      ? <Button label="Add" size="sm" variant="soft" onPress={() => { set(t.toolkit, true); setAdding(false) }} style={{ alignSelf: 'center' }} />
+                      : <Button label="Connect" size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t.toolkit)} style={{ alignSelf: 'center' }} />}
+                  </View>
+                </View>
+              ))}
+              {toolkits && results.length === 0 && <Text variant="caption" color="ink3" style={{ padding: 14 }}>No apps match “{query}”.</Text>}
+            </Surface>
+          </ScrollView>
+        </View>
+      </Sheet>
     </>
   )
 }
@@ -344,7 +388,7 @@ export function TeammateFields({ value, onChange, errors }: {
             <ModelField value={value.model} role={value.role} onChange={(v) => set('model', v)} />
           </FormSection>
 
-          <FormSection title="Apps" hint="Connect the ones they’ll work with. Sending, posting and pushing always wait for your approval.">
+          <FormSection title="Apps" hint="Switch on the apps they can use. Sending, posting and pushing always wait for your approval.">
             <ToolkitPicker value={value.allowed_toolkits} onChange={(v) => set('allowed_toolkits', v)} />
           </FormSection>
         </Animated.View>

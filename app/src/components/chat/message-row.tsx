@@ -8,14 +8,14 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
-import { fullTime, stripCues } from '@/lib/format'
+import { copied, fullTime, stripCues } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
 import { motion, radius, useTheme } from '@/theme'
 import {
-  Button, Collapse, Icon, Markdown, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, toast, useFlip,
+  Button, Collapse, Icon, Markdown, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, useFlip,
 } from '@/ui'
 
 import { ConnectCard, QuestionCard } from './prompt-cards'
@@ -206,7 +206,7 @@ function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void) {
     title: fullTime(m.created_at),
     items: [
       ...(onReply ? [{ label: 'Reply', icon: ArrowTurnBackwardIcon, onPress: () => onReply(m) }] : []),
-      { label: 'Copy text', icon: Copy01Icon, onPress: async () => { await Clipboard.setStringAsync(m.text); toast({ title: 'Copied' }) } },
+      { label: 'Copy text', icon: Copy01Icon, onPress: async () => { await Clipboard.setStringAsync(m.text); copied() } },
     ],
   })
 }
