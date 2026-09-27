@@ -16,6 +16,9 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
   Keep tool calls short: no sleeps over ~15s, downscale phone screenshots before reading.
 - Service: `cd agent-service && setsid .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8787 &` (`kill -USR1 <pid>` dumps stacks).
 - Metro: `cd app && setsid npx expo start --dev-client --port 8081 --localhost &`, then `adb reverse tcp:8081 tcp:8081; adb reverse tcp:8787 tcp:8787`.
+- Release APK: the laptop has ~4 GB free (the user's other apps); builds get OOM-killed unless capped:
+  `systemd-run --user --unit=tl-release --working-directory=$PWD/android -E JAVA_HOME=... -E NODE_OPTIONS=--max-old-space-size=1536 ./gradlew app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx1536m`.
+- Groq free tier = 8k tokens per minute per model: every request (instructions + tools + history) must fit. Composio tool schemas are trimmed (`connectors._lean`), earlier tool results shrink (`graph.shrink_old_results`), Groq history budget `llm.GROQ_HISTORY_BUDGET`; Cloudflare `@cf/openai/gpt-oss-120b` is the overflow fallback. Cloudflare models flagged `require_workers_paid` are hidden and skipped.
 - Native rebuild only after adding native deps: `cd app/android && JAVA_HOME=~/.local/share/jdk/jdk-17* ./gradlew app:assembleDebug -PreactNativeArchitectures=arm64-v8a` (JDK 25 breaks CMake). `android/` is generated (CNG); if missing: `CI=1 npx expo prebuild -p android`, then `echo "sdk.dir=$HOME/Android/Sdk" > android/local.properties`.
 - adb: `~/Android/Sdk/platform-tools/adb`. Screenshot: `adb exec-out screencap -p > f.png` (black = phone locked). Deep link: `adb shell am start -a android.intent.action.VIEW -d "tubelight://chat/<threadId>" studio.stepwise.tubelight`.
 - Checks before done: `cd app && npx tsc --noEmit && npx expo lint`; `cd agent-service && .venv/bin/pytest -q`.
