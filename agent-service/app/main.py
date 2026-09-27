@@ -1,4 +1,5 @@
 import asyncio
+import re
 import faulthandler
 import logging
 import signal
@@ -239,6 +240,49 @@ async def speech_part(message_id: str, n: int, user: User = Depends(current_user
         raise HTTPException(404, "No such part.")
     return Response(await voice.speak(chunks[n], m.get("teammate_id")), media_type="audio/wav",
                     headers={"Cache-Control": "private, max-age=3600"})
+
+
+class EnhanceIn(BaseModel):
+    name: str = ""
+    role: str = ""
+    bio: str = ""
+    instructions: str = ""
+    toolkits: list[str] = []
+
+
+ENHANCE = """You write the instructions (system prompt) for an AI teammate in Tubelight, a team chat where people
+work with AI teammates. Rewrite the user's notes into a clear, specific brief the teammate will follow.
+
+The name given is the teammate's own name, and the person they work for is "the user". Start with
+"You are <name>, …" and write in the second person. Use short plain-text sections with a heading line each:
+Role, What you do, How you work, Tone, Boundaries. Bullets where they help. Under 250 words.
+
+Keep every concrete detail the user gave (names, tools, preferences, limits) and do not invent facts,
+companies or people. Where the notes are vague, choose sensible defaults for the role. Always include:
+ask one short question when a request is unclear; say what you're about to do before long tasks; anything
+that sends, posts, pays or changes data waits for the user's approval; keep chat replies short.
+Reply with the instructions only: no preamble, no markdown code fences."""
+
+
+@app.post("/teammates/enhance")
+async def enhance_instructions(body: EnhanceIn, user: User = Depends(current_user)):
+    if not (body.instructions.strip() or body.role.strip()):
+        raise HTTPException(400, "Add a role or a few words about what they should do first.")
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    notes = "\n".join(f"{k}: {v}" for k, v in (
+        ("Teammate's name", body.name.strip()), ("Teammate's role", body.role.strip()), ("Bio", body.bio.strip()),
+        ("Apps they can use", ", ".join(body.toolkits)), ("User's notes", body.instructions.strip()),
+    ) if v)
+    try:
+        out = await llm.chat_model().ainvoke([SystemMessage(ENHANCE), HumanMessage(notes[:6000])])
+    except Exception:
+        log.exception("enhance failed")
+        raise HTTPException(502, "The model didn't respond. Try again in a moment.")
+    text = re.sub(r"^```\w*\n|\n```$", "", (out.text or "").strip()).replace("**", "").strip()
+    if not text:
+        raise HTTPException(502, "The model returned nothing. Try again.")
+    return {"prompt": text[:8000]}
 
 
 # ------------------------------------------------------------------ memories

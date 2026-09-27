@@ -67,8 +67,23 @@ def fallbacks() -> list[str]:
     return [m for m in ids if key(parse(m)[0])]
 
 
+class PaidModelError(ValueError):
+    pass
+
+
+def is_free(model_id: str) -> bool:
+    """OpenRouter bills per model: only ':free' ids, or ones its API listed at $0 (cached listing), are allowed.
+    Groq, Cloudflare Workers AI and the other providers here are used on their free tiers only."""
+    provider, model = parse(model_id)
+    if provider != "openrouter":
+        return True
+    return model.endswith(":free") or any(m["id"] == f"openrouter:{model}" for m in _models[1])
+
+
 def _one(model_id: str) -> ChatOpenAI:
     provider, model = parse(model_id)
+    if not is_free(model_id):
+        raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
                       default_headers=_headers(provider), timeout=120, max_retries=1)
 

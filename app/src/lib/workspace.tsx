@@ -75,6 +75,9 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     setThreads(th.data as Thread[])
     setPending(a.data as Approval[])
     setLiveRuns(r.data as Run[])
+    // Show the lists now; last-message previews fill in right after instead of holding the whole inbox.
+    loaded.current = true
+    setLoading(false)
     // Latest message per thread. ponytail: one query per thread; fine for tens of threads,
     // swap for an RPC / view with DISTINCT ON if a workspace grows to hundreds.
     const rows = await Promise.all(
@@ -85,8 +88,6 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     const next: Record<string, Preview> = {}
     for (const row of rows) if (row.data) next[row.data.thread_id] = row.data as Preview
     setPreviews(next)
-    loaded.current = true
-    setLoading(false)
   }, [userId])
 
   useEffect(() => {

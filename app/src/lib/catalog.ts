@@ -42,6 +42,27 @@ export interface Toolkit {
   auth: 'none' | 'oauth' | 'key'
 }
 
+/**
+ * A short, honest shortlist for the model picker: what each is good at and how fast it feels. Only ids the
+ * server actually lists (all free) are shown; the rest stay under "All free models".
+ */
+export const MODEL_HINTS: { id: string; best: string }[] = [
+  { id: 'groq:openai/gpt-oss-120b', best: 'Best all-rounder: planning, tools and clear writing. Very fast on Groq.' },
+  { id: 'groq:qwen/qwen3.8-27b', best: 'Coding and structured output. Fast on Groq.' },
+  { id: 'cloudflare:@cf/moonshotai/kimi-k2.7-code', best: 'Long, multi-step coding work.' },
+  { id: 'groq:openai/gpt-oss-20b', best: 'Quickest replies for simple jobs: triage, summaries, short answers.' },
+  { id: 'cloudflare:@cf/zai-org/glm-5.3', best: 'Research and long documents (very long context).' },
+  { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', best: 'Hardest problems, careful reasoning. Slower, with tighter daily limits.' },
+]
+
+/** The shortlisted model that fits a role best (by keywords in the role). */
+export function recommendedModel(role: string) {
+  const r = role.toLowerCase()
+  if (/(develop|engineer|code|coder|program|qa|test|devops|backend|frontend)/.test(r)) return 'groq:qwen/qwen3.8-27b'
+  if (/(research|analy|strateg|legal|finance)/.test(r)) return 'cloudflare:@cf/zai-org/glm-5.3'
+  return 'groq:openai/gpt-oss-120b'
+}
+
 export const DEFAULT_MODEL = 'groq:openai/gpt-oss-120b'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
 export const REPO_RE = /^https?:\/\/\S+\.\S+/

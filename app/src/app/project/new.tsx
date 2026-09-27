@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon, Link01Icon } from '@hugeicons/core-free-icons'
 
 import { ColorSwatches, FormSection, SheetHeader, TeammateToggles } from '@/components/form-bits'
+import { SheetScreen } from '@/components/sheet-screen'
 import { COLORS, REPO_RE } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Project } from '@/lib/types'
@@ -51,8 +52,8 @@ export default function NewProject() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.panel }}>
-      <SheetHeader title="New project" subtitle="A group chat where teammates work together." onClose={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+    <SheetScreen>
+      <SheetHeader title="New project" subtitle="A group chat where teammates work together." />
       <KeyboardAwareScrollView bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24, gap: 32 }}>
         <FormSection title="Details">
           <TextField label="Name" value={name} onChangeText={setName} placeholder="Stepwise UI" error={errors.name} autoCapitalize="words" maxLength={60} />
@@ -93,6 +94,6 @@ export default function NewProject() {
           onPress={create}
         />
       </View>
-    </View>
+    </SheetScreen>
   )
 }

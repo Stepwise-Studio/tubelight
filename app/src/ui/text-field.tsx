@@ -5,7 +5,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { Cancel01Icon, Search01Icon, ViewIcon, ViewOffIcon } from '@hugeicons/core-free-icons'
 
-import { motion, radius, type as typeScale, useTheme } from '@/theme'
+import { motion, type as typeScale, useTheme } from '@/theme'
 
 import { haptic } from './haptics'
 import { Icon, type IconSvgElement } from './icon'
@@ -43,7 +43,11 @@ export interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   inputRef?: Ref<TextInput>
 }
 
-/** Labelled text input: focus ring in tube, error shake, secure toggle, multiline, character count. */
+/**
+ * Stepwise UI's Input (ui.stepwise.studio/r/input): 44 px squircle (radius 18, smoothing 0.6), 1 px hairline
+ * that turns zinc on focus and red on error, label above that darkens on focus, optional left icon whose
+ * stroke thickens on focus, 12 px hint/error below, 280 ms error shake. Plus multiline and a character count.
+ */
 export function TextField({
   label, hint, error, showCount, icon, secureTextEntry, multiline, maxLength, value, style, inputStyle, inputRef,
   onFocus, onBlur, editable = true, ...props
@@ -60,7 +64,9 @@ export function TextField({
     lastError.current = error
   }, [error, shake])
 
-  const borderColor = error ? c.danger : focused ? c.tube : c.edge
+  const dark = scheme === 'dark'
+  const borderColor = error ? (dark ? '#ef4444' : '#f87171') : focused ? (dark ? '#d4d4d8' : '#3f3f46') : c.edge
+  const quiet = dark ? '#71717a' : '#a1a1aa' // zinc-500 / zinc-400: label, icon and hint at rest
   const border = useAnimatedStyle(() => ({ borderColor: withTiming(borderColor, { duration: duration.quick }) }), [borderColor])
   const count = value?.length ?? 0
   const below = error || hint
@@ -68,20 +74,24 @@ export function TextField({
   return (
     <View style={[{ gap: 6 }, style]}>
       {label && (
-        <Text nativeID={`${id}-label`} variant="label" color={error ? 'danger' : 'ink2'} style={{ paddingLeft: 2 }}>
+        <Text nativeID={`${id}-label`} variant="label" color={error ? 'danger' : focused ? c.ink : quiet} style={{ paddingLeft: 2, letterSpacing: -0.13 }}>
           {label}
         </Text>
       )}
       <AnimatedSquircle
         style={[
           {
-            minHeight: 48, borderRadius: radius.md, borderWidth: 1, backgroundColor: c.panel,
+            minHeight: 44, borderRadius: 18, borderWidth: 1, backgroundColor: dark ? '#18181b' : '#ffffff',
             flexDirection: 'row', alignItems: multiline ? 'flex-start' : 'center', opacity: editable ? 1 : 0.5,
           },
           border, shakeStyle,
         ]}
       >
-        {icon && <View style={{ paddingLeft: 14, paddingTop: multiline ? 14 : 0 }}><Icon icon={icon} size={18} color={focused ? 'ink2' : 'ink3'} /></View>}
+        {icon && (
+          <View style={{ paddingLeft: 13, paddingTop: multiline ? 12 : 0 }}>
+            <Icon icon={icon} size={18} strokeWidth={focused ? 2 : 1.5} color={error ? c.danger : focused ? (dark ? '#d4d4d8' : '#52525b') : quiet} />
+          </View>
+        )}
         <TextInput
           ref={inputRef}
           accessibilityLabel={label}
@@ -92,7 +102,7 @@ export function TextField({
           maxLength={showCount ? undefined : maxLength}
           multiline={multiline}
           secureTextEntry={secureTextEntry && !reveal}
-          placeholderTextColor={c.ink4}
+          placeholderTextColor={quiet}
           selectionColor={c.tube}
           cursorColor={c.tube}
           keyboardAppearance={scheme}
@@ -101,9 +111,9 @@ export function TextField({
           style={[
             typeScale.body,
             {
-              flex: 1, color: c.ink, paddingHorizontal: icon ? 10 : 14,
-              paddingTop: multiline ? 13 : 0, paddingBottom: multiline ? 13 : 0,
-              minHeight: multiline ? 96 : 46, textAlignVertical: multiline ? 'top' : 'center',
+              flex: 1, color: c.ink, paddingLeft: icon ? 11 : 14, paddingRight: 14, letterSpacing: -0.45,
+              paddingTop: multiline ? 11 : 0, paddingBottom: multiline ? 11 : 0,
+              minHeight: multiline ? 96 : 42, textAlignVertical: multiline ? 'top' : 'center',
             },
             inputStyle,
           ]}
@@ -128,7 +138,7 @@ export function TextField({
           <View style={{ flex: 1 }}>
             {below && (
               <Animated.View key={error ? 'e' : 'h'} entering={FadeIn.duration(duration.quick)} exiting={FadeOut.duration(duration.quick)}>
-                <Text variant="footnote" color={error ? 'danger' : 'ink3'} accessibilityLiveRegion={error ? 'polite' : 'none'}>
+                <Text variant="footnote" color={error ? 'danger' : quiet} accessibilityLiveRegion={error ? 'polite' : 'none'}>
                   {below}
                 </Text>
               </Animated.View>

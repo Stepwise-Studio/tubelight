@@ -1,24 +1,32 @@
 // Small building blocks shared by the teammate, project and rule editors.
 import { type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
+import { GestureDetector } from 'react-native-gesture-handler'
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
+import { Grabber, useSheet } from '@/components/sheet-screen'
 import type { Teammate } from '@/lib/types'
 import { motion, radius, useTheme } from '@/theme'
 import { Icon, IconButton, Press, TeammateAvatar, Text, Toggle, haptic } from '@/ui'
 
-/** Header for a formSheet route: title, optional subtitle, close. */
-export function SheetHeader({ title, subtitle, onClose }: { title: string; subtitle?: string; onClose: () => void }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 8, paddingTop: 16, paddingBottom: 8, gap: 8 }}>
-      <View style={{ flex: 1 }}>
-        <Text variant="heading" accessibilityRole="header">{title}</Text>
-        {subtitle && <Text variant="caption" color="ink3">{subtitle}</Text>}
+/** Header for a sheet route: grabber, title, optional subtitle, round close. Inside a SheetScreen it drags the sheet. */
+export function SheetHeader({ title, subtitle, onClose }: { title: string; subtitle?: string; onClose?: () => void }) {
+  const sheet = useSheet()
+  const header = (
+    <View collapsable={false}>
+      {sheet && <Grabber />}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 12, paddingTop: sheet ? 8 : 16, paddingBottom: 8, gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text variant="heading" accessibilityRole="header">{title}</Text>
+          {subtitle && <Text variant="caption" color="ink3">{subtitle}</Text>}
+        </View>
+        <IconButton icon={Cancel01Icon} accessibilityLabel="Close" variant="soft" round size={36} iconSize={18} onPress={sheet?.close ?? onClose} />
       </View>
-      <IconButton icon={Cancel01Icon} accessibilityLabel="Close" variant="soft" size={36} iconSize={18} onPress={onClose} />
     </View>
   )
+  // In a sheet the header is the drag handle: pull it down to close.
+  return sheet ? <GestureDetector gesture={sheet.drag}>{header}</GestureDetector> : header
 }
 
 /** A titled group of fields. Groups sit 32 apart; fields inside 16. */

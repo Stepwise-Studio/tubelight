@@ -192,3 +192,16 @@ def test_voice_heard_drops_silence_and_phantoms():
     assert heard({"segments": [{"text": " Hi Dev", "no_speech_prob": 0.1}, {"text": " blah", "no_speech_prob": 0.9}]}) == "Hi Dev"
     assert heard({"text": "Book a meeting"}) == "Book a meeting"
     assert parts("") == [] and len(parts("Short. " * 40)[0]) <= 120
+
+
+def test_paid_openrouter_models_are_refused():
+    from app import llm
+
+    assert llm.is_free("openrouter:qwen/qwen3.8-27b:free")
+    assert llm.is_free("groq:openai/gpt-oss-120b")
+    assert not llm.is_free("openrouter:anthropic/claude-opus-5")
+    try:
+        llm._one("openrouter:openai/gpt-6")
+        raise AssertionError("a paid model was constructed")
+    except llm.PaidModelError:
+        pass

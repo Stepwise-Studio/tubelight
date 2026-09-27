@@ -16,6 +16,10 @@ import { ConfirmHost, MenuHost, PortalHost, ToastHost } from '@/ui'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
+// Our own sheet (components/sheet-screen) animates in and out: the native form sheet dismissed on any
+// downward scroll inside it and was slow to open on Android.
+const SHEET = { presentation: 'transparentModal', animation: 'none', contentStyle: { backgroundColor: 'transparent' } } as const
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     'InterDisplay-Regular': require('@/assets/fonts/InterDisplay-Regular.ttf'),
@@ -60,8 +64,8 @@ function Root() {
               <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
               <Stack.Screen name="chat/[threadId]" />
               <Stack.Screen name="teammate/[id]" />
-              <Stack.Screen name="teammate/new" options={{ presentation: 'formSheet', sheetAllowedDetents: [0.92], sheetGrabberVisible: true, sheetCornerRadius: 28 }} />
-              <Stack.Screen name="project/new" options={{ presentation: 'formSheet', sheetAllowedDetents: [0.92], sheetGrabberVisible: true, sheetCornerRadius: 28 }} />
+              <Stack.Screen name="teammate/new" options={SHEET} />
+              <Stack.Screen name="project/new" options={SHEET} />
               <Stack.Screen name="project/[id]/settings" />
               <Stack.Screen name="connections" />
             </Stack.Protected>
