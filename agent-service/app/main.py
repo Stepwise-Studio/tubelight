@@ -1,22 +1,23 @@
 import asyncio
-import re
 import faulthandler
 import logging
+import re
 import signal
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import config, connectors, db, events, files, llm, memory, runs, sandbox, voice
+from . import config, connectors, db, events, files, live, llm, memory, runs, sandbox
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -121,7 +122,7 @@ class MessageIn(BaseModel):
     mentions: list[str] = []
     reply_to: str | None = None
     attachments: list[dict[str, Any]] = []
-    voice: bool = False  # sent from voice mode: the teammate answers as speech
+    voice_task: bool = False  # sent by live voice mode (run_task): hidden in the chat, where the spoken words show instead
 
 
 async def _quoted(thread_id: str, reply_to: str | None) -> str:
@@ -145,12 +146,12 @@ async def post_message(thread_id: str, body: MessageIn, user: User = Depends(cur
         raise HTTPException(400, "Write a message first.")
     thread = await owned("threads", thread_id, user, "conversation")
     meta = {"attachments": body.attachments} if body.attachments else {}
+    if body.voice_task:
+        meta["voice_task"] = True
     message = await db.insert("messages", {"thread_id": thread_id, "owner_id": user["id"], "sender_type": "user",
                                            "text": body.text, "mentions": body.mentions, "reply_to": body.reply_to,
                                            "meta": meta})
     prompt = await _quoted(thread_id, body.reply_to) + body.text + await files.describe(user["id"], body.attachments)
-    if body.voice:
-        prompt += voice.INSTRUCTION
     run_id = await runs.start(user["id"], thread_id, prompt, mentions=body.mentions,
                               teammate_id=thread.get("teammate_id"), message_id=message["id"])
     await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
@@ -225,39 +226,46 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
 
 
 # ------------------------------------------------------------------ voice
-@app.post("/voice/transcribe")
-async def transcribe(request: Request, user: User = Depends(current_user)):
-    """Raw audio body (the app's fetch can't send React Native-style multipart files)."""
-    audio = await request.body()
-    if len(audio) > 25 * 1024 * 1024:
-        raise HTTPException(413, "That recording is too long.")
-    return {"text": await voice.transcribe(audio, "speech.m4a")}
+class LiveIn(BaseModel):
+    thread_id: str
 
 
-class SpeakIn(BaseModel):
-    text: str
-    teammate_id: str | None = None
+@app.post("/voice/live")
+async def voice_live(body: LiveIn, user: User = Depends(current_user)):
+    """Start a live voice session: a single-use Gemini Live token with the teammate's voice persona locked in."""
+    if not config.env("GEMINI_API_KEY"):
+        raise HTTPException(503, "Live voice needs a Gemini API key on the server.")
+    await owned("threads", body.thread_id, user, "conversation")
+    ctx = await runs.load_ctx(str(uuid.uuid4()), user["id"], body.thread_id, "message", None)
+    tm = ctx.members[0]
+    try:
+        token = await live.mint(live.setup(tm, await live.instruction(ctx, tm, body.thread_id)))
+    except httpx.HTTPError:
+        log.exception("live token failed")
+        raise HTTPException(502, "Could not start the voice session. Try again in a moment.")
+    return {"token": token, "model": config.LIVE_MODEL, "teammate_id": tm["id"]}
 
 
-@app.post("/voice/speak")
-async def speak(body: SpeakIn, user: User = Depends(current_user)):
-    return Response(await voice.speak(body.text, body.teammate_id), media_type="audio/wav")
+class TranscriptIn(BaseModel):
+    thread_id: str
+    turns: list[dict[str, str]]
 
 
-@app.get("/voice/messages/{message_id}")
-async def speech_parts(message_id: str, user: User = Depends(current_user)):
-    """How many audio parts a reply has; the app plays /voice/messages/{id}/{n} in order, prefetching the next."""
-    return {"parts": len(voice.parts((await owned("messages", message_id, user, "message"))["text"]))}
-
-
-@app.get("/voice/messages/{message_id}/{n}")
-async def speech_part(message_id: str, n: int, user: User = Depends(current_user)):
-    m = await owned("messages", message_id, user, "message")
-    chunks = voice.parts(m["text"])
-    if not 0 <= n < len(chunks):
-        raise HTTPException(404, "No such part.")
-    return Response(await voice.speak(chunks[n], m.get("teammate_id")), media_type="audio/wav",
-                    headers={"Cache-Control": "private, max-age=3600"})
+@app.post("/voice/transcript")
+async def voice_transcript(body: TranscriptIn, user: User = Depends(current_user)):
+    """Save what was said in a live voice session into the chat, so the conversation carries on in text."""
+    thread = await owned("threads", body.thread_id, user, "conversation")
+    ctx = await runs.load_ctx(str(uuid.uuid4()), user["id"], body.thread_id, "message", None)
+    tm_id = thread.get("teammate_id") or ctx.members[0]["id"]
+    for t in body.turns[:200]:
+        text = str(t.get("text") or "").strip()
+        if not text:
+            continue
+        mine = t.get("role") == "user"
+        await db.insert("messages", {"thread_id": body.thread_id, "owner_id": user["id"], "sender_type": "user" if mine else "teammate",
+                                     "teammate_id": None if mine else tm_id, "text": text[:4000], "kind": "text",
+                                     "meta": {"voice": True}})
+    return {"ok": True}
 
 
 class EnhanceIn(BaseModel):

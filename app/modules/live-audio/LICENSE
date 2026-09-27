@@ -1,0 +1,4 @@
+The audio engine is adapted from @speechmatics/expo-two-way-audio (MIT License,
+Copyright (c) 2023, Cantab Research Ltd.): communication-mode capture with the platform's
+echo canceller and noise suppressor, and speaker routing. Tubelight changes: 24 kHz playback,
+instant flush for barge-in, base64 in and out, linear RMS levels and a playback-state event.

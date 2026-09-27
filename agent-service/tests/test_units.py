@@ -185,15 +185,6 @@ def test_model_ids_and_fallback_chain(monkeypatch):
     assert chain.fallbacks[0].openai_api_base == "https://api.groq.com/openai/v1"
 
 
-def test_voice_heard_drops_silence_and_phantoms():
-    from app.voice import heard, parts
-
-    assert heard({"text": " Thank you.", "segments": [{"text": " Thank you.", "no_speech_prob": 0.2}]}) == ""
-    assert heard({"segments": [{"text": " Hi Dev", "no_speech_prob": 0.1}, {"text": " blah", "no_speech_prob": 0.9}]}) == "Hi Dev"
-    assert heard({"text": "Book a meeting"}) == "Book a meeting"
-    assert parts("") == [] and len(parts("Short. " * 40)[0]) <= 120
-
-
 def test_paid_openrouter_models_are_refused():
     from app import llm
 
@@ -268,3 +259,8 @@ def test_big_requests_skip_groq_first(monkeypatch):
     big = llm.chat_model(size=12000)
     assert big.runnable.last.model_name == "@cf/openai/gpt-oss-120b"  # big: Cloudflare first (via the content fix)
     assert big.fallbacks[0].model_name == "openai/gpt-oss-120b"
+
+
+def test_status_label_for_non_verb_actions():
+    from app.tools import label
+    assert label("GOOGLECALENDAR_EVENTS_LIST", {}) == "Working in Googlecalendar"

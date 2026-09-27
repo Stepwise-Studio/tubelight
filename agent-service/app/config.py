@@ -18,6 +18,7 @@ OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")  # GROQ_/GEMINI_/MISTRAL_API_KEY 
 DEFAULT_MODEL = env("DEFAULT_MODEL", "openrouter:nvidia/nemotron-3-super-120b-a12b:free")
 ROUTER_MODEL = env("ROUTER_MODEL", DEFAULT_MODEL)
 LEARN_MODEL = env("LEARN_MODEL", "gemini:gemini-3.5-flash-lite")
+LIVE_MODEL = env("LIVE_MODEL", "gemini-3.8-live")
 COMPOSIO_API_KEY = env("COMPOSIO_API_KEY")
 GITHUB_TOKEN = env("GITHUB_TOKEN")  # optional, used only by the approved git_push tool
 APP_URL = env("APP_URL", "http://localhost:3000")

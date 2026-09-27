@@ -84,14 +84,17 @@ def apply_edit(name: str, args: dict[str, Any], edited: dict[str, Any] | None) -
 _ING = {"get": "getting", "set": "setting", "put": "putting", "run": "running", "list": "listing", "send": "sending",
         "fetch": "fetching", "search": "searching", "find": "finding", "read": "reading", "create": "creating",
         "update": "updating", "delete": "deleting", "move": "moving", "add": "adding", "remove": "removing",
-        "reply": "replying to", "draft": "drafting", "patch": "patching", "modify": "changing"}
+        "reply": "replying to", "draft": "drafting", "patch": "patching", "modify": "changing", "check": "checking",
+        "schedule": "scheduling", "insert": "adding", "upload": "uploading", "download": "downloading", "star": "starring",
+        "archive": "archiving", "forward": "forwarding", "invite": "inviting", "accept": "accepting", "decline": "declining"}
 
 
-def _ing(action: str) -> str:
-    """'fetch emails' -> 'Fetching emails', for the live status line."""
+def _ing(action: str) -> str | None:
+    """'fetch emails' -> 'Fetching emails', for the live status line; None when the action doesn't start with a verb
+    we know ('events list' must not become 'Eventsing list')."""
     verb, _, rest = action.partition(" ")
-    word = _ING.get(verb) or (verb[:-1] + "ing" if verb.endswith("e") and not verb.endswith("ee") else verb + "ing")
-    return f"{word} {rest}".strip().capitalize()
+    word = _ING.get(verb)
+    return f"{word} {rest}".strip().capitalize() if word else None
 
 
 def _phrase(name: str) -> tuple[str, str]:
@@ -109,7 +112,8 @@ def label(name: str, args: dict[str, Any]) -> str:
     if name == MULTI and inner(name, args):
         name = inner(name, args)[0][0]
     toolkit, action = _phrase(name)
-    return f"{_ing(action)} in {connectors.name_of(toolkit.upper())}" if action else name
+    app = connectors.name_of(toolkit.upper())
+    return (f"{_ing(action)} in {app}" if _ing(action) else f"Working in {app}") if action else name
 
 
 def title(name: str, args: dict[str, Any]) -> str:

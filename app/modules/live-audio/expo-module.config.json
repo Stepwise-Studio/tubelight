@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["studio.stepwise.liveaudio.LiveAudioModule"]
+  }
+}

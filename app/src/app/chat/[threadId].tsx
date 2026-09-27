@@ -48,8 +48,15 @@ export default function Thread() {
   const ghosts = Object.values(t.ghosts)
   // Index 0 sits at the bottom. A run shows its indicator until its text starts streaming
   // (same slot); a run waiting on an approval card already on screen shows nothing extra.
+  // One indicator per teammate: a message that arrives while a run is busy queues as a second "running" run, and two
+  // pills for the same teammate read as a glitch. A live status (with its label) wins over the queued fallback.
+  const perMate = new Map<string, LiveStatus>()
+  for (const st of statusFor.values()) {
+    const had = perMate.get(st.teammate_id)
+    if (!had || (!had.label && st.label)) perMate.set(st.teammate_id, st)
+  }
   const liveItems: ChatItem[] = [
-    ...[...statusFor.values()]
+    ...[...perMate.values()]
       // Hide while text streams, and keep hiding "writing" after `done` until the DB row swaps in.
       .filter((s) => !ghosts.some((g) => g.run_id === s.run_id && (!g.done || s.state === 'writing')))
       .filter((s) => s.state !== 'waiting' || !Object.values(t.approvals).some((a) => a.run_id === s.run_id && a.status === 'pending'))
@@ -58,7 +65,8 @@ export default function Thread() {
   ]
   const items: ChatItem[] = [
     ...liveItems,
-    ...t.messages.map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
+    // Tasks handed over by live voice are hidden: the spoken words are saved as the conversation instead.
+    ...t.messages.filter((m) => !m.meta?.voice_task).map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]
 
   // One retry at a time: a second tap while the first is on its way would start a second run.
@@ -250,9 +258,11 @@ export default function Thread() {
         <VoiceMode
           teammate={dmMate}
           title={title}
+          threadId={threadId}
           messages={t.messages}
-          live={live}
-          onSend={(text) => send(text, [], { voice: true })}
+          working={liveRuns.some((r) => r.status === 'running')}
+          activity={Object.values(t.statuses).find((st) => st.label)?.label}
+          onTask={(text) => t.send(text, [], { voiceTask: true })}
           onClose={() => setVoice(false)}
         />
       )}

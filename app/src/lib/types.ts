@@ -80,6 +80,10 @@ export interface Message {
     allow_other?: boolean
     /** connect cards */
     toolkit?: string
+    /** Said in live voice mode (a transcript line). */
+    voice?: boolean
+    /** A task live voice handed to the teammate: hidden, the spoken words show instead. */
+    voice_task?: boolean
     name?: string
     reason?: string
     [k: string]: unknown
