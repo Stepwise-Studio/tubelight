@@ -1,10 +1,10 @@
 import * as Clipboard from 'expo-clipboard'
 import { Image } from 'expo-image'
-import { createContext, memo, useContext, useEffect, useState } from 'react'
+import { Fragment, createContext, memo, useContext, useEffect, useState } from 'react'
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, ArrowRight02Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -34,7 +34,7 @@ const JOIN = 6 // corner between two bubbles of one group
 export function senderOf(item: ChatItem) {
   if (item.type === 'message') {
     const m = item.m
-    if (m.kind === 'handoff' || m.kind === 'event' || m.kind === 'error') return 'system'
+    if (m.kind === 'event' || m.kind === 'error') return 'system'
     return m.sender_type === 'teammate' ? `tm:${m.teammate_id}` : m.sender_type
   }
   return `tm:${item.type === 'ghost' ? item.g.teammate_id : item.s.teammate_id}`
@@ -107,18 +107,16 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   }
   if (item.type === 'ghost') {
     return (
-      <TeammateBlock teammate={t} first={first} paused={false} working>
-        {/* Same label and bubble the final row carries, so the swap doesn't shift anything. */}
-        {proactive && <EventLabel />}
-        <Bubble side="left" first={first} last={last} style={hasWideBlock(item.g.text) ? { width: '100%' } : undefined}>
-          <View accessibilityLiveRegion="none"><Markdown value={stripCues(item.g.text)} /></View>
-        </Bubble>
+      <TeammateBlock teammate={t} first={first} paused={false} working bleed={hasWideBlock(item.g.text)}>
+        {/* Same label and layout the final row carries, so the swap doesn't shift anything. */}
+        {proactive && <Inset><EventLabel /></Inset>}
+        <View accessibilityLiveRegion="none" style={{ alignSelf: 'stretch' }}><Reply text={item.g.text} first={first} last={last} /></View>
       </TeammateBlock>
     )
   }
   const m = item.m
   switch (m.kind) {
-    case 'handoff': return <HandoffRow m={m} />
+    case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
     case 'event': return <SystemRow icon={FlashIcon} text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
@@ -157,6 +155,68 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
  */
 const hasWideBlock = (text: string) => /```|^\s*\|.*\|\s*$\n^\s*\|?\s*:?-{3,}/m.test(text)
 
+/** Splits a reply into prose and wide blocks (fenced code, tables), in order. */
+export function splitWide(text: string): { wide: boolean; text: string }[] {
+  const out: { wide: boolean; text: string }[] = []
+  let buf: string[] = []
+  let mode: 'prose' | 'code' | 'table' = 'prose'
+  const flush = () => {
+    const t = buf.join('\n').trim()
+    if (t) out.push({ wide: mode !== 'prose', text: t })
+    buf = []
+  }
+  for (const line of text.split('\n')) {
+    if (mode === 'code') {
+      buf.push(line)
+      if (/^\s*```/.test(line)) { flush(); mode = 'prose' }
+      continue
+    }
+    if (/^\s*```/.test(line)) { flush(); mode = 'code'; buf.push(line); continue }
+    const row = /^\s*\|/.test(line)
+    if (row !== (mode === 'table')) { flush(); mode = row ? 'table' : 'prose' }
+    buf.push(line)
+  }
+  flush()
+  return out
+}
+
+/** The side padding a teammate's bubbles sit in (avatar gutter in groups, room on the right in DMs). */
+function Inset({ children }: { children: React.ReactNode }) {
+  const { group } = useActions()
+  return <View style={{ alignSelf: 'stretch', alignItems: 'flex-start', paddingLeft: group ? GUTTER : 0, paddingRight: group ? 8 : 48 }}>{children}</View>
+}
+
+/**
+ * A teammate's reply. Tables and code blocks break out of the bubble to the chat's full width, and the prose around
+ * them stays in bubbles. Wide rows render inside a `bleed` TeammateBlock.
+ */
+function Reply({ text, first, last, highlighted, head, tail }: {
+  text: string; first: boolean; last: boolean; highlighted?: boolean; head?: React.ReactNode; tail?: React.ReactNode
+}) {
+  const { handles } = useActions()
+  const parts = splitWide(stripCues(text))
+  if (!parts.some((p) => p.wide)) {
+    return (
+      <Bubble side="left" first={first} last={last} highlighted={highlighted}>
+        {head}
+        <Markdown value={stripCues(text)} mentions={handles} />
+        {tail}
+      </Bubble>
+    )
+  }
+  if (head && parts[0].wide) parts.unshift({ wide: false, text: '' })
+  return [...parts.map((p, i) => p.wide ? (
+    <View key={i} style={{ alignSelf: 'stretch', marginVertical: 2 }}><Markdown value={p.text} /></View>
+  ) : (
+    <Inset key={i}>
+      <Bubble side="left" first={first && i === 0} last={last && i === parts.length - 1} highlighted={highlighted}>
+        {i === 0 && head}
+        {!!p.text && <Markdown value={p.text} mentions={handles} />}
+      </Bubble>
+    </Inset>
+  )), tail && <Inset key="tail">{tail}</Inset>]
+}
+
 function Bubble({ side, first, last, tone = 'panel', highlighted, style, children }: {
   side: 'left' | 'right'; first: boolean; last: boolean; tone?: 'panel' | 'mine'; highlighted?: boolean; style?: ViewStyle; children: React.ReactNode
 }) {
@@ -187,8 +247,8 @@ function Bubble({ side, first, last, tone = 'panel', highlighted, style, childre
   )
 }
 
-function TeammateBlock({ teammate, first, paused, working, children }: {
-  teammate?: Teammate; first: boolean; paused: boolean; working?: boolean; children: React.ReactNode
+function TeammateBlock({ teammate, first, paused, working, bleed, children }: {
+  teammate?: Teammate; first: boolean; paused: boolean; working?: boolean; bleed?: boolean; children: React.ReactNode
 }) {
   const live = !!working
   const { group } = useActions()
@@ -203,7 +263,9 @@ function TeammateBlock({ teammate, first, paused, working, children }: {
           </Text>
         </View>
       )}
-      <View style={{ paddingLeft: group ? GUTTER : 0, paddingRight: group ? 8 : 48, alignItems: 'flex-start' }}>{children}</View>
+      {bleed
+        ? <View style={{ alignItems: 'flex-start' }}>{children}</View>
+        : <View style={{ paddingLeft: group ? GUTTER : 0, paddingRight: group ? 8 : 48, alignItems: 'flex-start' }}>{children}</View>}
     </View>
   )
 }
@@ -223,18 +285,17 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
 }) {
   const { onReply } = useActions()
   const calls = m.meta.tool_calls ?? []
+  const wide = hasWideBlock(m.text)
+  const Pad = wide ? Inset : Fragment
   return (
     <SwipeToReply onReply={() => onReply(m)}>
-      <TeammateBlock teammate={teammate} first={first} paused={paused} working={working}>
-        {m.proactive && <EventLabel type={m.meta.event_type} />}
-        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={hasWideBlock(m.text) ? { width: '100%' } : { maxWidth: '100%' }}>
-          <Bubble side="left" first={first} last={last} highlighted={highlighted}>
-            {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
-            <Markdown value={stripCues(m.text)} />
-            <Attachments items={m.meta.attachments} />
-          </Bubble>
+      <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
+        {m.proactive && <Pad><EventLabel type={m.meta.event_type} /></Pad>}
+        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
+          <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
+            tail={m.meta.attachments?.length ? <Attachments items={m.meta.attachments} /> : undefined} />
         </Pressable>
-        {calls.length > 0 && <ToolCalls calls={calls} />}
+        {calls.length > 0 && <Pad><ToolCalls calls={calls} /></Pad>}
       </TeammateBlock>
     </SwipeToReply>
   )
@@ -420,24 +481,12 @@ function renderMentions(text: string, handles: Set<string>) {
       : part)
 }
 
-function HandoffRow({ m }: { m: ChatMessage }) {
+/** Older runs handed work over with a separate note; show it the way teammates talk now: an @mention in a message. */
+function HandoffMessage({ m, first, last, paused }: { m: ChatMessage; first: boolean; last: boolean; paused: boolean }) {
   const from = useTeammate(m.teammate_id)
   const to = useTeammate(m.meta.to_teammate_id)
-  const note = m.meta.note
-  return (
-    <View
-      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 16 }}
-      accessible
-      accessibilityLabel={`${from?.name ?? 'A teammate'} handed off to ${to?.name ?? 'a teammate'}${note ? `: ${note}` : ''}`}
-    >
-      {from && <TeammateAvatar teammate={from} size={18} interactive={false} paused />}
-      <Text variant="footnote" color="ink2">{from?.name ?? 'Teammate'}</Text>
-      <Icon icon={ArrowRight02Icon} size={13} color="ink3" />
-      {to && <TeammateAvatar teammate={to} size={18} interactive={false} paused />}
-      <Text variant="footnote" color="ink2">{to?.name ?? 'Teammate'}</Text>
-      {note ? <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>{` · “${note}”`}</Text> : null}
-    </View>
-  )
+  const text = `@${to?.handle ?? 'teammate'} ${m.meta.note ?? ''}`.trim()
+  return <TeammateMessage m={{ ...m, text }} teammate={from} first={first} last={last} paused={paused} />
 }
 
 function SystemRow({ icon, text }: { icon: typeof FlashIcon; text: string }) {

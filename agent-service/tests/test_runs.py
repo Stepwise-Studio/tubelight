@@ -99,28 +99,37 @@ async def test_router_falls_back_to_first_member(api, env):
     assert fdb.rows("messages", sender_type="teammate")[0]["teammate_id"] == dev["id"]
 
 
-async def test_handoff_loop_guard(api, env):
+async def test_mentions_pass_the_turn_with_a_cap(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
     p = project(fdb, [dev, tess])
 
     def ping_pong(messages):
         me = "dev" if "(@dev)" in messages[0].content else "tess"
-        last = messages[-1]
-        if isinstance(last, ToolMessage) and "limit reached" in last.content:
-            return ai("Fine, I will finish it myself.")
-        return ai(calls=[("handoff_to", {"handle": "tess" if me == "dev" else "dev", "note": "your turn"})])
+        return ai(f"Over to you, @{'tess' if me == 'dev' else 'dev'}.")
 
     fake.script = [ping_pong] * 20
     r = await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "go", "mentions": [dev["id"]]})
     await settle()
-    assert len(fdb.rows("messages", kind="handoff")) == 6
-    assert fdb.rows("runs", id=r.json()["run_id"])[0]["handoffs"] == 6
-    assert fdb.rows("messages", kind="text", sender_type="teammate")[0]["text"] == "Fine, I will finish it myself."
-    # tess sees dev's handoff note as a named message, never dev's tool traffic
+    said = fdb.rows("messages", kind="text", sender_type="teammate")
+    assert len(said) == 7  # dev's first reply, then at most 6 turns asked for by mention
+    assert [m["teammate_id"] for m in said[:3]] == [dev["id"], tess["id"], dev["id"]]
+    assert fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "done"
+    # tess sees dev's words as a named message, never dev's tool traffic
     tess_view = next(c for c in fake.calls if "(@tess)" in c[0].content)
-    assert any(isinstance(m, HumanMessage) and m.content.startswith("[Dev · developer handed off to @tess]") for m in tess_view)
+    assert any(isinstance(m, HumanMessage) and m.content.startswith("[Dev · developer]: Over to you, @tess") for m in tess_view)
     assert not any(isinstance(m, ToolMessage) for m in tess_view)
+
+
+async def test_at_all_asks_everyone(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+    fake.script = [ai("Dev: tabs."), ai("Tess: spaces.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "@all tabs or spaces?"})
+    await settle()
+    said = fdb.rows("messages", kind="text", sender_type="teammate")
+    assert [m["teammate_id"] for m in said] == [dev["id"], tess["id"]]
 
 
 def _gmail_tool(sent: list):

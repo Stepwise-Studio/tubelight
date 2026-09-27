@@ -244,8 +244,9 @@ function ChatRow({ thread }: { thread: Thread }) {
   const working = ws.liveRuns.find((r) => r.thread_id === thread.id && r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
 
+  // A DM's title is already the teammate's name; a group says who.
   const sub = working
-    ? `${workerName ?? 'A teammate'} is working`
+    ? (thread.id.startsWith('dm:') || !workerName ? 'Working' : `${workerName} is working`)
     : pending
       ? `Waiting for your approval`
       : previewText(p, thread, (id) => ws.teammate(id)?.name)

@@ -5,7 +5,7 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, Alert02Icon, ArrowTurnBackwardIcon, ArrowUp02Icon, Camera01Icon, Cancel01Icon, File01Icon, Image01Icon, Mic01Icon, StopIcon,
+  Add01Icon, Alert02Icon, ArrowTurnBackwardIcon, ArrowUp02Icon, Camera01Icon, Cancel01Icon, File01Icon, Image01Icon, Mic01Icon, StopIcon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
 import { pickDocuments, pickPhotos, takePhoto, upload, type Draft } from '@/lib/attachments'
@@ -59,12 +59,13 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const before = text.slice(0, sel)
   const query = members.length ? before.match(MENTION)?.[2]?.toLowerCase() : undefined
   const matches = query === undefined ? [] : members.filter((m) => m.handle.startsWith(query) || m.name.toLowerCase().startsWith(query))
+  const offerAll = query !== undefined && members.length > 1 && ('all'.startsWith(query) || 'everyone'.startsWith(query))
 
   const pad = useAnimatedStyle(() => ({ paddingBottom: interpolate(kb.progress.value, [0, 1], [Math.max(insets.bottom, 10), 10]) }))
 
-  const insert = (t: Teammate) => {
+  const insert = (handle: string) => {
     haptic.tap()
-    const start = before.replace(MENTION, (_m, space) => `${space}@${t.handle} `)
+    const start = before.replace(MENTION, (_m, space) => `${space}@${handle} `)
     setText(start + text.slice(sel))
     setSel(start.length)
   }
@@ -104,7 +105,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
     if (!canSend) return
     const body = text.trim()
     haptic.light()
-    const mentions = members.filter((m) => new RegExp(`(^|\\s)@${m.handle}\\b`, 'i').test(body)).map((m) => m.id)
+    const all = /(^|\s)@(all|everyone)\b/i.test(body)
+    const mentions = members.filter((m) => all || new RegExp(`(^|\\s)@${m.handle}\\b`, 'i').test(body)).map((m) => m.id)
     onSend(body, mentions, { attachments: ready })
     setText('')
     setSel(0)
@@ -184,7 +186,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
 
   return (
     <Animated.View style={[{ paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.canvas }, pad]}>
-      {matches.length > 0 && (
+      {(matches.length > 0 || offerAll) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}
           exiting={FadeOut.duration(motion.duration.quick)}
@@ -192,13 +194,26 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
         >
           <Squircle style={{ borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 4 }} accessibilityRole="menu">
             <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 }}>Mention a teammate</Text>
-            {matches.slice(0, 5).map((m) => (
+            {offerAll && (
+              <ListRow
+                title="Everyone"
+                subtitle={`@all · all ${members.length} teammates reply`}
+                leading={
+                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon icon={UserGroupIcon} size={16} color={c.ink2} />
+                  </View>
+                }
+                onPress={() => insert('all')}
+                style={{ minHeight: 48 }}
+              />
+            )}
+            {matches.slice(0, offerAll ? 4 : 5).map((m) => (
               <ListRow
                 key={m.id}
                 title={m.name}
                 subtitle={`@${m.handle} · ${m.role}`}
                 leading={<TeammateAvatar teammate={m} size={28} interactive={false} />}
-                onPress={() => insert(m)}
+                onPress={() => insert(m.handle)}
                 style={{ minHeight: 48 }}
               />
             ))}

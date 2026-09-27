@@ -92,8 +92,22 @@ def is_free(model_id: str) -> bool:
     return model.endswith(":free") or any(m["id"] == f"openrouter:{model}" for m in _models[1])
 
 
-class _GeminiSignatures(httpx.AsyncBaseTransport):
-    """Gemini 3 rejects earlier tool calls that carry no "thought signature", and history from Groq or Cloudflare
+_cool: dict[str, float] = {}  # model name -> when (monotonic) it's worth trying again after a 429
+
+
+def _cooldown(body: str) -> float:
+    """Seconds to skip a model after a 429. A spent daily quota (Gemini's free tier is 20 requests a day on some
+    models) would otherwise cost a failed call and a retry on every request before the fallback answers."""
+    if "PerDay" in body or "per day" in body.lower():
+        return 3600  # ponytail: probe hourly; the exact reset time (midnight Pacific) isn't in the error
+    m = re.search(r"(?:retry|try again) in ([\d.]+)s", body)
+    return min(float(m.group(1)) + 1, 300) if m else 30
+
+
+class _Transport(httpx.AsyncBaseTransport):
+    """Shared by every provider: notes 429s for the cooldown, and adds Gemini's placeholder thought signature.
+
+    Gemini 3 rejects earlier tool calls that carry no "thought signature", and history from Groq or Cloudflare
     turns never has one (the OpenAI-compatible client drops them too). Google documents a placeholder signature for
     history that came from elsewhere; add it to every past tool call on the way out."""
 
@@ -103,34 +117,42 @@ class _GeminiSignatures(httpx.AsyncBaseTransport):
         self._inner = httpx.AsyncHTTPTransport()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        model = ""
         if request.method == "POST" and request.url.path.endswith("/chat/completions"):
             body = json.loads(await request.aread())
-            for m in body.get("messages", []):
-                for tc in m.get("tool_calls") or []:
-                    tc.setdefault("extra_content", self.SKIP)
-            content = json.dumps(body).encode()
-            headers = {k: v for k, v in request.headers.items() if k.lower() != "content-length"}
-            request = httpx.Request("POST", request.url, headers=headers, content=content, extensions=request.extensions)
-        return await self._inner.handle_async_request(request)
+            model = body.get("model", "")
+            if request.url.host == "generativelanguage.googleapis.com":
+                for m in body.get("messages", []):
+                    for tc in m.get("tool_calls") or []:
+                        tc.setdefault("extra_content", self.SKIP)
+                content = json.dumps(body).encode()
+                headers = {k: v for k, v in request.headers.items() if k.lower() != "content-length"}
+                request = httpx.Request("POST", request.url, headers=headers, content=content, extensions=request.extensions)
+        res = await self._inner.handle_async_request(request)
+        if res.status_code == 429 and model:
+            raw = await res.aread()
+            wait = _cooldown(raw.decode(errors="ignore"))
+            _cool[model] = time.monotonic() + wait
+            log.warning("%s rate limited: skipping it for %ds", model, wait)
+            headers = [(k, v) for k, v in res.headers.items() if k.lower() not in ("content-encoding", "content-length")]
+            return httpx.Response(429, headers=headers, content=raw, request=request)
+        return res
 
     async def aclose(self) -> None:
         await self._inner.aclose()
 
 
-_gemini_http: httpx.AsyncClient | None = None
+_http: httpx.AsyncClient | None = None
 
 
 def _one(model_id: str) -> ChatOpenAI:
     provider, model = parse(model_id)
     if not is_free(model_id):
         raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
-    global _gemini_http
-    extra: dict[str, Any] = {}
-    if provider == "gemini":
-        _gemini_http = _gemini_http or httpx.AsyncClient(transport=_GeminiSignatures(), timeout=120)
-        extra["http_async_client"] = _gemini_http
+    global _http
+    _http = _http or httpx.AsyncClient(transport=_Transport(), timeout=120)
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
-                      default_headers=_headers(provider), timeout=120, max_retries=1, **extra)
+                      default_headers=_headers(provider), timeout=120, max_retries=1, http_async_client=_http)
 
 
 def _text_content(messages: list) -> list:
@@ -154,6 +176,8 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
             log.warning("skipping %s: not free", m)
             continue
         ids.append(m)
+    now = time.monotonic()
+    ids = [m for m in ids if _cool.get(parse(m)[1], 0) <= now] or ids  # all cooling down: try them anyway
     if size > GROQ_REQUEST_LIMIT:
         # Too big for Groq's free tier: go straight to providers with bigger budgets; Groq only as a last resort.
         ids = [m for m in ids if parse(m)[0] != "groq"] + [m for m in ids if parse(m)[0] == "groq"]

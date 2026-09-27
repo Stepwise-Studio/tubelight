@@ -18,14 +18,14 @@ ACT = {"SEND", "POST", "PUSH", "MERGE", "DELETE", "REMOVE", "PAY", "ORDER", "PUB
 DRAFT = {"DRAFT"}
 READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "VIEW"}
 INTERNAL = {
-    "remember": "read", "recall": "read", "handoff_to": "read", "spawn_helper": "read",
+    "remember": "read", "recall": "read", "spawn_helper": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
 LABELS = {
-    "remember": "Saving to memory", "recall": "Searching memory", "handoff_to": "Handing off",
+    "remember": "Saving to memory", "recall": "Searching memory",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
     "git_push": "Pushing commits", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
@@ -203,15 +203,6 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "they connect, continue the task."),
         ]
 
-    if not helper and ctx.project and len(ctx.members) > 1:
-        async def handoff_to(handle: str, note: str = "") -> str:
-            return "handled by the graph"  # the tools node intercepts this call
-
-        tools.append(StructuredTool.from_function(
-            coroutine=handoff_to, name="handoff_to",
-            description="Hand the conversation to another member of this group, by @handle, with a note "
-                        "saying exactly what you need from them. Use only when their role fits better."))
-
     if ctx.docker and tm["role"] in ("developer", "tester"):
         box = lambda: ctx.sandbox(tm)  # noqa: E731
 
@@ -250,7 +241,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
 
 async def _helper(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], task: str) -> str:
-    """One level down: no handoff, no spawning, no act tools, at most HELPER_STEPS model calls."""
+    """One level down: no spawning, no act tools, at most HELPER_STEPS model calls."""
     # helpers get read/draft tools only; multi-execute calls are checked per call below
     tools = [t for t in build(ctx, tm, composio_tools, helper=True) if t.name == MULTI or classify(t.name) != "act"]
     by_name = {t.name: t for t in tools}

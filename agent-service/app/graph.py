@@ -189,7 +189,8 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append("Group members:\n" + "\n".join(
             f"- {m['name']} (@{m['handle']}, {m['role']}){' - that is you' if m['id'] == tm['id'] else ''}" for m in ctx.members))
         lines.append("Other members' messages appear as '[Name · role]: text'. Never prefix your own replies that way. "
-                     "If another member fits a request better, use handoff_to with a clear note.")
+                     "This is a group chat: to bring in another member, @mention their handle in your reply (e.g. @dev) with "
+                     "what you need from them, and they answer next. Only mention someone when you want them to reply.")
     else:
         lines.append(f"This is a direct message between you and {ctx.user_name}.")
     lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results.")
@@ -314,6 +315,8 @@ def make_teammate(ctx: RunCtx, tm: dict):
                 else t.tool_call_schema.model_json_schema())) for t in tools)) // 4 + estimate_tokens(view)
         model = llm.chat_model(tm["model"], tools, size=size)
         stream_id = str(uuid.uuid4())
+        if ctx.project:  # the run row names who is working, for the header and avatars
+            await db.update("runs", {"id": f"eq.{ctx.run_id}"}, {"teammate_id": tm["id"]})
         await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
         convo = [SystemMessage(system), *view]
         for attempt in range(3):
@@ -349,25 +352,30 @@ def make_teammate(ctx: RunCtx, tm: dict):
             })
             if ctx.proactive:
                 await push.notify(ctx.owner_id, tm["name"], text, ctx.thread_id)
+            asked = [m["id"] for m in mentioned(text, ctx.members) if m["id"] != tm["id"]]
+            if asked:
+                return {"messages": [*updates, ai], **_ask(state, asked)}
         return {"messages": [*updates, ai]}
 
     return node
 
 
-async def _route_with_model(ctx: RunCtx, msgs: list[BaseMessage]) -> str:
+async def _route_with_model(ctx: RunCtx, msgs: list[BaseMessage]) -> list[str]:
     roster = "\n".join(f"- {m['handle']}: {m['name']}, {m['role']}. {m.get('bio', '')}" for m in ctx.members)
     recent = _transcript(msgs[-6:])
     try:
         res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
-            SystemMessage(f"You route messages in a team chat. Members:\n{roster}\n\nPick the one member who should "
-                          'answer the latest message. Reply with JSON only, like {"handle": "dev"}.'),
+            SystemMessage(f"You route messages in a team chat. Members:\n{roster}\n\nPick who should answer the latest "
+                          "message: usually the one member it fits best; everyone when it speaks to the whole group "
+                          '(everyone, all of you, a debate or game with the team). Reply with JSON only, like '
+                          '{"handles": ["dev"]}.'),
             HumanMessage(recent),
         ])
-        m = re.search(r'"handle"\s*:\s*"@?([a-z0-9_-]+)"', res.text)
-        handle = m.group(1) if m else res.text.strip().lstrip("@").lower()
+        handles = re.findall(r'"@?([a-z0-9_-]+)"', res.text.split(":", 1)[-1]) or [res.text.strip().lstrip("@").lower()]
     except Exception:
-        handle = ""
-    return next((t["id"] for t in ctx.members if t["handle"] == handle), ctx.members[0]["id"])
+        handles = []
+    picked = [t["id"] for h in dict.fromkeys(handles) for t in ctx.members if t["handle"] == h]
+    return picked or [ctx.members[0]["id"]]
 
 
 def make_router(ctx: RunCtx):
@@ -377,7 +385,9 @@ def make_router(ctx: RunCtx):
             return {"active": queue[0], "queue": queue[1:]}
         if len(ctx.members) == 1:
             return {"active": ctx.members[0]["id"], "queue": []}
-        return {"active": await _route_with_model(ctx, state["messages"]), "queue": []}
+        last = _last_human(state["messages"])
+        picked = [m["id"] for m in mentioned(last, ctx.members)] or await _route_with_model(ctx, state["messages"])
+        return {"active": picked[0], "queue": picked[1:]}
 
     return router
 
@@ -477,20 +487,8 @@ def make_tools(ctx: RunCtx):
         approval_of = {p["tool_call_id"]: p["approval_id"] for p in state.get("pending") or []}
         decisions = state.get("decisions") or {}
         out: list[BaseMessage] = []
-        notes: list[BaseMessage] = []
-        update: dict[str, Any] = {}
-        handoffs = state.get("handoffs") or 0
         for tc in ai.tool_calls:
             name, args = tc["name"], tc["args"]
-            if name == "handoff_to":
-                text, target = await _handoff(ctx, tm, args, handoffs)
-                if target:
-                    handoffs += 1
-                    update.update(active=target["id"], handoffs=handoffs)
-                    notes.append(HumanMessage(f"[{tm['name']} · {tm['role']} handed off to @{target['handle']}]: "
-                                              f"{args.get('note', '')}", name="handoff"))
-                out.append(ToolMessage(text, tool_call_id=tc["id"], name=name))
-                continue
             if name in T.PROMPTS:
                 d = decisions.get(approval_of.get(tc["id"], "")) or {}
                 out.append(ToolMessage(await _prompt_result(ctx, tm, name, args, d), tool_call_id=tc["id"], name=name))
@@ -506,7 +504,7 @@ def make_tools(ctx: RunCtx):
                 args = T.apply_edit(name, args, d.get("args"))
             content, status = await T.run_tool(ctx, tm, by_name.get(name), name, args)
             out.append(ToolMessage(content, tool_call_id=tc["id"], name=name, status="error" if status == "error" else "success"))
-        return {"messages": out + notes, "pending": [], "decisions": {}, **update}
+        return {"messages": out, "pending": [], "decisions": {}}
 
     return tools_node
 
@@ -534,25 +532,23 @@ async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) 
     return f"The user connected {toolkit}. Its tools are available now; continue the task."
 
 
-async def _handoff(ctx: RunCtx, tm: dict, args: dict, handoffs: int) -> tuple[str, dict | None]:
-    handle = str(args.get("handle", "")).lstrip("@").lower()
-    target = next((m for m in ctx.members if m["handle"] == handle), None)
-    if not target or target["id"] == tm["id"]:
-        others = ", ".join(f"@{m['handle']}" for m in ctx.members if m["id"] != tm["id"])
-        return f"No other member with handle @{handle}. Members you can hand off to: {others}.", None
-    if handoffs >= config.MAX_HANDOFFS:
-        return (f"Handoff limit reached for this run ({config.MAX_HANDOFFS}). Finish the task yourself or tell the "
-                "user what is left."), None
-    note = str(args.get("note", ""))
-    await db.insert("messages", {
-        "thread_id": ctx.thread_id, "owner_id": ctx.owner_id, "sender_type": "teammate", "teammate_id": tm["id"],
-        "text": f"{tm['name']} handed off to @{target['handle']}: {note}"[:500], "kind": "handoff",
-        "proactive": ctx.proactive, "run_id": ctx.run_id, "meta": {"to_teammate_id": target["id"], "note": note},
-    })
-    await db.activity(ctx.owner_id, "handoff", f"{tm['handle']}->{target['handle']}", run_id=ctx.run_id,
-                      thread_id=ctx.thread_id, teammate_id=tm["id"], input={"note": note, "to": target["id"]})
-    await db.update("runs", {"id": f"eq.{ctx.run_id}"}, {"handoffs": handoffs + 1})
-    return f"Handed off to @{target['handle']}.", target
+def mentioned(text: str, members: list[dict]) -> list[dict]:
+    """Members @mentioned in a message, in member order; @all / @everyone means the whole group."""
+    handles = {h.lower() for h in re.findall(r"(?<![\w@])@([a-z0-9][a-z0-9_-]*)", text, re.I)}
+    if handles & {"all", "everyone"}:
+        return list(members)
+    return [m for m in members if m["handle"] in handles]
+
+
+def _ask(state: State, ids: list[str]) -> dict:
+    """Queue members a teammate asked for, up to MAX_HANDOFFS such turns per run (two teammates can't ping-pong forever)."""
+    queue = list(state.get("queue") or [])
+    turns = state.get("handoffs") or 0
+    for i in ids:
+        if i not in queue and turns < config.MAX_HANDOFFS:
+            queue.append(i)
+            turns += 1
+    return {"queue": queue, "handoffs": turns}
 
 
 # ------------------------------------------------------------------ graph

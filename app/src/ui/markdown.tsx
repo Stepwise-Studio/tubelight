@@ -82,14 +82,15 @@ function Table({ header, rows, c }: { header: ReactNode[][]; rows: ReactNode[][]
     return Math.round(Math.min(CELL_MAX, Math.max(CELL_MIN, longest * CHAR_W + 24)))
   })
   const cell = (content: ReactNode[], i: number, head: boolean): ReactNode => (
-    <View key={i} style={{ width: widths[i], paddingHorizontal: 12, paddingVertical: 9, justifyContent: 'center' } as ViewStyle}>
+    <View key={i} style={{ flexBasis: widths[i], flexGrow: widths[i], paddingHorizontal: 12, paddingVertical: 9, justifyContent: 'center' } as ViewStyle}>
       {head ? <RNText style={{ fontFamily: fonts.semibold, fontSize: 13, lineHeight: 18, color: c.ink }}>{Children.map(content, (n) => n)}</RNText> : content}
     </View>
   )
   return (
     <Squircle style={{ borderRadius: radius.md, borderWidth: 1, borderColor: c.line, overflow: 'hidden', marginVertical: 6 }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
-        <View>
+      {/* Columns keep their content widths and share out any room left, so a narrow table still spans the chat. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled contentContainerStyle={{ minWidth: '100%' }}>
+        <View style={{ flexGrow: 1 }}>
           <View style={{ flexDirection: 'row', backgroundColor: c.panel2 }}>{header.map((h, i) => cell(h, i, true))}</View>
           {rows.map((r, k) => (
             <View key={k} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.line }}>{r.map((d, i) => cell(d, i, false))}</View>
@@ -101,7 +102,15 @@ function Table({ header, rows, c }: { header: ReactNode[][]; rows: ReactNode[][]
 }
 
 class TubeRenderer extends Renderer {
-  constructor(private c: Palette) { super({ selectable: false }) }
+  constructor(private c: Palette, private mentions?: Set<string>) { super({ selectable: false }) }
+  text(text: string | ReactNode[], styles?: TextStyle): ReactNode {
+    if (typeof text !== 'string' || !this.mentions?.size || !text.includes('@')) return super.text(text, styles)
+    // @handles of people in the chat, tinted like in your own messages.
+    return super.text(text.split(/(@[a-z0-9][a-z0-9_-]*)/gi).map((part, i) =>
+      part.startsWith('@') && this.mentions!.has(part.slice(1).toLowerCase())
+        ? <RNText key={i} style={{ color: this.c.tube, fontFamily: fonts.medium }}>{part}</RNText>
+        : part), styles)
+  }
   code(text: string, language?: string): ReactNode {
     return <CodeBlock key={this.getKey()} code={text} language={language} />
   }
@@ -151,9 +160,9 @@ function useStyles(c: Palette): MarkedStyles {
 }
 
 /** Light markdown for teammate messages: text, lists, links, tables and code blocks (both scroll sideways when wide). */
-export const Markdown = memo(function Markdown({ value }: { value: string }) {
+export const Markdown = memo(function Markdown({ value, mentions }: { value: string; mentions?: Set<string> }) {
   const { c, scheme } = useTheme()
-  const renderer = new TubeRenderer(c)
+  const renderer = new TubeRenderer(c, mentions)
   const elements = useMarkdown(value, {
     colorScheme: scheme,
     renderer,

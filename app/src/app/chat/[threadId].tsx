@@ -127,7 +127,7 @@ export default function Thread() {
     onDiscardMessage: (m) => latest.current.t.discard(m.id),
     onRetryRun: () => latest.current.retryRun(),
     onDecided: () => { latest.current.t.refreshApprovals(); latest.current.ws.refresh() },
-    handles: new Set(handleKey.split(',')),
+    handles: new Set([...handleKey.split(','), ...(isDm ? [] : ['all', 'everyone'])]),
     group: !isDm,
   }
   const byId = new Map(t.messages.map((m) => [m.id, m]))
@@ -136,7 +136,7 @@ export default function Thread() {
   const working = liveRuns.find((r) => r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
   const subtitle = working
-    ? `${isDm ? 'Working' : `${workerName ?? 'A teammate'} is working`}`
+    ? (isDm || !workerName ? 'Working' : `${workerName} is working`)
     : isDm ? dmMate?.role ?? '' : people.length ? people.map((p) => p.name).join(', ') : 'No members yet'
   const openDetails = () => {
     if (dmMate) router.push({ pathname: '/teammate/[id]', params: { id: dmMate.id } })
