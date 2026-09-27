@@ -25,6 +25,14 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "teammates"
 User = dict[str, Any]
 
 
+async def _warm_catalog() -> None:
+    if connectors.enabled():
+        try:
+            await connectors.catalog()
+        except Exception as e:
+            log.warning("app catalog warm-up failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
@@ -38,7 +46,9 @@ async def lifespan(_: FastAPI):
     await runs.sweep_orphans()
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
     scheduler = asyncio.create_task(events.schedule_loop())
+    warm = asyncio.create_task(_warm_catalog())  # the first Connections visit shouldn't wait on Composio
     yield
+    warm.cancel()
     scheduler.cancel()
     for t in list(runs.tasks.values()):
         t.cancel()

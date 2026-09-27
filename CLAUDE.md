@@ -21,15 +21,15 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 - Checks before done: `cd app && npx tsc --noEmit && npx expo lint`; `cd agent-service && .venv/bin/pytest -q`.
 
 ## Deploy (home server)
-- Backend runs on the user's home server `akhil@192.168.0.4` (Ubuntu 24.04, Core 2 Duo, 3 GB; SSH key auth; user in `docker` group, no sudo for us).
+- Backend runs on the user's home server `akhil@192.168.0.6` (Ubuntu 24.04, Core 2 Duo, 3 GB, wired Ethernet ens33 (the RTL8188F USB Wi-Fi dongle uploads at ~0.04 Mbit/s: never rely on it); SSH key auth; user in `docker` group, no sudo for us).
   Container `tubelight-agent` (`--restart unless-stopped -p 127.0.0.1:8787:8787 --env-file ~/tubelight/.env --memory 1700m`), `EMBEDDINGS=cloudflare` (no AVX, little RAM). Postiz stack (compose project `snoofy`) is stopped with restart=no at the user's request; `files-webdav` must stay up.
 - Public URL `https://tubelight.stepwise.studio` via the existing remote-managed tunnel `snoofy-home` (systemd cloudflared on the server). App `.env` `EXPO_PUBLIC_AGENT_URL` points there. Gradle doesn't see `.env` changes: after editing it, `rm -rf android/app/build/generated/{assets,res}/react` before `assembleRelease`, then verify with `unzip -p <apk> assets/index.android.bundle | strings | grep stepwise`.
 - Code-only redeploy (fast, ~20 KB): ship `app/` + `teammates/` as a thin layer: tar a temp dir with
   `Dockerfile` = `FROM tubelight-agent` / `COPY app /srv/app` / `COPY teammates /srv/teammates`, pipe it to
-  `ssh akhil@192.168.0.4 docker build -t tubelight-agent -`, then `docker rm -f` + the `docker run` above.
+  `ssh akhil@192.168.0.6 docker build -t tubelight-agent -`, then `docker rm -f` + the `docker run` above.
   NumPy/fastembed can't load on this CPU (no SSE4.2): never switch it back to local embeddings.
   The laptop's local service (`tl-svc`) must stay stopped while the server runs (both would fire schedules).
-- Full redeploy (new deps): `cd agent-service && docker build -t tubelight-agent . && docker save tubelight-agent | gzip -1 | ssh akhil@192.168.0.4 docker load` (slow Wi-Fi, ~10 min; run as a systemd user unit), then re-run the container.
+- Full redeploy (new deps): `cd agent-service && docker build -t tubelight-agent . && docker save tubelight-agent | gzip -1 | ssh akhil@192.168.0.6 docker load` (slow Wi-Fi, ~10 min; run as a systemd user unit), then re-run the container.
 
 ## Rules
 - Secrets live only in `agent-service/.env`, `app/.env`, `.env.test` (all gitignored). Never print or commit them.
