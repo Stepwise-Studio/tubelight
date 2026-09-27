@@ -176,8 +176,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append(f"Connected apps ({', '.join(tm.get('allowed_toolkits') or [])}): find the right app tool with "
                      "COMPOSIO_SEARCH_TOOLS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL using the exact slug and "
                      "arguments. Never invent slugs.")
-    lines.append("If a request needs an app that is not connected (GMAIL, GITHUB, LINEAR, NOTION), call connect_app "
-                 "instead of telling the user to go somewhere. When the next step depends on the user's preference, "
+    lines.append("If a request needs an app that is not connected (any of about 1,500: Google Calendar, Slack, Notion, "
+                 "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
+                 "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
     if tm["role"] in ("developer", "tester") and "run_shell" not in tool_names:
         lines.append("You have no code sandbox right now (Docker is not available), so you cannot run code or tests. "
@@ -357,8 +358,9 @@ def make_gate(ctx: RunCtx):
                 if tc["name"] == "connect_app":
                     if connected is None:
                         connected = await connectors.ready(ctx.owner_id)
-                    if str(tc["args"].get("toolkit", "")).upper() in connected:
-                        continue  # nothing to wait for; the tools node says it is already connected
+                    slug = await connectors.resolve(str(tc["args"].get("toolkit", "")))
+                    if slug is None or slug in connected:
+                        continue  # nothing to wait for: the tools node says it's connected, or that no such app exists
                 pending.append(await _prompt(ctx, tm, tc))
                 continue
             if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
@@ -399,7 +401,7 @@ async def _prompt(ctx: RunCtx, tm: dict, tc: dict) -> dict:
         draft = {"question": title, "options": options, "allow_other": bool(args.get("allow_other", True))}
     else:
         kind = "connect"
-        toolkit = str(args.get("toolkit", "")).upper()
+        toolkit = await connectors.resolve(str(args.get("toolkit", ""))) or str(args.get("toolkit", "")).upper()
         name = connectors.name_of(toolkit)
         title = f"Connect {name}"
         draft = {"toolkit": toolkit, "name": name, "reason": str(args.get("reason") or "")}
@@ -476,7 +478,12 @@ async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) 
         if d.get("action") == "answer" and d.get("answer"):
             return f"The user answered: {d['answer']}"
         return "The user dismissed the question. Continue with your best judgement or ask in plain text."
-    toolkit = str(args.get("toolkit", "")).upper()
+    asked = str(args.get("toolkit", ""))
+    toolkit = await connectors.resolve(asked)
+    if toolkit is None:
+        close = await connectors.similar(asked)
+        return (f"There is no app called {asked}." + (f" Did you mean {', '.join(close)}?" if close else "")
+                + " Call connect_app again with the app's name.")
     if d and d.get("action") != "connected":
         return f"The user chose not to connect {toolkit} for now. Tell them what you can do without it."
     # Connected now, or already (the gate skipped the pause): either way this teammate gets the app's tools.

@@ -7,7 +7,9 @@ management and Composio's remote sandbox are off. The SDK is sync, so calls run 
 """
 import asyncio
 import copy
+import difflib
 import logging
+import re
 import time
 from functools import lru_cache
 from typing import Any
@@ -119,6 +121,23 @@ async def ready(user_id: str) -> set[str]:
     """Toolkits a teammate can use right now: connected ones plus those that need no sign-in."""
     connected = {c["toolkit"] for c in await list_connections(user_id) if c["connected"]}
     return connected | {t["toolkit"] for t in await catalog() if t["auth"] == "none"}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+async def resolve(toolkit: str) -> str | None:
+    """The catalog slug for whatever a model called an app: GOOGLE_CALENDAR, "Google Calendar" -> GOOGLECALENDAR."""
+    want = _norm(toolkit)
+    if not want:
+        return None
+    return next((t["toolkit"] for t in await catalog() if want in (_norm(t["toolkit"]), _norm(t["name"]))), None)
+
+
+async def similar(toolkit: str, n: int = 3) -> list[str]:
+    names = {_norm(t["name"]): t["name"] for t in await catalog()}
+    return [names[k] for k in difflib.get_close_matches(_norm(toolkit), list(names), n=n, cutoff=0.6)]
 
 
 def name_of(toolkit: str) -> str:

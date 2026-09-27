@@ -402,11 +402,14 @@ async def connections(user: User = Depends(current_user)):
 @app.post("/connections/{toolkit}")
 async def connect(toolkit: str, body: ConnectIn, user: User = Depends(current_user)):
     _need_composio()
+    slug = await connectors.resolve(toolkit)
+    if slug is None:
+        raise HTTPException(404, f"There's no app called {toolkit}.")
     try:
-        return {"redirect_url": await connectors.connect(user["id"], toolkit, body.callback_url)}
+        return {"redirect_url": await connectors.connect(user["id"], slug, body.callback_url)}
     except Exception:
         log.exception("composio connect failed")
-        raise HTTPException(502, f"Could not start connecting {toolkit.title()}. Try again in a moment.")
+        raise HTTPException(502, f"Could not start connecting {connectors.name_of(slug)}. Try again in a moment.")
 
 
 @app.delete("/connections/{toolkit}")

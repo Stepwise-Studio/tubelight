@@ -100,6 +100,7 @@ async def _supersede(thread_id: str) -> None:
                             {"status": "cancelled", "error": "Superseded by a newer message.", "ended_at": db.now()})
     for r in stale:
         sandbox.cleanup_workdir(r["id"])
+        await db.broadcast(thread_id, "status", {"run_id": r["id"], "teammate_id": r["teammate_id"], "state": "idle"})
 
 
 async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, graph_input: Any,

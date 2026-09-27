@@ -194,8 +194,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "their own answer. Use it for real forks, not for yes/no confirmations of approved actions."),
             StructuredTool.from_function(
                 coroutine=connect_app, name="connect_app",
-                description="Ask the user to connect an app you need (GMAIL, GITHUB, LINEAR or NOTION) when it is not "
-                            "connected yet. They get a Connect button in the chat; after they connect, continue the task."),
+                description="Ask the user to connect an app you need when it is not connected yet, by its name "
+                            "(e.g. 'Google Calendar', 'Slack', 'GitHub'). They get a Connect button in the chat; after "
+                            "they connect, continue the task."),
         ]
 
     if not helper and ctx.project and len(ctx.members) > 1:
