@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import db, llm, memory, sandbox
+from . import connectors, db, llm, memory, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -81,6 +81,19 @@ def apply_edit(name: str, args: dict[str, Any], edited: dict[str, Any] | None) -
     return {**args, "tools": edited.get("tools", items)}
 
 
+_ING = {"get": "getting", "set": "setting", "put": "putting", "run": "running", "list": "listing", "send": "sending",
+        "fetch": "fetching", "search": "searching", "find": "finding", "read": "reading", "create": "creating",
+        "update": "updating", "delete": "deleting", "move": "moving", "add": "adding", "remove": "removing",
+        "reply": "replying to", "draft": "drafting", "patch": "patching", "modify": "changing"}
+
+
+def _ing(action: str) -> str:
+    """'fetch emails' -> 'Fetching emails', for the live status line."""
+    verb, _, rest = action.partition(" ")
+    word = _ING.get(verb) or (verb[:-1] + "ing" if verb.endswith("e") and not verb.endswith("ee") else verb + "ing")
+    return f"{word} {rest}".strip().capitalize()
+
+
 def _phrase(name: str) -> tuple[str, str]:
     toolkit, _, rest = name.partition("_")
     return toolkit.title(), rest.replace("_", " ").lower()
@@ -92,11 +105,11 @@ def label(name: str, args: dict[str, Any]) -> str:
     if name in LABELS:
         return LABELS[name]
     if name == "COMPOSIO_SEARCH_TOOLS":
-        return "Looking for the right app tool"
+        return "Finding the right tool"
     if name == MULTI and inner(name, args):
         name = inner(name, args)[0][0]
     toolkit, action = _phrase(name)
-    return f"{toolkit}: {action}" if action else name
+    return f"{_ing(action)} in {connectors.name_of(toolkit.upper())}" if action else name
 
 
 def title(name: str, args: dict[str, Any]) -> str:

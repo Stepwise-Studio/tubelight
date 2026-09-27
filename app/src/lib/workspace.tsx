@@ -90,6 +90,15 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     setPreviews(next)
   }, [userId])
 
+  // Teammates speak in the user's local time: keep the device's time zone in their auth metadata.
+  useEffect(() => {
+    if (!userId) return
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    supabase.auth.getUser().then(({ data }) => {
+      if (timezone && data.user && data.user.user_metadata?.timezone !== timezone) supabase.auth.updateUser({ data: { timezone } })
+    }).catch(() => {})
+  }, [userId])
+
   useEffect(() => {
     // The root layout keys this provider by user, so signing out remounts it with empty state.
     if (!userId) return

@@ -61,10 +61,15 @@ export default function Thread() {
     ...t.messages.map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]
 
+  // One retry at a time: a second tap while the first is on its way would start a second run.
+  const retrying = useRef(false)
   const retryRun = async () => {
     const lastUser = t.messages.find((m) => m.sender_type === 'user' && !m.local)
     if (!lastUser) return toast({ title: 'Nothing to retry', body: 'Send a new message instead.' })
+    if (retrying.current) return
+    retrying.current = true
     const err = await t.rerun(lastUser)
+    retrying.current = false
     if (err) toast({ title: 'Unable to retry', body: err, tone: 'error' })
   }
 

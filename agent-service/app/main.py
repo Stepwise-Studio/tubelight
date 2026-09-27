@@ -152,7 +152,7 @@ async def post_message(thread_id: str, body: MessageIn, user: User = Depends(cur
     if body.voice:
         prompt += voice.INSTRUCTION
     run_id = await runs.start(user["id"], thread_id, prompt, mentions=body.mentions,
-                              teammate_id=thread.get("teammate_id"))
+                              teammate_id=thread.get("teammate_id"), message_id=message["id"])
     await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
     return {"message": {**message, "run_id": run_id}, "run_id": run_id}
 
@@ -164,11 +164,13 @@ async def retry_message(message_id: str, user: User = Depends(current_user)):
     if m["sender_type"] != "user":
         raise HTTPException(400, "Only your own messages can be retried.")
     thread = await owned("threads", m["thread_id"], user, "conversation")
+    if await db.one("runs", {"thread_id": f"eq.{m['thread_id']}", "status": "eq.running"}):
+        raise HTTPException(409, "Already on it: wait for this reply to finish.")
     await db.delete("messages", {"thread_id": f"eq.{m['thread_id']}", "kind": "eq.error", "created_at": f"gt.{m['created_at']}"})
     attachments = (m.get("meta") or {}).get("attachments") or []
     prompt = await _quoted(m["thread_id"], m.get("reply_to")) + m["text"] + await files.describe(user["id"], attachments)
     run_id = await runs.start(user["id"], m["thread_id"], prompt, mentions=m.get("mentions") or [],
-                              teammate_id=thread.get("teammate_id"))
+                              teammate_id=thread.get("teammate_id"), message_id=message_id)
     await db.update("messages", {"id": f"eq.{message_id}"}, {"run_id": run_id})
     return {"run_id": run_id}
 
@@ -275,7 +277,7 @@ Role, What you do, How you work, Tone, Boundaries. Bullets where they help. Unde
 
 Keep every concrete detail the user gave (names, tools, preferences, limits) and do not invent facts,
 companies or people. Where the notes are vague, choose sensible defaults for the role. Always include:
-ask one short question when a request is unclear; say what you're about to do before long tasks; anything
+ask one short question when a request is unclear; anything
 that sends, posts, pays or changes data waits for the user's approval; keep chat replies short.
 Reply with the instructions only: no preamble, no markdown code fences."""
 

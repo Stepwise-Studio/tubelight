@@ -162,7 +162,7 @@ def test_composio_multi_execute_is_gated_by_inner_slugs():
     edited = tools.apply_edit(tools.MULTI, {"tools": [send], "thought": "x"}, {"recipient_email": "bob@acme.com", "body": "Yo"})
     assert edited == {"tools": [{"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"recipient_email": "bob@acme.com", "body": "Yo"}}],
                       "thought": "x"}
-    assert tools.label(tools.MULTI, {"tools": [fetch]}) == "Gmail: fetch emails"
+    assert tools.label(tools.MULTI, {"tools": [fetch]}) == "Fetching emails in Gmail"
 
 
 def test_model_ids_and_fallback_chain(monkeypatch):
@@ -218,3 +218,10 @@ def test_composio_null_defaults_accept_null_and_are_dropped():
     assert out["properties"]["q"]["items"]["properties"]["use_case"]["type"] == "string"
     assert out["properties"]["session"]["anyOf"] == [{"$ref": "#/$defs/S"}, {"type": "null"}]
     assert _drop_nones({"q": [{"use_case": "x", "known_fields": None}], "session": None}) == {"q": [{"use_case": "x"}]}
+
+
+def test_status_labels_read_as_actions():
+    from app.tools import label
+    assert label("GMAIL_FETCH_EMAILS", {}) == "Fetching emails in Gmail"
+    assert label("GITHUB_CREATE_AN_ISSUE", {}) == "Creating an issue in GitHub"
+    assert label("COMPOSIO_SEARCH_TOOLS", {}) == "Finding the right tool"

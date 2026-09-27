@@ -36,6 +36,15 @@ def _check(r: httpx.Response) -> None:
         raise DBError(f"Database request failed ({r.status_code}): {r.text[:300]}")
 
 
+async def user_timezone(user_id: str) -> str | None:
+    """The IANA time zone the app stored in the user's auth metadata. Best effort."""
+    try:
+        r = await client().get(f"/auth/v1/admin/users/{user_id}")
+        return (r.json().get("user_metadata") or {}).get("timezone") if r.is_success else None
+    except httpx.HTTPError:
+        return None
+
+
 async def select(table: str, params: dict[str, str]) -> list[dict[str, Any]]:
     """params are raw PostgREST filters, e.g. {"id": "eq.x", "select": "*"}."""
     r = await client().get(f"/rest/v1/{table}", params={"select": "*", **params})

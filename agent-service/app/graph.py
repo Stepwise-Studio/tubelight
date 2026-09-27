@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from langchain_core.messages import (
     AIMessage, AnyMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage,
@@ -49,6 +50,7 @@ class RunCtx:
     members: list[dict]
     project: dict | None = None
     user_name: str = "the user"
+    timezone: str = "UTC"
     trigger: str = "message"
     event_type: str | None = None
     docker: bool = False
@@ -113,15 +115,43 @@ def _last_human(msgs: list[BaseMessage]) -> str:
     return next((str(m.content) for m in reversed(msgs) if isinstance(m, HumanMessage)), "")
 
 
+# How every teammate talks. Last in the prompt so it wins over narration habits in a role's own instructions;
+# the role still sets the personality and tone (casual, formal) on top of this.
+VOICE = """## How you talk (always)
+- Talk like a sharp colleague messaging from their phone, not a report generator: warm, direct, first person, contractions.
+- Lead with the answer or your verdict in one line ("Quiet day, nothing needs you." / "Two things need you today."). Then only the detail that earns its place.
+- Judge, don't just list. Say what matters and why, and what they can ignore. Fold routine stuff into one line.
+- When there's an obvious next step, offer it in one short question ("Want me to draft a reply to Priya?"). One or two offers at most, never a generic menu.
+- Never narrate your process ("I'm about to scan...", "I used the search tool"): the app already shows what you're doing live. Never mention tools, slugs, IDs, raw timestamps or UTC.
+- Keep it short: most replies fit on one phone screen. Markdown sparingly: bold for the few things that matter, bullets only for real lists, no headings in short replies. No emojis."""
+
+# App playbooks: how to do the common job well with each app, added when the teammate has it.
+PLAYBOOKS = {
+    "GMAIL": """Working with email:
+- "What did I get / summarise my inbox": fetch the messages first (sender, subject, snippet; open a full body only when it decides importance). "Today" means today in the user's time zone.
+- Sort into: needs them (a real person waiting on a reply or asking them something, deadlines, bills and payments, unexpected security alerts), worth knowing, and noise (promotions, newsletters, social notifications, automated receipts).
+- Reply shape: a one-line verdict; then each needs-them item as who, what they want, and what you suggest; then one line for worth-knowing; then one line counting the noise ("plus 5 promos and newsletters").
+- Spot follow-ups: threads where they were asked something and haven't replied, or promised something. Offer to draft the reply.
+- Security alerts caused by their own recent actions (like connecting an app to Tubelight) are expected: mention them briefly and say so.""",
+    "GOOGLECALENDAR": """Working with the calendar: lead with what's next and anything that clashes or needs prep; times in the user's local time; offer to move, decline or block time when it would help.""",
+    "GITHUB": """Working with GitHub: lead with what needs them (reviews requested, failing checks, mentions); name PRs and issues by title and number; offer the next concrete step.""",
+}
+
+
 async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: list[str]) -> str:
     query = _last_human(msgs)[:500]
     profile = [r["text"] for r in await memory.listing(memory.ns("user", ctx.owner_id), limit=20)]
     own = await memory.search(memory.ns("teammate", tm["id"]), query)
     proj = await memory.search(memory.ns("project", ctx.project["id"]), query) if ctx.project else []
 
+    try:
+        now = datetime.now(ZoneInfo(ctx.timezone))
+    except (ZoneInfoNotFoundError, ValueError):
+        now = datetime.now(UTC)
     lines = [
         f"You are {tm['name']} (@{tm['handle']}), the team's {tm['role']}. You work for {ctx.user_name} as a teammate, "
-        f"not as a generic assistant. Today is {datetime.now(UTC):%A, %B %d, %Y} (UTC).",
+        f"not as a generic assistant. It is {now:%A, %B %d, %Y, %I:%M %p} where the user is ({now.tzname()}). "
+        "Give times in their local time and relative words (this morning, yesterday), never UTC.",
     ]
     if ctx.project:
         p = ctx.project
@@ -150,14 +180,16 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         "approval card and may edit or reject it. Do not ask for permission in chat first. If an action is rejected, "
         "acknowledge it briefly and adjust.")
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
-    lines.append("Write plain, concise Markdown. No emojis.")
+    guides = [PLAYBOOKS[t] for t in tm.get("allowed_toolkits") or [] if t in PLAYBOOKS]
+    if guides:
+        lines.append("\n\n".join(guides))
     if profile:
         lines.append("What you know about the user:\n" + "\n".join(f"- {t}" for t in profile))
     if own:
         lines.append("Your relevant memories:\n" + "\n".join(f"- {t}" for t in own))
     if proj:
         lines.append("Project memories:\n" + "\n".join(f"- {t}" for t in proj))
-    return "\n\n".join(lines) + "\n\n## Your role\n" + tm["system_prompt"]
+    return "\n\n".join(lines) + "\n\n## Your role\n" + tm["system_prompt"] + "\n\n" + VOICE
 
 
 # ------------------------------------------------------------------ compaction

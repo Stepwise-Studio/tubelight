@@ -102,6 +102,10 @@ async def env(monkeypatch):
     fdb = FakeDB()
     for name in ("select", "one", "insert", "update", "delete", "broadcast"):
         monkeypatch.setattr(db, name, getattr(fdb, name))
+
+    async def no_tz(user_id: str) -> None:
+        return None
+    monkeypatch.setattr(db, "user_timezone", no_tz)
     fake = FakeLLM(script=[], calls=[])
     monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None: fake)
 
