@@ -63,10 +63,19 @@ export default function Thread() {
       .map((s) => ({ type: 'status' as const, key: `r:${s.run_id}`, s })),
     ...ghosts.map((g) => ({ type: 'ghost' as const, key: `s:${g.stream_id}`, g })),
   ]
+  // Cards that have been dealt with leave the chat (messages are newest first):
+  // - a task live voice handed over: the spoken words are saved as the conversation instead;
+  // - an error once the teammate has since replied (it got sorted, so Retry means nothing now);
+  // - a request that expired unanswered (a newer message replaced it). Approved and rejected cards stay as a record.
+  const shown = (m: ChatMessage, i: number) => {
+    if (m.meta?.voice_task) return false
+    if (m.kind === 'error') return !t.messages.slice(0, i).some((n) => n.sender_type === 'teammate' && n.kind === 'text')
+    const a = m.meta?.approval_id ? t.approvals[m.meta.approval_id] : undefined
+    return a?.status !== 'expired'
+  }
   const items: ChatItem[] = [
     ...liveItems,
-    // Tasks handed over by live voice are hidden: the spoken words are saved as the conversation instead.
-    ...t.messages.filter((m) => !m.meta?.voice_task).map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
+    ...t.messages.filter((m, i) => shown(m, i)).map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]
 
   // One retry at a time: a second tap while the first is on its way would start a second run.
