@@ -256,3 +256,15 @@ def test_composio_schemas_are_trimmed():
     s = _lean({"title": "X", "examples": [1], "properties": {"q": {"type": "string", "title": "Q", "description": "word " * 100}}})
     assert "title" not in s and "examples" not in s
     assert len(s["properties"]["q"]["description"]) <= 160 and "title" not in s["properties"]["q"]
+
+
+def test_big_requests_skip_groq_first(monkeypatch):
+    from app import config, llm
+
+    monkeypatch.setattr(config, "DEFAULT_MODEL", "groq:openai/gpt-oss-120b")
+    monkeypatch.setattr(llm, "fallbacks", lambda: ["cloudflare:@cf/openai/gpt-oss-120b"])
+    monkeypatch.setattr(llm, "key", lambda p: "k")
+    assert llm.chat_model(size=3000).runnable.model_name == "openai/gpt-oss-120b"  # small: Groq first
+    big = llm.chat_model(size=12000)
+    assert big.runnable.last.model_name == "@cf/openai/gpt-oss-120b"  # big: Cloudflare first (via the content fix)
+    assert big.fallbacks[0].model_name == "openai/gpt-oss-120b"

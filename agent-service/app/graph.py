@@ -309,10 +309,13 @@ def make_teammate(ctx: RunCtx, tm: dict):
         updates, msgs = await compact(ctx, tm, state["messages"])
         tools = await ctx.tools_for(tm)
         system = await preamble(ctx, tm, msgs, [t.name for t in tools])
-        model = llm.chat_model(tm["model"], tools)
+        view = shrink_old_results(view_for(tm, msgs, ctx.members))
+        size = (len(system) + sum(len(t.description) + len(json.dumps(t.tool_call_schema if isinstance(t.tool_call_schema, dict)
+                else t.tool_call_schema.model_json_schema())) for t in tools)) // 4 + estimate_tokens(view)
+        model = llm.chat_model(tm["model"], tools, size=size)
         stream_id = str(uuid.uuid4())
         await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
-        convo = [SystemMessage(system), *shrink_old_results(view_for(tm, msgs, ctx.members))]
+        convo = [SystemMessage(system), *view]
         for attempt in range(3):
             try:
                 ai = await _stream(ctx, tm, model, convo, stream_id)

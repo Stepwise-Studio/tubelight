@@ -12,7 +12,8 @@ from typing import Any
 import httpx
 import openai
 from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import Runnable
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
@@ -98,7 +99,15 @@ def _one(model_id: str) -> ChatOpenAI:
                       default_headers=_headers(provider), timeout=120, max_retries=1)
 
 
-def chat_model(model: str | None = None, tools: list[BaseTool] | None = None) -> Runnable:
+def _text_content(messages: list) -> list:
+    """Workers AI rejects an assistant turn whose content is null (a pure tool call); give it a blank string."""
+    return [m.model_copy(update={"content": " "}) if isinstance(m, AIMessage) and not m.content else m for m in messages]
+
+
+GROQ_REQUEST_LIMIT = 7000  # tokens: Groq's free tier allows 8k per minute per model; leave room for the reply
+
+
+def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0) -> Runnable:
     """The model (tools bound) followed by the fallback chain for 429s, 5xx, timeouts and provider errors.
     Tests monkeypatch this to return a scripted fake."""
     primary = model or config.DEFAULT_MODEL
@@ -111,10 +120,14 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None) ->
             log.warning("skipping %s: not free", m)
             continue
         ids.append(m)
+    if size > GROQ_REQUEST_LIMIT:
+        # Too big for Groq's free tier: go straight to providers with bigger budgets; Groq only as a last resort.
+        ids = [m for m in ids if parse(m)[0] != "groq"] + [m for m in ids if parse(m)[0] == "groq"]
     chain: list[BaseChatModel | Runnable] = []
     for m in ids or [config.DEFAULT_MODEL]:
         llm = _one(m)
-        chain.append(llm.bind_tools(tools) if tools else llm)
+        bound = llm.bind_tools(tools) if tools else llm
+        chain.append(RunnableLambda(_text_content) | bound if parse(m)[0] == "cloudflare" else bound)
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
 
 
