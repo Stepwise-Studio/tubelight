@@ -1,7 +1,7 @@
 // Port of Stepwise UI's Toast (ui.stepwise.studio/r/toast.json), docked at the top for phones:
 // squircle card (22), tone tint bleeding in from the top-left, filled status icon, pill action or ✕,
 // and a deck: up to three stacked, the older ones peeking out below the newest.
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useState, useSyncExternalStore } from 'react'
 import { AccessibilityInfo, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
@@ -91,16 +91,11 @@ export function ToastHost() {
 }
 
 function ToastCard({ item, depth, height, onHeight }: { item: Item; depth: number; height: number; onHeight?: (h: number) => void }) {
-  const { c, scheme } = useTheme()
+  const { scheme } = useTheme()
   const dark = scheme === 'dark'
-  const tone = TONES[toneOf(item.tone)]
   const front = depth === 0
   const x = useSharedValue(0)
   const y = useSharedValue(0)
-  const [box, setBox] = useState({ w: 0, h: 0 })
-  // CSS 135°: the gradient line runs corner to corner at 45°, so it spans (w + h) / 2 on each axis.
-  const span = (box.w + box.h) / 2
-
   useEffect(() => {
     if (!front) return
     AccessibilityInfo.announceForAccessibility(item.body ? `${item.title}. ${item.body}` : item.title)
@@ -132,65 +127,101 @@ function ToastCard({ item, depth, height, onHeight }: { item: Item; depth: numbe
         entering={toastIn}
         exiting={toastOut}
         layout={LinearTransition.duration(motion.duration.fast)}
-        onLayout={(e) => {
-          const { width: w, height: h } = e.nativeEvent.layout
-          setBox({ w, h })
-          onHeight?.(h)
-        }}
+        onLayout={onHeight ? (e) => onHeight(e.nativeEvent.layout.height) : undefined}
         style={[place, { zIndex: MAX_VISIBLE - depth, borderRadius: RADIUS, boxShadow: dark ? '0 8px 24px rgba(0,0,0,0.45)' : '0 8px 24px rgba(9,9,11,0.10)' }, drag]}
         pointerEvents={front ? 'auto' : 'none'}
         importantForAccessibility={front ? 'auto' : 'no-hide-descendants'}
       >
-        <Squircle
-          accessibilityRole={item.tone === 'error' ? 'alert' : 'summary'}
-          style={{
-            borderRadius: RADIUS, overflow: 'hidden', flex: front ? undefined : 1,
-            backgroundColor: dark ? '#1c1c1f' : '#fafafa', borderWidth: 1, borderColor: dark ? 'rgba(63,63,70,0.7)' : 'rgba(212,212,216,0.7)',
-          }}
-        >
-          {/* 135°: the tint bleeds in from the top-left corner */}
-          <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} width="100%" height="100%">
-            <Defs>
-              <LinearGradient id={`t${item.id}`} x1={0} y1={0} x2={span} y2={span} gradientUnits="userSpaceOnUse">
-                <Stop offset="0.04" stopColor={tone.tint} stopOpacity={TINT_OPACITY} />
-                <Stop offset="0.3" stopColor={tone.tint} stopOpacity={0} />
-              </LinearGradient>
-            </Defs>
-            {span > 0 && <Rect width="100%" height="100%" fill={`url(#t${item.id})`} />}
-          </Svg>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, opacity: front ? 1 : 0 }}>
-            <View style={{ width: 22, height: 22, borderRadius: tone.square ? 7 : 11, backgroundColor: tone.color, alignItems: 'center', justifyContent: 'center' }}>
-              {typeof tone.glyph === 'string'
-                ? <Text style={{ fontFamily: fonts.bold, fontSize: 13, lineHeight: 16, color: '#ffffff', includeFontPadding: false }}>{tone.glyph}</Text>
-                : <Icon icon={tone.glyph} size={13} color="#ffffff" strokeWidth={3} />}
-            </View>
-            <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-              <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#f4f4f5' : '#27272a' }}>
-                {item.title}
-              </Text>
-              {item.body ? (
-                <Text numberOfLines={3} style={{ fontFamily: fonts.regular, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#a1a1aa' : '#71717a' }}>
-                  {item.body}
-                </Text>
-              ) : null}
-            </View>
-            {item.action ? (
-              <Press
-                radius={17}
-                smoothing={0}
-                onPress={() => { dismiss(item.id); item.action!.onPress() }}
-                style={{ height: 34, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: dark ? '#3f3f46' : '#e4e4e7' }}
-              >
-                <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: -0.3, color: dark ? '#f4f4f5' : '#27272a' }}>{item.action.label}</Text>
-              </Press>
-            ) : (
-              <Press radius={14} smoothing={0} accessibilityLabel="Dismiss" hitSlop={8} onPress={() => dismiss(item.id)} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon icon={Cancel01Icon} size={16} color={c.ink3} strokeWidth={1.5} />
-              </Press>
-            )}
-          </View>
-        </Squircle>
+        <Notice
+          tone={toneOf(item.tone)}
+          title={item.title}
+          body={item.body}
+          action={item.action && { label: item.action.label, onPress: () => { dismiss(item.id); item.action!.onPress() } }}
+          onDismiss={() => dismiss(item.id)}
+          fill={!front}
+          hidden={!front}
+        />
       </Animated.View>
     </GestureDetector>
+  )
+}
+
+export interface NoticeProps {
+  tone: ToastTone
+  title: string
+  body?: string
+  /** A pill button on the right (Retry, Undo). */
+  action?: { label: string; onPress: () => void }
+  /** Without an action, a quiet ✕ that calls this. */
+  onDismiss?: () => void
+  /** Stretch to the parent's height (a card behind the toast deck). */
+  fill?: boolean
+  /** Keep the card but hide its content (the deck's back cards). */
+  hidden?: boolean
+}
+
+/**
+ * The Stepwise UI toast card on its own: squircle (22), the tone's tint bleeding in from the top-left corner,
+ * a filled status mark, a semibold title over a grey line, and a pill action or ✕. Toasts use it, and so do
+ * notices that sit inline (a failed reply in a chat).
+ */
+export function Notice({ tone: toneName, title, body, action, onDismiss, fill, hidden }: NoticeProps) {
+  const { c, scheme } = useTheme()
+  const dark = scheme === 'dark'
+  const tone = TONES[toneName]
+  const id = useId()
+  const [box, setBox] = useState({ w: 0, h: 0 })
+  // CSS 135°: the gradient line runs corner to corner at 45°, so it spans (w + h) / 2 on each axis.
+  const span = (box.w + box.h) / 2
+  return (
+    <Squircle
+      accessibilityRole={toneName === 'error' ? 'alert' : 'summary'}
+      onLayout={(e) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+      style={{
+        borderRadius: RADIUS, overflow: 'hidden', flex: fill ? 1 : undefined,
+        backgroundColor: dark ? '#1c1c1f' : '#fafafa', borderWidth: 1, borderColor: dark ? 'rgba(63,63,70,0.7)' : 'rgba(212,212,216,0.7)',
+      }}
+    >
+      <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} width="100%" height="100%">
+        <Defs>
+          <LinearGradient id={`t${id}`} x1={0} y1={0} x2={span} y2={span} gradientUnits="userSpaceOnUse">
+            <Stop offset="0.04" stopColor={tone.tint} stopOpacity={TINT_OPACITY} />
+            <Stop offset="0.3" stopColor={tone.tint} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        {span > 0 && <Rect width="100%" height="100%" fill={`url(#t${id})`} />}
+      </Svg>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, opacity: hidden ? 0 : 1 }}>
+        <View style={{ width: 22, height: 22, borderRadius: tone.square ? 7 : 11, backgroundColor: tone.color, alignItems: 'center', justifyContent: 'center' }}>
+          {typeof tone.glyph === 'string'
+            ? <Text style={{ fontFamily: fonts.bold, fontSize: 13, lineHeight: 16, color: '#ffffff', includeFontPadding: false }}>{tone.glyph}</Text>
+            : <Icon icon={tone.glyph} size={13} color="#ffffff" strokeWidth={3} />}
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+          <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#f4f4f5' : '#27272a' }}>
+            {title}
+          </Text>
+          {body ? (
+            <Text numberOfLines={4} style={{ fontFamily: fonts.regular, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#a1a1aa' : '#71717a' }}>
+              {body}
+            </Text>
+          ) : null}
+        </View>
+        {action ? (
+          <Press
+            radius={17}
+            smoothing={0}
+            onPress={action.onPress}
+            style={{ height: 34, paddingHorizontal: 14, justifyContent: 'center', backgroundColor: dark ? '#3f3f46' : '#e4e4e7' }}
+          >
+            <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: -0.3, color: dark ? '#f4f4f5' : '#27272a' }}>{action.label}</Text>
+          </Press>
+        ) : onDismiss ? (
+          <Press radius={14} smoothing={0} accessibilityLabel="Dismiss" hitSlop={8} onPress={onDismiss} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon icon={Cancel01Icon} size={16} color={c.ink3} strokeWidth={1.5} />
+          </Press>
+        ) : null}
+      </View>
+    </Squircle>
   )
 }

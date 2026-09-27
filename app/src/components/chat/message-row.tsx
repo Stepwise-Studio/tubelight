@@ -4,7 +4,7 @@ import { createContext, memo, useContext, useEffect, useState } from 'react'
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, ArrowRight02Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon, Refresh01Icon,
+  Alert02Icon, ArrowDown01Icon, ArrowRight02Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -13,9 +13,9 @@ import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
-import { motion, radius, useTheme } from '@/theme'
+import { motion, useTheme } from '@/theme'
 import {
-  Button, Collapse, Icon, Markdown, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, useFlip,
+  Collapse, Icon, Markdown, Notice, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, useFlip,
 } from '@/ui'
 
 import { ConnectCard, QuestionCard } from './prompt-cards'
@@ -443,13 +443,10 @@ function SystemRow({ icon, text }: { icon: typeof FlashIcon; text: string }) {
 }
 
 function ErrorRow({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
-  const { c } = useTheme()
   const { group } = useActions()
   return (
-    <Squircle style={{ marginTop: 10, marginLeft: group ? GUTTER : 0, borderRadius: radius.md, backgroundColor: c.dangerSoft, paddingLeft: 12, paddingRight: 4, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <Icon icon={Alert02Icon} size={16} color="danger" />
-      <Text variant="caption" color="ink2" style={{ flex: 1, paddingVertical: 6 }}>{m.text || 'The run stopped with an error.'}</Text>
-      <Button label="Retry" size="sm" variant="ghost" icon={Refresh01Icon} onPress={onRetry} />
-    </Squircle>
+    <View style={{ marginTop: 10, marginLeft: group ? GUTTER : 0 }}>
+      <Notice tone="error" title="Couldn’t finish that" body={m.text || 'The run stopped with an error.'} action={{ label: 'Retry', onPress: onRetry }} />
+    </View>
   )
 }

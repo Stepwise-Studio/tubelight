@@ -207,6 +207,18 @@ def test_paid_openrouter_models_are_refused():
         pass
 
 
+def test_paid_plan_workers_models_are_skipped_not_fatal(monkeypatch):
+    from app import config, llm
+
+    monkeypatch.setattr(llm, "_cf_paid", {"@cf/zai-org/glm-5.3"})
+    monkeypatch.setattr(config, "DEFAULT_MODEL", "groq:openai/gpt-oss-120b")
+    monkeypatch.setattr(llm, "fallbacks", lambda: [])
+    assert not llm.is_free("cloudflare:@cf/zai-org/glm-5.3")
+    assert llm.is_free("cloudflare:@cf/openai/gpt-oss-120b")
+    model = llm.chat_model("cloudflare:@cf/zai-org/glm-5.3")  # a teammate still set to it keeps working
+    assert model.model_name == "openai/gpt-oss-120b"
+
+
 def test_composio_null_defaults_accept_null_and_are_dropped():
     from app.connectors import _drop_nones, _nullable
     schema = {"properties": {

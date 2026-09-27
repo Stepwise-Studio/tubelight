@@ -4,6 +4,7 @@ Model ids: `<provider>:<model>` (openrouter, groq, gemini, mistral). A bare id i
 e.g. `nvidia/nemotron-3-super-120b-a12b:free`.
 """
 import asyncio
+import logging
 import re
 import time
 from typing import Any
@@ -16,6 +17,8 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from . import config
+
+log = logging.getLogger(__name__)
 
 PROVIDERS: dict[str, dict[str, str]] = {
     "openrouter": {"base": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY", "name": "OpenRouter",
@@ -34,6 +37,8 @@ PROVIDERS: dict[str, dict[str, str]] = {
 GATEWAY_PATH = {"openrouter": "openrouter", "groq": "groq", "mistral": "mistral/v1", "cloudflare": "workers-ai/v1"}
 NOT_CHAT = re.compile(r"whisper|tts|embed|guard|imagen|veo|aqa|moderation|ocr|audio|image|orpheus|allam|prompt-guard", re.I)
 _models: tuple[float, list[dict[str, Any]]] = (0.0, [])
+# Workers AI models flagged require_workers_paid (they 403 on the free plan), filled by the model listing.
+_cf_paid: set[str] = set()
 
 
 def parse(model_id: str) -> tuple[str, str]:
@@ -75,6 +80,8 @@ def is_free(model_id: str) -> bool:
     """OpenRouter bills per model: only ':free' ids, or ones its API listed at $0 (cached listing), are allowed.
     Groq, Cloudflare Workers AI and the other providers here are used on their free tiers only."""
     provider, model = parse(model_id)
+    if provider == "cloudflare":
+        return model not in _cf_paid
     if provider != "openrouter":
         return True
     return model.endswith(":free") or any(m["id"] == f"openrouter:{model}" for m in _models[1])
@@ -92,8 +99,17 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None) ->
     """The model (tools bound) followed by the fallback chain for 429s, 5xx, timeouts and provider errors.
     Tests monkeypatch this to return a scripted fake."""
     primary = model or config.DEFAULT_MODEL
+    # The default model is always the first fallback: it handles tool-heavy requests that smaller free tiers reject.
+    ids: list[str] = []
+    for m in [primary, config.DEFAULT_MODEL, *fallbacks()]:
+        if parse(m) in [parse(i) for i in ids]:
+            continue
+        if not is_free(m):  # e.g. a teammate still set to a model that has since become paid-only: skip, don't fail
+            log.warning("skipping %s: not free", m)
+            continue
+        ids.append(m)
     chain: list[BaseChatModel | Runnable] = []
-    for m in [primary] + [f for f in fallbacks() if parse(f) != parse(primary)]:
+    for m in ids or [config.DEFAULT_MODEL]:
         llm = _one(m)
         chain.append(llm.bind_tools(tools) if tools else llm)
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
@@ -107,6 +123,9 @@ async def _list_cloudflare(c: httpx.AsyncClient) -> list[dict[str, Any]]:
     out = []
     for m in r.json().get("result", []):
         props = {p.get("property_id"): p.get("value") for p in m.get("properties") or []}
+        if str(props.get("require_workers_paid")).lower() == "true":
+            _cf_paid.add(m["name"])  # 403 on the Workers Free plan
+            continue
         if str(props.get("function_calling")).lower() != "true":
             continue
         ctx = props.get("context_window") or props.get("max_input_tokens")
@@ -170,6 +189,8 @@ def human_error(e: BaseException) -> str:
         return "The model is rate limited right now. Try again in a minute."
     if isinstance(e, openai.AuthenticationError):
         return "The model provider rejected the API key. Check the provider keys in agent-service/.env."
+    if isinstance(e, openai.PermissionDeniedError):
+        return "This teammate's model isn't available on the free plan. Pick another model in their settings."
     if isinstance(e, openai.NotFoundError):
         return "This teammate's model is not available. Pick another model in its settings."
     if isinstance(e, (openai.APITimeoutError, openai.APIConnectionError)):
