@@ -26,6 +26,7 @@ const MENTION = /(^|\s)@([a-z0-9_-]*)$/i
 const MAX_FILES = 6
 // Half the one-line height (36 button + 2×4 padding + 2×1 border): a capsule at rest, soft corners as it grows.
 const PILL = 23
+const ROW = 46 // one-line bar height: the round action matches it
 
 export interface ComposerProps {
   placeholder: string
@@ -45,8 +46,9 @@ export interface ComposerProps {
 type Item = Draft & { att?: Attachment }
 
 /**
- * Auto-growing input in a squircle: reply strip and attachment tray on top, + for files, then the
- * input and one trailing action (mic when empty, send when there's something, stop while a run is live).
+ * Telegram-style floating bar over the chat: a glass pill (reply strip and attachment tray on top, + for files, then
+ * the input) and beside it one round action (mic when empty, send when there's something, stop while a run is live).
+ * Behind them the chat just darkens smoothly toward the bottom edge: no bar, no line.
  */
 export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, blurTarget }: ComposerProps) {
   const { c, scheme } = useTheme()
@@ -58,6 +60,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const [sel, setSel] = useState(0)
   const [stopping, setStopping] = useState(false)
   const [files, setFiles] = useState<Item[]>([])
+  // At rest the bar sits in from the edges; typing widens it to the full width.
+  const [focused, setFocused] = useState(false)
 
   useEffect(() => { if (replyTo) input.current?.focus() }, [replyTo])
 
@@ -134,7 +138,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
       : { icon: ArrowUp02Icon, key: 'send', label: 'Send', variant: canSend ? 'tube' as const : 'soft' as const }
 
   const field = (
-    <Squircle cornerSmoothing={0} style={{ borderRadius: PILL, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
+    <Glass blurTarget={blurTarget} radius={PILL}>
       {replyTo && <ReplyStrip m={replyTo} onCancel={onCancelReply} />}
       {files.length > 0 && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
@@ -159,6 +163,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           ref={input}
           onChangeText={setText}
           onSelectionChange={(e) => setSel(e.nativeEvent.selection.end)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder={placeholder}
           placeholderTextColor={c.ink4}
           selectionColor={c.tube}
@@ -174,48 +180,49 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
             ? <RNText key={i} style={{ color: c.tube }}>{part.text}</RNText>
             : part.text)}
         </TextInput>
-        <IconButton
-          icon={action.icon}
-          round
-          swapKey={action.key}
-          accessibilityLabel={action.label}
-          variant={action.variant}
-          size={36}
-          iconSize={18}
-          disabled={showStop ? stopping : showMic ? false : !canSend}
-          // Tap: voice mode. Hold: dictate into the message box.
-          onLongPress={showMic ? () => { haptic.medium(); setDictating(true) } : undefined}
-          delayLongPress={350}
-          accessibilityHint={showMic ? 'Hold to dictate instead' : undefined}
-          onPress={async () => {
-            if (showMic) { haptic.tap(); return onVoice?.() }
-            if (!showStop) return send()
-            haptic.medium()
-            setStopping(true)
-            await onStop()
-            setStopping(false)
-          }}
-          style={{ marginLeft: 4 }}
-        />
       </View>
       )}
-    </Squircle>
+    </Glass>
+  )
+
+  const glassy = action.variant === 'soft'
+  const actionButton = (
+    <IconButton
+      icon={action.icon}
+      round
+      swapKey={action.key}
+      accessibilityLabel={action.label}
+      variant={glassy ? 'ghost' : action.variant}
+      size={ROW}
+      iconSize={20}
+      color={glassy ? c.ink : undefined}
+      disabled={showStop ? stopping : showMic ? false : !canSend}
+      // Tap: voice mode. Hold: dictate into the message box.
+      onLongPress={showMic ? () => { haptic.medium(); setDictating(true) } : undefined}
+      delayLongPress={350}
+      accessibilityHint={showMic ? 'Hold to dictate instead' : undefined}
+      onPress={async () => {
+        if (showMic) { haptic.tap(); return onVoice?.() }
+        if (!showStop) return send()
+        haptic.medium()
+        setStopping(true)
+        await onStop()
+        setStopping(false)
+      }}
+    />
   )
 
   return (
-    <Animated.View style={[{ paddingHorizontal: 10, paddingTop: 14 }, pad]}>
-      {/* No solid band: the chat shows through a light blur that deepens into the canvas colour at the bottom. */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        {/* Chrome tints are near the canvas colour (no grey band); the blur starts under the fade so its edge doesn't show. */}
-        <BlurView
-          blurTarget={blurTarget}
-          blurMethod="dimezisBlurViewSdk31Plus"
-          intensity={Platform.OS === 'ios' ? 24 : 36}
-          tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-          style={[StyleSheet.absoluteFill, { top: '30%' }]}
-        />
-        <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}8C 45%, ${c.canvas}E6 100%)` }]} />
-      </View>
+    <Animated.View style={[{ paddingHorizontal: focused ? 8 : 16, paddingTop: 10 }, pad]}>
+      {/* The edge fade: starts well above the bar and eases into the canvas colour at the bottom (black-ish in dark,
+          white-ish in light), so messages sink under it with no visible start. */}
+      <View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, {
+          top: -36,
+          experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}1F 22%, ${c.canvas}66 45%, ${c.canvas}B3 68%, ${c.canvas}E0 86%, ${c.canvas}F2 100%)`,
+        }]}
+      />
       {(people.length > 0 || appRows.length > 0 || offerAll) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}
@@ -268,8 +275,33 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           </Squircle>
         </Animated.View>
       )}
-      <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>{field}</Animated.View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+        <Animated.View style={{ flex: 1 }} layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}>{field}</Animated.View>
+        {!dictating && (
+          <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
+            {glassy ? <Glass blurTarget={blurTarget} radius={ROW / 2}>{actionButton}</Glass> : actionButton}
+          </Animated.View>
+        )}
+      </View>
     </Animated.View>
+  )
+}
+
+/** Frosted glass: the chat blurred behind the control, a translucent fill and a hairline edge. */
+function Glass({ blurTarget, radius: r, children }: { blurTarget?: React.RefObject<View | null>; radius: number; children: React.ReactNode }) {
+  const { c, scheme } = useTheme()
+  return (
+    <Squircle cornerSmoothing={0} style={{ borderRadius: r, overflow: 'hidden', borderWidth: 1, borderColor: c.line }}>
+      <BlurView
+        blurTarget={blurTarget}
+        blurMethod="dimezisBlurViewSdk31Plus"
+        intensity={Platform.OS === 'ios' ? 40 : 60}
+        tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+        style={StyleSheet.absoluteFill}
+      />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: c.panel2, opacity: 0.35 }]} />
+      {children}
+    </Squircle>
   )
 }
 

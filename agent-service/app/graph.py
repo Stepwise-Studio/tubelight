@@ -200,7 +200,8 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      + (f" Repo: {p['repo_url']}" if p.get("repo_url") else ""))
         lines.append("Group members:\n" + "\n".join(
             f"- {m['name']} (@{m['handle']}, {m['role']}){' - that is you' if m['id'] == tm['id'] else ''}" for m in ctx.members))
-        lines.append("Other members' messages appear as '[Name · role]: text'. Never prefix your own replies that way. "
+        lines.append("Other members' messages appear as '[Name · role]: text'; only your own earlier replies are yours. Never "
+                     "take credit or blame for what another member said, and never prefix your own replies that way. "
                      "This is a group chat. To ask another member something, @mention their handle (e.g. @dev) and they reply "
                      "after you. Only @mention someone when you need an answer from them or you're answering what they "
                      "actually said above; never address someone as if they had spoken when they haven't.")
@@ -379,13 +380,16 @@ def make_teammate(ctx: RunCtx, tm: dict):
 
 async def _route_with_model(ctx: RunCtx, msgs: list[BaseMessage]) -> list[str]:
     roster = "\n".join(f"- {m['handle']}: {m['name']}, {m['role']}. {m.get('bio', '')}" for m in ctx.members)
-    recent = _transcript(msgs[-6:])
+    # Enough of the chat to resolve "apologise to him" or "you were right" to the member who did the thing.
+    said = [m for m in msgs if not isinstance(m, ToolMessage) and not (isinstance(m, AIMessage) and not m.text.strip())]
+    recent = "\n".join(line[:300] for line in _transcript(said[-12:]).split("\n"))
     try:
         res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
             SystemMessage(f"You route messages in a team chat. Members:\n{roster}\n\nPick who should answer the latest "
                           "message: usually the one member it fits best; everyone when it speaks to the whole group "
-                          '(everyone, all of you, a debate or game with the team). Reply with JSON only, like '
-                          '{"handles": ["dev"]}.'),
+                          "(everyone, all of you, a debate or game with the team). Work out who 'him', 'her', 'you' or "
+                          "'they' mean from what was said: 'apologise to him' goes to whoever did the thing, not to "
+                          'the one it was done to. Reply with JSON only, like {"handles": ["dev"]}.'),
             HumanMessage(recent),
         ])
         handles = re.findall(r'"@?([a-z0-9_-]+)"', res.text.split(":", 1)[-1]) or [res.text.strip().lstrip("@").lower()]
