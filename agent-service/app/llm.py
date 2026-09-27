@@ -4,6 +4,7 @@ Model ids: `<provider>:<model>` (openrouter, groq, gemini, mistral). A bare id i
 e.g. `nvidia/nemotron-3-super-120b-a12b:free`.
 """
 import asyncio
+import json
 import logging
 import re
 import time
@@ -91,12 +92,45 @@ def is_free(model_id: str) -> bool:
     return model.endswith(":free") or any(m["id"] == f"openrouter:{model}" for m in _models[1])
 
 
+class _GeminiSignatures(httpx.AsyncBaseTransport):
+    """Gemini 3 rejects earlier tool calls that carry no "thought signature", and history from Groq or Cloudflare
+    turns never has one (the OpenAI-compatible client drops them too). Google documents a placeholder signature for
+    history that came from elsewhere; add it to every past tool call on the way out."""
+
+    SKIP = {"google": {"thought_signature": "skip_thought_signature_validator"}}
+
+    def __init__(self) -> None:
+        self._inner = httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path.endswith("/chat/completions"):
+            body = json.loads(await request.aread())
+            for m in body.get("messages", []):
+                for tc in m.get("tool_calls") or []:
+                    tc.setdefault("extra_content", self.SKIP)
+            content = json.dumps(body).encode()
+            headers = {k: v for k, v in request.headers.items() if k.lower() != "content-length"}
+            request = httpx.Request("POST", request.url, headers=headers, content=content, extensions=request.extensions)
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+_gemini_http: httpx.AsyncClient | None = None
+
+
 def _one(model_id: str) -> ChatOpenAI:
     provider, model = parse(model_id)
     if not is_free(model_id):
         raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
+    global _gemini_http
+    extra: dict[str, Any] = {}
+    if provider == "gemini":
+        _gemini_http = _gemini_http or httpx.AsyncClient(transport=_GeminiSignatures(), timeout=120)
+        extra["http_async_client"] = _gemini_http
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
-                      default_headers=_headers(provider), timeout=120, max_retries=1)
+                      default_headers=_headers(provider), timeout=120, max_retries=1, **extra)
 
 
 def _text_content(messages: list) -> list:
@@ -114,8 +148,8 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
     # The default model is always the first fallback: it handles tool-heavy requests that smaller free tiers reject.
     ids: list[str] = []
     for m in [primary, config.DEFAULT_MODEL, *fallbacks()]:
-        if parse(m) in [parse(i) for i in ids]:
-            continue
+        if parse(m) in [parse(i) for i in ids] or (m != primary and not key(parse(m)[0])):
+            continue  # already in the chain, or a provider without a key
         if not is_free(m):  # e.g. a teammate still set to a model that has since become paid-only: skip, don't fail
             log.warning("skipping %s: not free", m)
             continue

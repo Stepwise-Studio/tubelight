@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from . import db, llm, memory
+from . import config, db, llm, memory
 
 log = logging.getLogger(__name__)
 MAX_CHANGES = 6
@@ -104,8 +104,9 @@ async def learn(owner_id: str, user_name: str, tm: dict, project_id: str | None,
             known[r["key"]] = (shelf, r)
     existing = "\n".join(f"{k} | {s} | {r['kind']} | {r['text']}" for k, (s, r) in known.items()) or "(none yet)"
     prompt = PROMPT.format(name=tm["name"], user=user_name, today=today, max=MAX_CHANGES, existing=existing)
-    # The stronger default model: this runs in the background, and a weak one duplicates and invents lessons.
-    res = await llm.chat_model().ainvoke([SystemMessage(prompt), HumanMessage(turn)])
+    # Flash-Lite: good enough for this and it has the largest free daily quota, so learning after every reply
+    # doesn't eat into the main model's requests. The usual fallbacks follow it.
+    res = await llm.chat_model(config.LEARN_MODEL).ainvoke([SystemMessage(prompt), HumanMessage(turn)])
     plan = _parse(res.text if isinstance(res, AIMessage) else str(res.content))
 
     done = {"add": 0, "update": 0, "delete": 0, "done": 0}

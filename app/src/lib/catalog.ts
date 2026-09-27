@@ -47,19 +47,18 @@ export interface Toolkit {
  * server actually lists (all free) are shown; the rest stay under "All free models".
  */
 export const MODEL_HINTS: { id: string; best: string }[] = [
-  { id: 'groq:openai/gpt-oss-120b', best: 'Best all-rounder: planning, tools and clear writing. Very fast on Groq.' },
+  { id: 'gemini:gemini-3.8-flash', best: 'Best for real work: multi-step tasks across your apps. Big free budget.' },
+  { id: 'gemini:gemini-3.5-flash-lite', best: 'Fastest replies, still good with apps. Largest free daily quota.' },
+  { id: 'groq:openai/gpt-oss-120b', best: 'Quick chat and planning. Very fast, but small per-minute limits.' },
   { id: 'groq:qwen/qwen3.8-27b', best: 'Quick coding questions. Too small for teammates with many apps.' },
   { id: 'groq:openai/gpt-oss-20b', best: 'Quickest replies for simple jobs: triage, summaries, short answers.' },
   { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', best: 'Hardest problems, careful reasoning. Slower, with tighter daily limits.' },
 ]
 
-/**
- * The shortlisted model to suggest for a role. Every role gets the all-rounder for now: it is the only free model
- * that reliably takes big app-tool requests (Qwen on Groq's free tier rejects them with 413).
- */
-export const recommendedModel = (_role: string) => 'groq:openai/gpt-oss-120b'
+/** The shortlisted model to suggest for a role: Gemini's big free budget suits every role that uses apps. */
+export const recommendedModel = (_role: string) => 'gemini:gemini-3.8-flash'
 
-export const DEFAULT_MODEL = 'groq:openai/gpt-oss-120b'
+export const DEFAULT_MODEL = 'gemini:gemini-3.8-flash'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
 export const REPO_RE = /^https?:\/\/\S+\.\S+/
 
@@ -86,7 +85,7 @@ export const toolkitName = (t: string) => TOOLKIT_NAMES[t] ?? t.charAt(0) + t.sl
 const ROLE_NAMES: Record<string, string> = { developer: 'Developer', tester: 'QA engineer', social: 'Social media lead', email: 'Inbox chief of staff' }
 export const roleName = (key: string) => ROLE_NAMES[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
 
-export const PROVIDERS: Record<string, string> = { groq: 'Groq', openrouter: 'OpenRouter', gemini: 'Gemini', mistral: 'Mistral' }
+export const PROVIDERS: Record<string, string> = { gemini: 'Gemini', groq: 'Groq', openrouter: 'OpenRouter', cloudflare: 'Cloudflare', mistral: 'Mistral' }
 
 /** "groq:openai/gpt-oss-120b" → "GPT OSS 120B". Uses the service's name when we have it. */
 export function modelName(id: string, models?: Model[] | null) {
