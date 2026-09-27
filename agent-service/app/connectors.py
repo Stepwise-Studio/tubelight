@@ -172,6 +172,23 @@ def _nullable(schema: Any) -> Any:
     return out
 
 
+def _lean(schema: Any) -> Any:
+    """Composio's schemas are verbose (the search tool alone is ~3k tokens): clip field notes, drop examples and
+    titles. Groq's free tier caps a request at 8k tokens per minute, and the tools ride along on every call."""
+    if isinstance(schema, list):
+        return [_lean(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: _lean(v) for k, v in schema.items() if k not in ("examples", "title")}
+    if isinstance(out.get("description"), str) and len(out["description"]) > 160:
+        out["description"] = out["description"][:157].rsplit(" ", 1)[0] + "..."
+    return out
+
+
+def _clip(text: str, n: int = 700) -> str:
+    return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + "..."
+
+
 def _drop_nones(v: Any) -> Any:
     if isinstance(v, dict):
         return {k: _drop_nones(x) for k, x in v.items() if x is not None}
@@ -183,7 +200,7 @@ def _drop_nones(v: Any) -> Any:
 def _lenient(t: BaseTool) -> BaseTool:
     """The same tool with null-tolerant arguments; nulls are dropped before Composio sees them."""
     raw = t.args_schema if isinstance(t.args_schema, dict) else t.args_schema.model_json_schema()
-    return StructuredTool(name=t.name, description=t.description, args_schema=_nullable(copy.deepcopy(raw)),
+    return StructuredTool(name=t.name, description=_clip(t.description), args_schema=_lean(_nullable(copy.deepcopy(raw))),
                           func=lambda **kw: t.invoke(_drop_nones(kw)))
 
 

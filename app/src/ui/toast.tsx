@@ -4,7 +4,7 @@
 import { useEffect, useId, useState, useSyncExternalStore } from 'react'
 import { AccessibilityInfo, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
+import Animated, { FadeIn, Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
@@ -158,6 +158,8 @@ export interface NoticeProps {
   fill?: boolean
   /** Keep the card but hide its content (the deck's back cards). */
   hidden?: boolean
+  /** Show only the title, with a small "View more" that reveals the body. */
+  collapsible?: boolean
 }
 
 /**
@@ -165,7 +167,8 @@ export interface NoticeProps {
  * a filled status mark, a semibold title over a grey line, and a pill action or ✕. Toasts use it, and so do
  * notices that sit inline (a failed reply in a chat).
  */
-export function Notice({ tone: toneName, title, body, action, onDismiss, fill, hidden }: NoticeProps) {
+export function Notice({ tone: toneName, title, body, action, onDismiss, fill, hidden, collapsible }: NoticeProps) {
+  const [open, setOpen] = useState(!collapsible)
   const { c, scheme } = useTheme()
   const dark = scheme === 'dark'
   const tone = TONES[toneName]
@@ -182,14 +185,15 @@ export function Notice({ tone: toneName, title, body, action, onDismiss, fill, h
         backgroundColor: dark ? '#1c1c1f' : '#fafafa', borderWidth: 1, borderColor: dark ? 'rgba(63,63,70,0.7)' : 'rgba(212,212,216,0.7)',
       }}
     >
-      <Svg style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} width="100%" height="100%">
+      {/* Sized in numbers from the card's layout: a percentage-sized Svg kept its first height when the card grew. */}
+      <Svg style={{ position: 'absolute', top: 0, left: 0 }} width={box.w} height={box.h}>
         <Defs>
           <LinearGradient id={`t${id}`} x1={0} y1={0} x2={span} y2={span} gradientUnits="userSpaceOnUse">
             <Stop offset="0.04" stopColor={tone.tint} stopOpacity={TINT_OPACITY} />
             <Stop offset="0.3" stopColor={tone.tint} stopOpacity={0} />
           </LinearGradient>
         </Defs>
-        {span > 0 && <Rect width="100%" height="100%" fill={`url(#t${id})`} />}
+        {span > 0 && <Rect width={box.w} height={box.h} fill={`url(#t${id})`} />}
       </Svg>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, opacity: hidden ? 0 : 1 }}>
         <View style={{ width: 22, height: 22, borderRadius: tone.square ? 7 : 11, backgroundColor: tone.color, alignItems: 'center', justifyContent: 'center' }}>
@@ -201,10 +205,15 @@ export function Notice({ tone: toneName, title, body, action, onDismiss, fill, h
           <Text numberOfLines={2} style={{ fontFamily: fonts.semibold, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#f4f4f5' : '#27272a' }}>
             {title}
           </Text>
-          {body ? (
-            <Text numberOfLines={4} style={{ fontFamily: fonts.regular, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#a1a1aa' : '#71717a' }}>
+          {body && open ? (
+            <Animated.Text entering={FadeIn.duration(motion.duration.fast)} style={{ fontFamily: fonts.regular, fontSize: 14, lineHeight: 18, letterSpacing: -0.36, color: dark ? '#a1a1aa' : '#71717a' }}>
               {body}
-            </Text>
+            </Animated.Text>
+          ) : null}
+          {body && collapsible ? (
+            <Press radius={6} static hitSlop={8} onPress={() => setOpen(!open)} accessibilityLabel={open ? 'Show less' : 'View more about this error'} outerStyle={{ alignSelf: 'flex-start' }}>
+              <Text style={{ fontFamily: fonts.medium, fontSize: 12, letterSpacing: -0.2, color: dark ? '#a1a1aa' : '#71717a' }}>{open ? 'Show less' : 'View more'}</Text>
+            </Press>
           ) : null}
         </View>
         {action ? (

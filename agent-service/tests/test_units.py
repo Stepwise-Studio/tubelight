@@ -237,3 +237,22 @@ def test_status_labels_read_as_actions():
     assert label("GMAIL_FETCH_EMAILS", {}) == "Fetching emails in Gmail"
     assert label("GITHUB_CREATE_AN_ISSUE", {}) == "Creating an issue in GitHub"
     assert label("COMPOSIO_SEARCH_TOOLS", {}) == "Finding the right tool"
+
+
+def test_old_tool_results_shrink_but_the_current_turn_stays_whole():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.graph import OLD_RESULT_CHARS, shrink_old_results
+    big = "x" * 5000
+    msgs = [HumanMessage("yesterday"), AIMessage("", tool_calls=[{"id": "a", "name": "t", "args": {}}]), ToolMessage(big, tool_call_id="a"),
+            AIMessage("done"), HumanMessage("today"), AIMessage("", tool_calls=[{"id": "b", "name": "t", "args": {}}]), ToolMessage(big, tool_call_id="b")]
+    out = shrink_old_results(msgs)
+    assert len(out[2].content) < OLD_RESULT_CHARS + 50 and out[6].content == big
+    assert msgs[2].content == big  # history itself untouched
+
+
+def test_composio_schemas_are_trimmed():
+    from app.connectors import _lean
+    s = _lean({"title": "X", "examples": [1], "properties": {"q": {"type": "string", "title": "Q", "description": "word " * 100}}})
+    assert "title" not in s and "examples" not in s
+    assert len(s["properties"]["q"]["description"]) <= 160 and "title" not in s["properties"]["q"]

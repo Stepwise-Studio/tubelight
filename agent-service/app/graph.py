@@ -109,6 +109,18 @@ def view_for(tm: dict, msgs: list[BaseMessage], members: list[dict]) -> list[Bas
     return out
 
 
+OLD_RESULT_CHARS = 600
+
+
+def shrink_old_results(msgs: list[BaseMessage]) -> list[BaseMessage]:
+    """Tool results from earlier turns (a 2k-token email list from yesterday) shrink to a preview before each call;
+    the current turn keeps them whole. The saved history is untouched."""
+    turn = next((i for i in range(len(msgs) - 1, -1, -1) if isinstance(msgs[i], HumanMessage) and msgs[i].name != "summary"), 0)
+    return [m.model_copy(update={"content": str(m.content)[:OLD_RESULT_CHARS] + " ...[earlier result shortened]"})
+            if i < turn and isinstance(m, ToolMessage) and len(str(m.content)) > OLD_RESULT_CHARS else m
+            for i, m in enumerate(msgs)]
+
+
 def estimate_tokens(msgs: list[BaseMessage]) -> int:
     chars = sum(len(str(m.content)) + len(json.dumps(getattr(m, "tool_calls", []) or [])) for m in msgs)
     return chars // 4
@@ -300,7 +312,7 @@ def make_teammate(ctx: RunCtx, tm: dict):
         model = llm.chat_model(tm["model"], tools)
         stream_id = str(uuid.uuid4())
         await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
-        convo = [SystemMessage(system), *view_for(tm, msgs, ctx.members)]
+        convo = [SystemMessage(system), *shrink_old_results(view_for(tm, msgs, ctx.members))]
         for attempt in range(3):
             try:
                 ai = await _stream(ctx, tm, model, convo, stream_id)

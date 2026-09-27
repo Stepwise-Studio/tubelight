@@ -72,6 +72,9 @@ def fallbacks() -> list[str]:
     return [m for m in ids if key(parse(m)[0])]
 
 
+GROQ_HISTORY_BUDGET = 5500
+
+
 class PaidModelError(ValueError):
     pass
 
@@ -178,7 +181,9 @@ async def context_window(model: str) -> int:
         models = []
     ctx = next((m["context_length"] for m in models if m["id"] == f"{provider}:{name}" and m["context_length"]),
                config.MAX_CONTEXT)
-    return min(ctx, config.MAX_CONTEXT)
+    # Groq's free tier allows 8k tokens per minute per model, so a single request has to fit well under that
+    # together with the instructions and tools: compaction treats this as the window for Groq models.
+    return min(ctx, config.MAX_CONTEXT, GROQ_HISTORY_BUDGET if provider == "groq" else ctx)
 
 
 def human_error(e: BaseException) -> str:
@@ -195,6 +200,8 @@ def human_error(e: BaseException) -> str:
         return "This teammate's model is not available. Pick another model in its settings."
     if isinstance(e, (openai.APITimeoutError, openai.APIConnectionError)):
         return "Could not reach the model provider. Try again in a moment."
+    if isinstance(e, openai.APIStatusError) and e.status_code == 413:
+        return "This was too big for the free models right now. Try again in a minute, or start a fresh chat."
     if isinstance(e, openai.APIStatusError):
         return f"The model provider returned an error ({e.status_code}). Try again in a moment."
     if isinstance(e, openai.APIError):  # errors reported mid-stream, e.g. an overloaded upstream

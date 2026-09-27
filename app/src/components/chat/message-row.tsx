@@ -446,7 +446,7 @@ function ErrorRow({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
   const { group } = useActions()
   return (
     <View style={{ marginTop: 10, marginLeft: group ? GUTTER : 0 }}>
-      <Notice tone="error" title="Couldn’t finish that" body={m.text || 'The run stopped with an error.'} action={{ label: 'Retry', onPress: onRetry }} />
+      <Notice tone="error" title="Couldn’t finish that" body={m.text || 'The run stopped with an error.'} action={{ label: 'Retry', onPress: onRetry }} collapsible />
     </View>
   )
 }
