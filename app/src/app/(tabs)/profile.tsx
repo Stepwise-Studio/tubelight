@@ -246,7 +246,7 @@ function AppsSection() {
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
                 <BrandTile toolkit={x.toolkit} size={34} />
                 <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{x.name || toolkitName(x.toolkit)}</Text>
-                <Chip label="Connected" tone="success" dot />
+                <Chip label="Connected" color="success" dot />
               </Press>
             </View>
           ))}

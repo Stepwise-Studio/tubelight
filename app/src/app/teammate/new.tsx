@@ -8,13 +8,13 @@ import { Add01Icon } from '@hugeicons/core-free-icons'
 import { SheetHeader } from '@/components/form-bits'
 import { SheetScreen } from '@/components/sheet-screen'
 import {
-  TeammateFields, TeammatePreview, handleTakenError, validateTeammate, type DraftErrors, type TeammateDraft,
+  TeammateFields, handleTakenError, validateTeammate, type DraftErrors, type TeammateDraft,
 } from '@/components/teammate-form'
 import { DEFAULT_MODEL, freeHandle, fromTemplate, roleName, useTemplates, type Template } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
-import { radius, useTheme } from '@/theme'
+import { useTheme } from '@/theme'
 import { Button, Icon, Press, TeammateAvatar, Text, haptic, toast } from '@/ui'
 
 const BLANK: TeammateDraft = {
@@ -63,14 +63,19 @@ export default function NewTeammate() {
     <SheetScreen>
       <SheetHeader title="New teammate" subtitle="Start from a role or from scratch." />
       <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 12, gap: 8 }}>
-          <TemplateCard label="Blank" sub="From scratch" on={picked === 'blank'} onPress={() => pick(null)} />
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, gap: 8 }}
+          accessibilityRole="radiogroup"
+          accessibilityLabel="Start from"
+        >
+          <TemplatePill label="Custom" sub="From scratch" on={picked === 'blank'} onPress={() => pick(null)} />
           {templates.map((t) => (
-            <TemplateCard key={t.role} template={t} label={t.name} sub={roleName(t.role)} on={picked === t.role} onPress={() => pick(t)} />
+            <TemplatePill key={t.role} template={t} label={t.name} sub={roleName(t.role)} on={picked === t.role} onPress={() => pick(t)} />
           ))}
         </ScrollView>
-        <View style={{ paddingHorizontal: 20, gap: 32, paddingTop: 8 }}>
-          <TeammatePreview draft={draft} />
+        <View style={{ paddingHorizontal: 20 }}>
           <TeammateFields value={draft} onChange={setDraft} errors={errors} />
         </View>
       </KeyboardAwareScrollView>
@@ -81,26 +86,31 @@ export default function NewTeammate() {
   )
 }
 
-function TemplateCard({ template, label, sub, on, onPress }: { template?: Template; label: string; sub: string; on: boolean; onPress: () => void }) {
+/** A starting point: a capsule with the face, name and role. The selected one takes the accent edge. */
+function TemplatePill({ template, label, sub, on, onPress }: { template?: Template; label: string; sub: string; on: boolean; onPress: () => void }) {
   const { c } = useTheme()
   return (
     <Press
-      radius={radius.lg}
+      radius={28}
+      smoothing={0}
       onPress={onPress}
       accessibilityRole="radio"
       accessibilityState={{ checked: on }}
       accessibilityLabel={`${label}, ${sub}`}
-      style={{ width: 128, padding: 12, gap: 8, backgroundColor: on ? c.tubeSoft : c.panel2, borderWidth: 1.5, borderColor: on ? c.tube : c.line }}
+      style={{
+        height: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 18,
+        backgroundColor: on ? c.tubeSoft : c.panel2, borderWidth: 1.5, borderColor: on ? c.tube : 'transparent',
+      }}
     >
       {template ? (
-        <TeammateAvatar teammate={template} size={36} interactive={false} paused={!on} />
+        <TeammateAvatar teammate={template} size={40} />
       ) : (
-        <View style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.ink4, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon icon={Add01Icon} size={16} color="ink3" />
+        <View style={{ width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.ink4, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={Add01Icon} size={18} color="ink3" />
         </View>
       )}
       <View>
-        <Text variant="label" numberOfLines={1}>{label}</Text>
+        <Text variant="label" color={on ? 'ink' : 'ink2'} numberOfLines={1}>{label}</Text>
         <Text variant="footnote" color="ink3" numberOfLines={1}>{sub}</Text>
       </View>
     </Press>

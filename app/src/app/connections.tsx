@@ -149,8 +149,8 @@ const ToolkitRow = memo(function ToolkitRow({ t, state, disabled, onChanged }: {
         {!!t.description && <Text variant="caption" color="ink3" numberOfLines={1}>{t.description}</Text>}
         {hint && <Text variant="footnote" color="ink3" numberOfLines={1}>{hint}</Text>}
       </View>
-      {state === 'connected' ? <Chip label="Connected" tone="success" dot />
-        : state === 'ready' ? <Chip label="Ready" />
+      {state === 'connected' ? <Chip label="Connected" color="success" dot />
+        : state === 'ready' ? <Chip label="Ready" color="info" dot />
         : <Button label="Connect" size="sm" variant="soft" loading={busy} disabled={disabled} onPress={connect} />}
     </View>
   )
@@ -195,8 +195,8 @@ function ConnectionRow({ conn, onChanged, disabled }: { conn: Connection; onChan
       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text variant="bodyMedium" numberOfLines={1} style={{ flexShrink: 1 }}>{name}</Text>
-          {conn.connected && <Chip label="Connected" tone="success" dot />}
-          {needsFix && <Chip label="Needs reconnecting" tone="warning" />}
+          {conn.connected && <Chip label="Connected" color="success" dot size="sm" />}
+          {needsFix && <Chip label="Needs reconnecting" color="warning" variant="soft" size="sm" />}
         </View>
         {!conn.connected && !needsFix && <Text variant="caption" color="ink3" numberOfLines={1}>{connectionStatus(conn)}</Text>}
         {conn.connected && conn.account && <Text variant="caption" color="ink3" numberOfLines={1}>{conn.account}</Text>}

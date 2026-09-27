@@ -1,7 +1,7 @@
 // The teammate editor: used by /teammate/new and the Settings half of /teammate/[id].
 import { useState } from 'react'
-import { Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, Keyframe } from 'react-native-reanimated'
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
+import Animated, { FadeIn } from 'react-native-reanimated'
 import { AtIcon, SparklesIcon, Tick02Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -13,9 +13,9 @@ import {
   useConnections, useModels, useToolkits, type Connection, type Toolkit,
 } from '@/lib/catalog'
 import type { Teammate } from '@/lib/types'
-import { motion, radius, useTheme } from '@/theme'
+import { motion, useTheme } from '@/theme'
 import {
-  Button, Chip, Divider, FACE_SEEDS, Icon, ListRow, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, Toggle, faceSeed,
+  Button, Chip, Divider, FACE_SEEDS, Icon, ListRow, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
   haptic, toast,
 } from '@/ui'
 
@@ -54,58 +54,44 @@ const followName = (d: TeammateDraft, name: string) => (!d.handle || d.handle ==
 
 export const sameDraft = (a: TeammateDraft, b: TeammateDraft) => JSON.stringify(a) === JSON.stringify(b)
 
-// The preview settles in when the face changes: modal-style 0.96 → 1, 250ms smooth out.
-const settle = new Keyframe({
-  0: { opacity: 0.4, transform: [{ scale: motion.scale.large }] },
-  100: { opacity: 1, transform: [{ scale: 1 }], easing: motion.ease.smoothOut },
-}).duration(motion.duration.fast)
-
-/** Large live preview of the draft. Tap it to make it hop. */
-export function TeammatePreview({ draft }: { draft: TeammateDraft }) {
-  return (
-    <Surface tone="panel2" radius={radius.xl} padding={20} style={{ alignItems: 'center', gap: 12 }}>
-      {/* Reanimated web leaves keyframe entrances hidden; web is only a preview. */}
-      <Animated.View key={draft.avatar_shape + draft.color} entering={Platform.OS === 'web' ? undefined : settle}>
-        <TeammateAvatar teammate={{ ...draft, name: draft.name || 'New teammate' }} size={96} live />
-      </Animated.View>
-      <View style={{ alignItems: 'center', gap: 2, maxWidth: '100%' }}>
-        <Text variant="heading" numberOfLines={1}>{draft.name.trim() || 'Unnamed'}</Text>
-        <Text variant="caption" color="ink3" numberOfLines={1}>
-          {[draft.handle && `@${draft.handle}`, draft.role.trim()].filter(Boolean).join(' · ') || 'Pick a name and a role'}
-        </Text>
-      </View>
-    </Surface>
-  )
-}
-
-/** Twelve Notionists faces: the one the name draws, then fixed seeds (kept across renames). */
-function FaceGrid({ draft, onPick }: { draft: TeammateDraft; onPick: (s: TeammateDraft['avatar_shape']) => void }) {
+/** The look, at the top next to the name: a strip of Notionists faces on the chosen colour, then the colours. */
+function LookPicker({ draft, onChange }: { draft: TeammateDraft; onChange: (d: Partial<TeammateDraft>) => void }) {
   const { c } = useTheme()
-  const { width } = useWindowDimensions()
-  const cols = 6
-  const cell = Math.floor((Math.min(width, 520) - 40 - (cols - 1) * 6) / cols)
+  const ready = useSheet()?.ready ?? true
   const current = faceSeed({ ...draft, name: draft.name || 'Teammate' })
   const seeds = [draft.name.trim() || 'Teammate', ...FACE_SEEDS]
+  const size = 60
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }} accessibilityRole="radiogroup" accessibilityLabel="Face">
-      {seeds.map((seed, i) => {
-        const on = seed === current
-        return (
-          <Pressable
-            key={`${i}-${seed}`}
-            accessibilityRole="radio"
-            accessibilityLabel={i === 0 ? 'Face from their name' : `Face ${i + 1}`}
-            accessibilityState={{ checked: on }}
-            onPress={() => { if (!on) { haptic.tap(); onPick(`face:${seed}`) } }}
-            style={{
-              width: cell, height: cell, borderRadius: cell / 2, alignItems: 'center', justifyContent: 'center',
-              borderWidth: 2, borderColor: on ? c.tube : 'transparent',
-            }}
-          >
-            <TeammateAvatar teammate={{ avatar_shape: `face:${seed}`, color: draft.color, name: seed }} size={cell - 8} />
-          </Pressable>
-        )
-      })}
+    <View style={{ gap: 16 }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginHorizontal: -20 }}
+        contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+        accessibilityRole="radiogroup"
+        accessibilityLabel="Face"
+      >
+        {(ready ? seeds : seeds.slice(0, 6)).map((seed, i) => {
+          const on = seed === current
+          return (
+            <Pressable
+              key={`${i}-${seed}`}
+              accessibilityRole="radio"
+              accessibilityLabel={i === 0 ? 'Face from their name' : `Face ${i + 1}`}
+              accessibilityState={{ checked: on }}
+              onPress={() => { if (!on) { haptic.tap(); onChange({ avatar_shape: `face:${seed}` }) } }}
+              style={{ width: size + 8, height: size + 8, borderRadius: size, padding: 2, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
+            >
+              {ready || on ? (
+                <TeammateAvatar teammate={{ avatar_shape: `face:${seed}`, color: draft.color, name: seed }} size={size} />
+              ) : (
+                <Skeleton width={size} height={size} radius={size / 2} />
+              )}
+            </Pressable>
+          )
+        })}
+      </ScrollView>
+      <ColorSwatches colors={COLORS} value={draft.color} onChange={(v) => onChange({ color: v })} />
     </View>
   )
 }
@@ -157,7 +143,7 @@ function ModelField({ value, role, onChange }: { value: string; role: string; on
                   subtitle={h.best}
                   accessory={
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      {h.id === forRole && <Chip label={`For ${role.trim().toLowerCase()}`} tone="tube" />}
+                      {h.id === forRole && <Chip label={`For ${role.trim().toLowerCase()}`} color="info" variant="soft" size="sm" />}
                       {tick(h.id)}
                     </View>
                   }
@@ -189,8 +175,8 @@ function ModelField({ value, role, onChange }: { value: string; role: string; on
   )
 }
 
-/** The system prompt, with Enhance: an LLM rewrites the user's words into a clear brief (Undo restores them). */
-function InstructionsField({ value, onChange, error }: { value: TeammateDraft; onChange: (v: string) => void; error?: string }) {
+/** The system prompt, with Enhance on the title line: an LLM rewrites the user's words into a clear brief (Undo restores them). */
+function InstructionsSection({ value, onChange, error }: { value: TeammateDraft; onChange: (v: string) => void; error?: string }) {
   const [busy, setBusy] = useState(false)
   const [before, setBefore] = useState<string | null>(null)
   const enhance = async () => {
@@ -210,7 +196,18 @@ function InstructionsField({ value, onChange, error }: { value: TeammateDraft; o
   }
   const empty = !value.system_prompt.trim() && !value.role.trim()
   return (
-    <>
+    <FormSection
+      title="Instructions"
+      hint={empty ? 'Add a role or a few words, then Enhance turns them into a clear brief.' : 'What they do and how they work, in your own words. Enhance turns it into a clear brief.'}
+      action={
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          {before !== null && !busy && (
+            <Button label="Undo" size="sm" variant="ghost" onPress={() => { haptic.tap(); onChange(before); setBefore(null) }} />
+          )}
+          <Button label={busy ? 'Enhancing…' : 'Enhance'} icon={SparklesIcon} size="sm" variant="soft" loading={busy} disabled={empty} onPress={enhance} />
+        </View>
+      }
+    >
       <TextField
         value={value.system_prompt}
         onChangeText={(v) => { onChange(v); if (before !== null) setBefore(null) }}
@@ -222,16 +219,9 @@ function InstructionsField({ value, onChange, error }: { value: TeammateDraft; o
         error={error}
         autoCapitalize="sentences"
         editable={!busy}
-        inputStyle={{ fontSize: 14, lineHeight: 21, minHeight: 180, maxHeight: 380 }}
+        inputStyle={{ fontSize: 14, lineHeight: 21, minHeight: 160, maxHeight: 360 }}
       />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Button label={busy ? 'Enhancing…' : 'Enhance'} icon={SparklesIcon} size="sm" variant="soft" loading={busy} disabled={empty} onPress={enhance} />
-        {before !== null && !busy && (
-          <Button label="Undo" size="sm" variant="ghost" onPress={() => { haptic.tap(); onChange(before); setBefore(null) }} />
-        )}
-        {empty && <Text variant="footnote" color="ink3" style={{ flex: 1 }}>Add a role or a few words first.</Text>}
-      </View>
-    </>
+    </FormSection>
   )
 }
 
@@ -244,24 +234,28 @@ export function connectionStatus(conn: Connection | undefined) {
   return 'Not connected'
 }
 
-const APP_ROWS = 8
+const APP_ROWS = 5
 
-/** The apps this teammate may use: the ones picked, then the most used, and a search across every app. */
+/**
+ * Apps: the teammate's own first, then the most used, five at most; search reaches every app.
+ * Each row is a name and either Connect or a Connected chip. Connecting one here also gives it to this teammate;
+ * any other connected app they can pick up later by asking.
+ */
 function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const { connections, reload } = useConnections()
   const { toolkits } = useToolkits()
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const byId = new Map((toolkits ?? []).map((t) => [t.toolkit, t]))
-  const status = (t: string) => connections?.find((x) => x.toolkit === t)
   const q = query.trim().toLowerCase()
   const picked = value.map((t): Toolkit => byId.get(t) ?? { toolkit: t, name: toolkitName(t), logo: '', description: '', categories: [], tools: 0, auth: 'oauth' })
   const rest = (toolkits ?? []).filter((t) => !value.includes(t.toolkit))
   const rows = q
-    ? (toolkits ?? []).filter((t) => t.name.toLowerCase().includes(q) || t.toolkit.toLowerCase().includes(q) || t.categories.some((k) => k.includes(q))).slice(0, APP_ROWS)
-    : [...picked, ...rest.slice(0, Math.max(0, APP_ROWS - picked.length))]
-  const toggle = (t: string, on: boolean) => { haptic.tap(); onChange(on ? [...value, t] : value.filter((x) => x !== t)) }
+    ? (toolkits ?? []).filter((t) => t.name.toLowerCase().includes(q) || t.toolkit.toLowerCase().includes(q)).slice(0, APP_ROWS)
+    : picked.length >= APP_ROWS ? picked : [...picked, ...rest].slice(0, APP_ROWS)
   const connect = async (t: Toolkit) => {
+    haptic.tap()
+    if (!value.includes(t.toolkit)) onChange([...value, t.toolkit])
     setBusy(t.toolkit)
     try { await connectApp(t.toolkit, t.name); await reload() } catch (e) {
       toast({ title: `Unable to connect ${t.name}`, body: (e as Error).message, tone: 'error' })
@@ -273,30 +267,27 @@ function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: str
       <SearchField value={query} onChangeText={setQuery} placeholder={toolkits ? `Search ${toolkits.length.toLocaleString()} apps` : 'Search apps'} />
       <Surface style={{ overflow: 'hidden' }}>
         {toolkits === null && rows.length === 0 && [0, 1, 2].map((i) => (
-          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
-            <Skeleton width={36} height={36} radius={10} />
-            <View style={{ flex: 1, gap: 6 }}><Skeleton width="40%" height={12} /><Skeleton width="60%" height={10} /></View>
+          <View key={i}>
+            {i > 0 && <Divider />}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, height: 60 }}>
+              <Skeleton width={32} height={32} radius={9} />
+              <Skeleton width="36%" height={12} />
+            </View>
           </View>
         ))}
         {rows.map((t, i) => {
-          const on = value.includes(t.toolkit)
-          const conn = status(t.toolkit)
-          const ready = t.auth === 'none' || conn?.connected
+          const conn = connections?.find((x) => x.toolkit === t.toolkit)
           return (
             <View key={t.toolkit}>
-              {i > 0 && <Divider inset={60} />}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 14, paddingRight: 10, minHeight: 64 }}>
-                <BrandTile toolkit={t.toolkit} size={36} />
-                <View style={{ flex: 1, minWidth: 0, paddingVertical: 10 }}>
-                  <Text variant="bodyMedium" numberOfLines={1}>{t.name}</Text>
-                  <Text variant="footnote" color="ink3" numberOfLines={1}>
-                    {t.auth === 'none' ? 'No sign-in needed' : conn ? connectionStatus(conn) : t.description || 'Not connected'}
-                  </Text>
-                </View>
-                {on && !ready && conn?.status !== 'unavailable' && (
-                  <Button label="Connect" size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t)} />
-                )}
-                <Toggle value={on} onChange={(v) => toggle(t.toolkit, v)} label={`${t.name} for this teammate`} />
+              {i > 0 && <Divider />}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 14, paddingRight: 12, height: 60 }}>
+                <BrandTile toolkit={t.toolkit} size={32} />
+                <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{t.name}</Text>
+                {connections === null ? <Skeleton width={84} height={28} radius={14} />
+                  : t.auth === 'none' ? <Chip label="Ready" color="info" dot />
+                  : conn?.connected ? <Chip label="Connected" color="success" dot />
+                  : conn?.status === 'unavailable' ? null
+                  : <Button label={conn?.status === 'expired' || conn?.status === 'failed' ? 'Reconnect' : 'Connect'} size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t)} />}
               </View>
             </View>
           )
@@ -319,6 +310,7 @@ export function TeammateFields({ value, onChange, errors }: {
   return (
     <View style={{ gap: 32 }}>
       <FormSection title="Who they are">
+        <LookPicker draft={value} onChange={(p) => onChange({ ...value, ...p })} />
         <TextField
           label="Name"
           value={value.name}
@@ -344,27 +336,20 @@ export function TeammateFields({ value, onChange, errors }: {
         <TextField label="Bio" value={value.bio} onChangeText={(v) => set('bio', v)} placeholder="One line on how they work" multiline showCount maxLength={BIO_MAX} />
       </FormSection>
 
-      <FormSection title="Instructions" hint="What they do and how they work. Write it in your own words, then Enhance turns it into a clear brief.">
-        <InstructionsField value={value} onChange={(v) => set('system_prompt', v)} error={errors.system_prompt} />
-      </FormSection>
+      <InstructionsSection value={value} onChange={(v) => set('system_prompt', v)} error={errors.system_prompt} />
 
       {ready ? (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} style={{ gap: 32 }}>
-          <FormSection title="Model" hint="The model that writes their replies. All free.">
+          <FormSection title="Model" hint="Writes their replies. Every option is free.">
             <ModelField value={value.model} role={value.role} onChange={(v) => set('model', v)} />
           </FormSection>
 
-          <FormSection title="Apps" hint="What this teammate may use. Sending, posting and pushing always wait for your approval.">
+          <FormSection title="Apps" hint="Connect the ones they’ll work with. Sending, posting and pushing always wait for your approval.">
             <ToolkitPicker value={value.allowed_toolkits} onChange={(v) => set('allowed_toolkits', v)} />
-          </FormSection>
-
-          <FormSection title="Look">
-            <FaceGrid draft={value} onPick={(s) => set('avatar_shape', s)} />
-            <ColorSwatches colors={COLORS} value={value.color} onChange={(v) => set('color', v)} />
           </FormSection>
         </Animated.View>
       ) : (
-        <View style={{ gap: 12 }}><Skeleton width="30%" height={12} /><Skeleton height={64} radius={16} /><Skeleton height={180} radius={16} /></View>
+        <View style={{ gap: 12 }}><Skeleton width="30%" height={16} /><Skeleton height={64} radius={16} /><Skeleton height={180} radius={16} /></View>
       )}
     </View>
   )

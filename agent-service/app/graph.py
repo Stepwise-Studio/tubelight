@@ -432,14 +432,15 @@ async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) 
             return f"The user answered: {d['answer']}"
         return "The user dismissed the question. Continue with your best judgement or ask in plain text."
     toolkit = str(args.get("toolkit", "")).upper()
-    if not d:  # the gate skipped the pause: it was connected already
-        return f"{toolkit} is already connected. Continue the task."
-    if d.get("action") != "connected":
+    if d and d.get("action") != "connected":
         return f"The user chose not to connect {toolkit} for now. Tell them what you can do without it."
+    # Connected now, or already (the gate skipped the pause): either way this teammate gets the app's tools.
     if toolkit not in (tm.get("allowed_toolkits") or []):
         tm["allowed_toolkits"] = [*(tm.get("allowed_toolkits") or []), toolkit]
         await db.update("teammates", {"id": f"eq.{tm['id']}"}, {"allowed_toolkits": tm["allowed_toolkits"]})
     ctx._tools.pop(tm["id"], None)  # rebuild with the new app's tools on the next model call
+    if not d:
+        return f"{toolkit} is already connected. Its tools are available now; continue the task."
     return f"The user connected {toolkit}. Its tools are available now; continue the task."
 
 

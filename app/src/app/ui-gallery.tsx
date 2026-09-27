@@ -74,8 +74,9 @@ function Gallery() {
           <SuccessCheck key={n} />
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <Chip label="Neutral" /><Chip label="Live" tone="tube" dot /><Chip label="Approved" tone="success" />
-          <Chip label="Expired" tone="warning" /><Chip label="Failed" tone="danger" /><Chip label="Filter" selected onPress={() => {}} />
+          <Chip label="Idle" /><Chip label="Live" color="info" dot /><Chip label="Approved" color="success" variant="soft" />
+          <Chip label="Expired" color="warning" variant="soft" /><Chip label="Failed" color="danger" variant="solid" /><Chip label="Magic" color="magical" variant="soft" />
+          <Chip label="Small" size="sm" color="success" dot /><Chip label="Filter" selected onPress={() => {}} />
         </View>
         <SearchField value={q} onChangeText={setQ} placeholder="Search chats" />
         <TextField label="Email" placeholder="name@example.com" error={err} hint="We never email you." />

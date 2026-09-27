@@ -84,7 +84,7 @@ function TeammateCard({ t, model, working }: { t: Teammate; model: string; worki
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text variant="headline" numberOfLines={1} style={{ flexShrink: 1 }}>{t.name}</Text>
           <Text variant="caption" color="ink3" numberOfLines={1} style={{ flexShrink: 2 }}>@{t.handle}</Text>
-          {working && <Chip label="Working" tone="tube" dot />}
+          {working && <Chip label="Working" color="info" dot size="sm" />}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
           <Text variant="label" color="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>{t.role}</Text>

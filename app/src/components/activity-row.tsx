@@ -187,8 +187,8 @@ export function ActivityRow({ a }: { a: Activity }) {
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text variant="footnote" color="ink3" tabular numberOfLines={1} style={{ flexShrink: 1 }}>{meta}</Text>
-            {failed && <Chip label="Failed" tone="danger" />}
-            {a.status === 'pending' && <Chip label="Waiting" tone="warning" />}
+            {failed && <Chip label="Failed" color="danger" variant="soft" size="sm" />}
+            {a.status === 'pending' && <Chip label="Waiting" color="warning" variant="soft" size="sm" />}
           </View>
         </View>
         <Animated.View style={[{ paddingTop: 3 }, flip]}>

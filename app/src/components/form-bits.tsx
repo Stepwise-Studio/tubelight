@@ -29,16 +29,16 @@ export function SheetHeader({ title, subtitle, onClose }: { title: string; subti
   return sheet ? <GestureDetector gesture={sheet.drag}>{header}</GestureDetector> : header
 }
 
-/** A titled group of fields. Groups sit 32 apart; fields inside 16. */
+/** A titled group of fields: a headline title (with an optional action on its line), a quieter hint below. */
 export function FormSection({ title, hint, action, children }: { title: string; hint?: string; action?: ReactNode; children: ReactNode }) {
   return (
     <View style={{ gap: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, minHeight: 20 }}>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text variant="overline" color="ink3" accessibilityRole="header">{title}</Text>
-          {hint && <Text variant="caption" color="ink3">{hint}</Text>}
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 34 }}>
+          <Text variant="headline" accessibilityRole="header" style={{ flex: 1 }}>{title}</Text>
+          {action}
         </View>
-        {action}
+        {hint && <Text variant="caption" color="ink3">{hint}</Text>}
       </View>
       {children}
     </View>
