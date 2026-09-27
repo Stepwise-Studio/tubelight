@@ -36,3 +36,5 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 - Commit after each coherent chunk, with the Co-Authored-By line.
 - Avatars are static DiceBear Notionists SVGs (`src/ui/avatar.tsx`, cached per seed+colour); `avatar_shape` = `face:<seed>` or a legacy shape name (then the name is the seed). No avatar animation: the user dislikes it.
 - `npx expo install <pkg>` only; a new native dep means a dev-client rebuild.
+- Reanimated gotcha (release builds only): a view whose resting state is only reached by animating a shared value can snap back to its first-render style on a later React commit. Make the rendered/initial state the resting one (entering/exiting layout animations, offsets that rest at 0); never animate views you've already unmounted. Verify overlay/animation changes on a release APK, not just the dev client.
+- Full-height sheets (new teammate/project) render in `SheetsHost` above the navigator via `openSheet()`, not as transparent-modal routes (Android's native stack drew the tabs over them).
