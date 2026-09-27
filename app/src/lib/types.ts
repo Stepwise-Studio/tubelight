@@ -1,9 +1,5 @@
 // Row types mirroring supabase/migrations/0001_init.sql. Keep in sync with docs/CONTRACT.md.
 
-export type BotShape =
-  | 'clover' | 'flower' | 'star' | 'ghost' | 'mech' | 'circle' | 'hexagon' | 'square' | 'triangle'
-  | 'blob' | 'drop' | 'droid' | 'alien' | 'cat' | 'cloud' | 'pill' | 'pebble' | 'puddle'
-
 export interface Profile {
   id: string
   display_name: string | null
@@ -21,7 +17,8 @@ export interface Teammate {
   system_prompt: string
   model: string
   allowed_toolkits: string[]
-  avatar_shape: BotShape
+  /** `face:<seed>` (a Notionists face) or a legacy bot shape name. */
+  avatar_shape: string
   color: string
   created_at: string
   updated_at: string

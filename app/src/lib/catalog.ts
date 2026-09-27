@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { api } from '@/lib/api'
 import { FALLBACK_TEMPLATES } from '@/lib/templates'
-import type { BotShape, Teammate } from '@/lib/types'
+import type { Teammate } from '@/lib/types'
 import { haptic, toast } from '@/ui'
 
 export interface Template {
@@ -16,7 +16,7 @@ export interface Template {
   bio: string
   system_prompt: string
   allowed_toolkits: string[]
-  avatar_shape: BotShape
+  avatar_shape: string
   color: string
 }
 
@@ -45,11 +45,6 @@ export interface Toolkit {
 export const DEFAULT_MODEL = 'groq:openai/gpt-oss-120b'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
 export const REPO_RE = /^https?:\/\/\S+\.\S+/
-
-export const SHAPES: BotShape[] = [
-  'clover', 'flower', 'star', 'ghost', 'mech', 'circle', 'hexagon', 'square', 'triangle',
-  'blob', 'drop', 'droid', 'alien', 'cat', 'cloud', 'pill', 'pebble', 'puddle',
-]
 
 /** Mid-light pastels: readable faces on zinc-950 and on white. */
 export const COLORS = [

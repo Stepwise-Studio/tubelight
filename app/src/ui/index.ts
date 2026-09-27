@@ -1,5 +1,5 @@
 export { AvatarStack } from './avatar-stack'
-export { TeammateAvatar, type AvatarState } from './avatar'
+export { FACE_SEEDS, TeammateAvatar, faceSeed, type AvatarState } from './avatar'
 export { Badge } from './badge'
 export { Beam } from './beam'
 export { Button, IconButton, type ButtonVariant } from './button'

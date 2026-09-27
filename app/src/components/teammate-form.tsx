@@ -8,13 +8,13 @@ import { AtIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { BrandTile } from '@/components/brand-mark'
 import { ColorSwatches, FormSection, SwitchRow } from '@/components/form-bits'
 import {
-  COLORS, HANDLE_RE, PROVIDERS, SHAPES, TOOLKITS, contextLabel, modelName, modelProvider, toolkitName,
+  COLORS, HANDLE_RE, PROVIDERS, TOOLKITS, contextLabel, modelName, modelProvider, toolkitName,
   useConnections, useModels, type Connection,
 } from '@/lib/catalog'
 import type { Teammate } from '@/lib/types'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import {
-  Button, Divider, Icon, ListRow, Sheet, Surface, TeammateAvatar, Text, TextField, haptic,
+  Button, Divider, FACE_SEEDS, Icon, ListRow, Sheet, Surface, TeammateAvatar, Text, TextField, faceSeed, haptic,
 } from '@/ui'
 
 export type TeammateDraft = Pick<Teammate, 'name' | 'handle' | 'role' | 'bio' | 'system_prompt' | 'model' | 'allowed_toolkits' | 'avatar_shape' | 'color'>
@@ -76,28 +76,31 @@ export function TeammatePreview({ draft }: { draft: TeammateDraft }) {
   )
 }
 
-function ShapeGrid({ draft, onPick }: { draft: TeammateDraft; onPick: (s: TeammateDraft['avatar_shape']) => void }) {
+/** Twelve Notionists faces: the one the name draws, then fixed seeds (kept across renames). */
+function FaceGrid({ draft, onPick }: { draft: TeammateDraft; onPick: (s: TeammateDraft['avatar_shape']) => void }) {
   const { c } = useTheme()
   const { width } = useWindowDimensions()
   const cols = 6
   const cell = Math.floor((Math.min(width, 520) - 40 - (cols - 1) * 6) / cols)
+  const current = faceSeed({ ...draft, name: draft.name || 'Teammate' })
+  const seeds = [draft.name.trim() || 'Teammate', ...FACE_SEEDS]
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }} accessibilityRole="radiogroup" accessibilityLabel="Face">
-      {SHAPES.map((s) => {
-        const on = s === draft.avatar_shape
+      {seeds.map((seed, i) => {
+        const on = seed === current
         return (
           <Pressable
-            key={s}
+            key={`${i}-${seed}`}
             accessibilityRole="radio"
-            accessibilityLabel={s}
+            accessibilityLabel={i === 0 ? 'Face from their name' : `Face ${i + 1}`}
             accessibilityState={{ checked: on }}
-            onPress={() => { if (!on) { haptic.tap(); onPick(s) } }}
+            onPress={() => { if (!on) { haptic.tap(); onPick(`face:${seed}`) } }}
             style={{
-              width: cell, height: cell, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: on ? c.tubeSoft : c.panel2, borderWidth: 1.5, borderColor: on ? c.tube : 'transparent',
+              width: cell, height: cell, borderRadius: cell / 2, alignItems: 'center', justifyContent: 'center',
+              borderWidth: 2, borderColor: on ? c.tube : 'transparent',
             }}
           >
-            <TeammateAvatar teammate={{ avatar_shape: s, color: draft.color, name: s }} size={Math.round(cell * 0.72)} interactive={false} />
+            <TeammateAvatar teammate={{ avatar_shape: `face:${seed}`, color: draft.color, name: seed }} size={cell - 8} />
           </Pressable>
         )
       })}
@@ -244,7 +247,7 @@ export function TeammateFields({ value, onChange, errors }: {
       </FormSection>
 
       <FormSection title="Face">
-        <ShapeGrid draft={value} onPick={(s) => set('avatar_shape', s)} />
+        <FaceGrid draft={value} onPick={(s) => set('avatar_shape', s)} />
         <ColorSwatches colors={COLORS} value={value.color} onChange={(v) => set('color', v)} />
       </FormSection>
 

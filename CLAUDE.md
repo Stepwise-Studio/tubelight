@@ -34,5 +34,5 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 ## Rules
 - Secrets live only in `agent-service/.env`, `app/.env`, `.env.test` (all gitignored). Never print or commit them.
 - Commit after each coherent chunk, with the Co-Authored-By line.
-- Avatars (Skia) are frozen unless working or `live`: keep it that way for performance.
+- Avatars are static DiceBear Notionists SVGs (`src/ui/avatar.tsx`, cached per seed+colour); `avatar_shape` = `face:<seed>` or a legacy shape name (then the name is the seed). No avatar animation: the user dislikes it.
 - `npx expo install <pkg>` only; a new native dep means a dev-client rebuild.
