@@ -138,7 +138,7 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
           />
         }
       />
-      <KeyboardAwareScrollView bottomOffset={96} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + (dirty ? 112 : 40) }}>
+      <KeyboardAwareScrollView bottomOffset={dirty ? 170 : 96} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + (dirty ? 170 : 40) }}>
         <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingTop: 24, gap: 12 }}>
           <TeammateAvatar teammate={draft} size={88} live state={working ? 'working' : 'default'} />
           <View style={{ alignItems: 'center', gap: 2 }}>
@@ -176,12 +176,18 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
         <Animated.View
           entering={barIn}
           exiting={barOut}
-          style={{ position: 'absolute', zIndex: 10, left: 12, right: 12, bottom: Math.max(insets.bottom, 12), borderRadius: 26, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.25)' }}
+          style={{ position: 'absolute', zIndex: 10, left: 12, right: 12, bottom: Math.max(insets.bottom, 12), borderRadius: 24, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.25)' }}
         >
-          <Surface radius={26 /* button 18 + padding 8 */} padding={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 16 }}>
-            <Text variant="label" color="ink2" style={{ flex: 1 }}>Unsaved changes</Text>
-            <Button label="Discard" variant="ghost" onPress={() => { setEdit(null); setErrors({}) }} />
-            <Button label="Save changes" loading={saving} onPress={save} />
+          {/* A heading and one line of context, then the two choices side by side at full width. */}
+          <Surface radius={24} padding={16} style={{ gap: 14 }} accessibilityRole="alert">
+            <View style={{ gap: 2 }}>
+              <Text variant="headline">Unsaved changes</Text>
+              <Text variant="caption" color="ink3">Save to update {t?.name ?? 'this teammate'}, or discard to keep things as they were.</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button label="Discard" variant="outline" onPress={() => { setEdit(null); setErrors({}) }} style={{ flex: 1 }} />
+              <Button label="Save changes" loading={saving} onPress={save} style={{ flex: 1 }} />
+            </View>
           </Surface>
         </Animated.View>
       )}

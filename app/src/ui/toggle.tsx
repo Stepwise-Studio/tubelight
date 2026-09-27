@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Pressable, View } from 'react-native'
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import Animated, { useAnimatedStyle, withSequence, withSpring, withTiming } from 'react-native-reanimated'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { motion, useTheme } from '@/theme'
@@ -11,6 +12,16 @@ import { Text } from './text'
 
 const t = (v: number | string) => { 'worklet'; return withTiming(v as number, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) }
 
+export type ToggleSize = 'sm' | 'default' | 'lg'
+
+// Stepwise UI Toggle geometry: equal gap on all four sides, knob = track height − 2 × gap.
+const SIZES = {
+  sm: { w: 36, h: 22, gap: 3 },
+  default: { w: 44, h: 26, gap: 4 },
+  lg: { w: 54, h: 32, gap: 4 },
+} as const
+const SPRING = { stiffness: 500, damping: 32 }
+
 export interface ToggleProps {
   value: boolean
   onChange: (v: boolean) => void
@@ -18,16 +29,36 @@ export interface ToggleProps {
   label?: string
   description?: string
   disabled?: boolean
+  size?: ToggleSize
 }
 
-/** Switch. On = tube. With `label`, the whole row is the hit target. */
-export function Toggle({ value, onChange, label, description, disabled }: ToggleProps) {
-  const { c } = useTheme()
-  const track = useAnimatedStyle(() => ({ backgroundColor: withTiming(value ? c.tube : c.panel3, { duration: motion.duration.fast }) }), [value, c])
-  const knob = useAnimatedStyle(() => ({ transform: [{ translateX: t(value ? 20 : 0) }] }), [value])
+/**
+ * Switch (port of Stepwise UI's Toggle). The knob springs across and squashes a little mid-travel after a real
+ * flip, so it has some weight. On = tube. With `label`, the whole row is the hit target.
+ */
+export function Toggle({ value, onChange, label, description, disabled, size = 'default' }: ToggleProps) {
+  const { c, scheme } = useTheme()
+  const { w, h, gap } = SIZES[size]
+  const knob = h - gap * 2
+  const travel = w - knob - gap * 2
+  // The squash is feedback for a real flip (by this switch or a row around it), never a first-paint effect.
+  const [seen, setSeen] = useState(value)
+  const [flipped, setFlipped] = useState(false)
+  if (seen !== value) {
+    setSeen(value)
+    setFlipped(true)
+  }
+  const off = scheme === 'dark' ? 'rgba(63,63,70,0.7)' : 'rgba(228,228,231,0.8)'
+  const track = useAnimatedStyle(() => ({ backgroundColor: withTiming(value ? c.tube : off, { duration: 200 }) }), [value, c, off])
+  const knobStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: withSpring(value ? travel : 0, SPRING) },
+      { scaleX: flipped ? withSequence(withTiming(1.12, { duration: 110 }), withTiming(1, { duration: 110 })) : 1 },
+    ],
+  }), [value, travel, flipped])
   const sw = (
-    <Animated.View style={[{ width: 51, height: 31, borderRadius: 16, padding: 2, opacity: disabled ? 0.45 : 1 }, track]}>
-      <Animated.View style={[{ width: 27, height: 27, borderRadius: 14, backgroundColor: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }, knob]} />
+    <Animated.View style={[{ width: w, height: h, borderRadius: h / 2, opacity: disabled ? 0.4 : 1 }, track]}>
+      <Animated.View style={[{ position: 'absolute', top: gap, left: gap, width: knob, height: knob, borderRadius: knob / 2, backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }, knobStyle]} />
     </Animated.View>
   )
   return (
@@ -37,7 +68,7 @@ export function Toggle({ value, onChange, label, description, disabled }: Toggle
       accessibilityState={{ checked: value, disabled }}
       disabled={disabled}
       onPress={() => { haptic.tap(); onChange(!value) }}
-      hitSlop={label ? 0 : 8}
+      hitSlop={label ? 0 : 10}
       style={label ? { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 } : undefined}
     >
       {label && (

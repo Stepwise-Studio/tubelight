@@ -252,8 +252,10 @@ function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: str
   const nameOf = (t: string) => toolkits?.find((k) => k.toolkit === t)?.name ?? connections?.find((k) => k.toolkit === t)?.name ?? toolkitName(t)
   const connected = (connections ?? []).filter((k) => k.connected).map((k) => k.toolkit)
   const missing = value.filter((t) => !connected.includes(t) && toolkits?.find((k) => k.toolkit === t)?.auth !== 'none')
+  // Selected apps lead, but by what was selected when the page opened: a row never jumps away when you flip it.
+  const [opened] = useState(value)
   const rows = [...new Set([...connected, ...value.filter((t) => !missing.includes(t))])]
-    .sort((a, b) => Number(value.includes(b)) - Number(value.includes(a)) || nameOf(a).localeCompare(nameOf(b)))
+    .sort((a, b) => Number(opened.includes(b)) - Number(opened.includes(a)) || nameOf(a).localeCompare(nameOf(b)))
   const set = (t: string, on: boolean) => onChange(on ? [...new Set([...value, t])] : value.filter((x) => x !== t))
 
   const connect = async (t: string) => {
