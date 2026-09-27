@@ -83,9 +83,9 @@ Web: `*.web.tsx` files swap Skia/native-only pieces (squircle → radius, bot-av
 | `/activity` | `app/(tabs)/activity.tsx` | **placeholder** | Activity feed. |
 | `/settings` | `app/(tabs)/settings.tsx` | **placeholder** | Theme (`setPreference`), Connections link, push registration (`push_tokens`), sign out. |
 | `/chat/[threadId]` | `app/chat/[threadId].tsx` | built | `dm:<id>` or `proj:<id>`. Push taps and `tubelight://chat/<threadId>` land here. Tab bar hidden. |
-| `/teammate/new` | `app/teammate/new.tsx` | **placeholder** | Presented as a `formSheet` (root layout). Chat list empty state links here. |
+| `openSheet('teammate')` | `components/new-teammate-sheet.tsx` | built | Full-height sheet above the navigator (`SheetsHost`), not a route. |
 | `/teammate/[id]` | `app/teammate/[id].tsx` | **placeholder** | Profile/editor. DM header links here. |
-| `/project/new` | `app/project/new.tsx` | **placeholder** | `formSheet`. Chat list header links here. |
+| `openSheet('project')` | `components/new-project-sheet.tsx` | built | Same sheet host. |
 | `/project/[id]/settings` | `app/project/[id]/settings.tsx` | **placeholder** | Members, event rules. Project thread header links here. |
 | `/connections` | `app/connections.tsx` | **placeholder** | Composio OAuth; `tubelight://connections` returns here. |
 | `/ui-gallery` | `app/ui-gallery.tsx` | built (dev) | Every primitive, both themes. |

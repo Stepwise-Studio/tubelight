@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon, Link01Icon } from '@hugeicons/core-free-icons'
 
 import { ColorSwatches, FormSection, SheetHeader, TeammateToggles } from '@/components/form-bits'
-import { SheetScreen } from '@/components/sheet-screen'
+import { openSheet, useSheet } from '@/components/sheet-screen'
 import { COLORS, REPO_RE } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Project } from '@/lib/types'
@@ -14,7 +14,9 @@ import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import { Button, Text, TextField, haptic, toast } from '@/ui'
 
-export default function NewProject() {
+/** Rendered inside SheetScreen by SheetsHost. */
+export function NewProject() {
+  const sheet = useSheet()
   const { c } = useTheme()
   const ws = useWorkspace()
   const insets = useSafeAreaInsets()
@@ -46,13 +48,12 @@ export default function NewProject() {
     }
     await ws.refresh()
     haptic.success()
-    // Opened from a tab this closes the sheet first; opened by URL there is nothing to go back to.
-    const next = { pathname: '/chat/[threadId]', params: { threadId: `proj:${project.id}` } } as const
-    if (router.canGoBack()) { router.back(); router.push(next) } else router.replace(next)
+    // The chat opens underneath as the sheet slides away.
+    sheet?.close(() => router.push({ pathname: '/chat/[threadId]', params: { threadId: `proj:${project.id}` } }))
   }
 
   return (
-    <SheetScreen>
+    <>
       <SheetHeader title="New project" subtitle="A group chat where teammates work together." />
       <KeyboardAwareScrollView bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24, gap: 32 }}>
         <FormSection title="Details">
@@ -80,7 +81,7 @@ export default function NewProject() {
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Text variant="caption" color="ink3" style={{ flex: 1 }}>You don’t have any teammates yet. Add one first, then bring them in.</Text>
-              <Button label="New teammate" size="sm" variant="soft" icon={Add01Icon} onPress={() => { router.back(); router.push('/teammate/new') }} />
+              <Button label="New teammate" size="sm" variant="soft" icon={Add01Icon} onPress={() => openSheet('teammate')} />
             </View>
           )}
         </FormSection>
@@ -94,6 +95,6 @@ export default function NewProject() {
           onPress={create}
         />
       </View>
-    </SheetScreen>
+    </>
   )
 }

@@ -21,7 +21,7 @@ export function SheetHeader({ title, subtitle, onClose }: { title: string; subti
           <Text variant="heading" accessibilityRole="header">{title}</Text>
           {subtitle && <Text variant="caption" color="ink3">{subtitle}</Text>}
         </View>
-        <IconButton icon={Cancel01Icon} accessibilityLabel="Close" variant="soft" round size={36} iconSize={18} onPress={sheet?.close ?? onClose} />
+        <IconButton icon={Cancel01Icon} accessibilityLabel="Close" variant="soft" round size={36} iconSize={18} onPress={sheet ? () => sheet.close() : onClose} />
       </View>
     </View>
   )

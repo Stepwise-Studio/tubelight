@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon } from '@hugeicons/core-free-icons'
 
 import { SheetHeader } from '@/components/form-bits'
-import { SheetScreen } from '@/components/sheet-screen'
+import { useSheet } from '@/components/sheet-screen'
 import {
   TeammateFields, handleTakenError, validateTeammate, type DraftErrors, type TeammateDraft,
 } from '@/components/teammate-form'
@@ -21,7 +21,9 @@ const BLANK: TeammateDraft = {
   name: '', handle: '', role: '', bio: '', system_prompt: '', model: DEFAULT_MODEL, allowed_toolkits: [], avatar_shape: 'circle', color: '#8bd4f7',
 }
 
-export default function NewTeammate() {
+/** Rendered inside SheetScreen by SheetsHost. */
+export function NewTeammate() {
+  const sheet = useSheet()
   const { c } = useTheme()
   const ws = useWorkspace()
   const insets = useSafeAreaInsets()
@@ -53,14 +55,13 @@ export default function NewTeammate() {
     }
     haptic.success()
     await ws.refresh()
-    // Opened from a tab this closes the sheet first; opened by URL there is nothing to go back to.
-    const next = { pathname: '/teammate/[id]', params: { id: (data as Teammate).id } } as const
-    if (router.canGoBack()) { router.back(); router.push(next) } else router.replace(next)
+    // Their page opens underneath as the sheet slides away.
+    sheet?.close(() => router.push({ pathname: '/teammate/[id]', params: { id: (data as Teammate).id } }))
     toast({ title: `${draft.name.trim()} joined your team`, tone: 'success' })
   }
 
   return (
-    <SheetScreen>
+    <>
       <SheetHeader title="New teammate" subtitle="Start from a role or from scratch." />
       <KeyboardAwareScrollView bottomOffset={24} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
         <ScrollView
@@ -82,7 +83,7 @@ export default function NewTeammate() {
       <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: Math.max(insets.bottom, 16), borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.panel }}>
         <Button label={draft.name.trim() ? `Add ${draft.name.trim()}` : 'Add teammate'} size="lg" fullWidth loading={saving} onPress={save} />
       </View>
-    </SheetScreen>
+    </>
   )
 }
 

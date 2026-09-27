@@ -14,6 +14,7 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import {
   TeammateFields, draftOf, handleTakenError, sameDraft, validateTeammate, type DraftErrors, type TeammateDraft,
 } from '@/components/teammate-form'
+import { openSheet } from '@/components/sheet-screen'
 import { isShown } from '@/lib/activity'
 import { modelName, useModels } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
@@ -209,7 +210,7 @@ function Overview({ t }: { t: Teammate }) {
         {projects.length === 0 ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <Text variant="caption" color="ink3" style={{ flex: 1 }}>Not in any project yet. Projects are group chats where teammates work together.</Text>
-            <Button label="New project" size="sm" variant="soft" icon={Add01Icon} onPress={() => router.push('/project/new')} />
+            <Button label="New project" size="sm" variant="soft" icon={Add01Icon} onPress={() => openSheet('project')} />
           </View>
         ) : (
           <Surface style={{ overflow: 'hidden' }}>

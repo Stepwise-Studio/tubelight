@@ -11,6 +11,7 @@ import { CrewList } from '@/components/crew'
 import { FabMenu } from '@/components/fab-menu'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ThreadAvatar } from '@/components/thread-avatar'
+import { openSheet } from '@/components/sheet-screen'
 import { isUnread, relativeTime, stripCues } from '@/lib/format'
 import type { Thread } from '@/lib/types'
 import { useWorkspace, type Preview } from '@/lib/workspace'
@@ -132,8 +133,8 @@ export default function Chats() {
           accessibilityLabel="New chat, project or teammate"
           items={[
             { label: 'Message a teammate', icon: BubbleChatIcon, onPress: () => setPicker(true) },
-            { label: 'New project', icon: UserGroupIcon, onPress: () => router.push('/project/new') },
-            { label: 'New teammate', icon: UserAdd01Icon, onPress: () => router.push('/teammate/new') },
+            { label: 'New project', icon: UserGroupIcon, onPress: () => openSheet('project') },
+            { label: 'New teammate', icon: UserAdd01Icon, onPress: () => openSheet('teammate') },
           ]}
         />
       )}
@@ -191,7 +192,7 @@ function Inbox({ query }: { query: string }) {
           art={<TeammateAvatar teammate={{ name: 'Teammate', avatar_shape: 'clover', color: c.tube }} size={64} state="sleeping" />}
           action={ws.error
             ? <Button label="Try again" variant="soft" onPress={refresh} />
-            : <Button label="Create a teammate" icon={Add01Icon} onPress={() => router.push('/teammate/new')} />}
+            : <Button label="Create a teammate" icon={Add01Icon} onPress={() => openSheet('teammate')} />}
         />
       </View>
     )
@@ -212,7 +213,7 @@ function Inbox({ query }: { query: string }) {
       )}
       ListEmptyComponent={q ? <EmptyState title="No chats match" body={`Nothing in your inbox matches "${query.trim()}".`} /> : null}
       ListFooterComponent={ws.projects.length === 0 && !q ? (
-        <Press radius={16} onPress={() => router.push('/project/new')} outerStyle={{ marginHorizontal: 16, marginTop: 12 }} style={{ padding: 16, borderWidth: 1, borderColor: c.line, borderStyle: 'dashed', flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+        <Press radius={16} onPress={() => openSheet('project')} outerStyle={{ marginHorizontal: 16, marginTop: 12 }} style={{ padding: 16, borderWidth: 1, borderColor: c.line, borderStyle: 'dashed', flexDirection: 'row', gap: 12, alignItems: 'center' }}>
           <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon icon={UserGroupIcon} size={20} color="ink2" />
           </View>

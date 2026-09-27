@@ -151,7 +151,7 @@ const ToolkitRow = memo(function ToolkitRow({ t, state, disabled, onChanged }: {
       </View>
       {state === 'connected' ? <Chip label="Connected" color="success" dot />
         : state === 'ready' ? <Chip label="Ready" color="info" dot />
-        : <Button label="Connect" size="sm" variant="soft" loading={busy} disabled={disabled} onPress={connect} />}
+        : <Button label="Connect" size="sm" variant="soft" loading={busy} disabled={disabled} onPress={connect} style={{ alignSelf: 'center' }} />}
     </View>
   )
 })

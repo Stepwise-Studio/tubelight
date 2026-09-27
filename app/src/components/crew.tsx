@@ -7,6 +7,7 @@ import type { ReactElement } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
 import { useTabBarInset } from '@/components/tab-bar'
+import { openSheet } from '@/components/sheet-screen'
 import { freeHandle, fromTemplate, modelName, roleName, toolkitName, useModels, useTemplates, type Template } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Teammate } from '@/lib/types'
@@ -159,7 +160,7 @@ function StarterTemplates() {
         ))}
       </View>
       <View style={{ alignItems: 'center', marginTop: 20 }}>
-        <Button label="Build your own" variant="soft" icon={Add01Icon} onPress={() => router.push('/teammate/new')} />
+        <Button label="Build your own" variant="soft" icon={Add01Icon} onPress={() => openSheet('teammate')} />
       </View>
     </View>
   )

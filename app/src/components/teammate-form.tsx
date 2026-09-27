@@ -1,4 +1,4 @@
-// The teammate editor: used by /teammate/new and the Settings half of /teammate/[id].
+// The teammate editor: used by the New teammate sheet and the Settings half of /teammate/[id].
 import { useState } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
@@ -287,7 +287,7 @@ function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: str
                   : t.auth === 'none' ? <Chip label="Ready" color="info" dot />
                   : conn?.connected ? <Chip label="Connected" color="success" dot />
                   : conn?.status === 'unavailable' ? null
-                  : <Button label={conn?.status === 'expired' || conn?.status === 'failed' ? 'Reconnect' : 'Connect'} size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t)} />}
+                  : <Button label={conn?.status === 'expired' || conn?.status === 'failed' ? 'Reconnect' : 'Connect'} size="sm" variant="soft" loading={busy === t.toolkit} onPress={() => connect(t)} style={{ alignSelf: 'center' }} />}
               </View>
             </View>
           )
