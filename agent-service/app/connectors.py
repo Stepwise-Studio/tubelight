@@ -6,12 +6,13 @@ scoped to their allowed toolkits: a toolkit's direct tools are far too large for
 management and Composio's remote sandbox are off. The SDK is sync, so calls run in a thread.
 """
 import asyncio
+import copy
 import logging
 import time
 from functools import lru_cache
 from typing import Any
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 
 from . import config
 
@@ -136,11 +137,43 @@ async def disconnect(user_id: str, toolkit: str) -> None:
         await asyncio.to_thread(c.connected_accounts.delete, acc.id)
 
 
+def _nullable(schema: Any) -> Any:
+    """Composio's optional fields default to null but are typed non-null (e.g. known_fields: string). Models send
+    the null and strict validators (Groq) reject the whole call, so let every null-default field accept null."""
+    if isinstance(schema, list):
+        return [_nullable(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: _nullable(v) for k, v in schema.items()}
+    if "default" in out and out["default"] is None:
+        if isinstance(out.get("type"), str) and out["type"] != "null":
+            out["type"] = [out["type"], "null"]
+        elif "$ref" in out:
+            out["anyOf"] = [{"$ref": out.pop("$ref")}, {"type": "null"}]
+    return out
+
+
+def _drop_nones(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: _drop_nones(x) for k, x in v.items() if x is not None}
+    if isinstance(v, list):
+        return [_drop_nones(x) for x in v]
+    return v
+
+
+def _lenient(t: BaseTool) -> BaseTool:
+    """The same tool with null-tolerant arguments; nulls are dropped before Composio sees them."""
+    raw = t.args_schema if isinstance(t.args_schema, dict) else t.args_schema.model_json_schema()
+    return StructuredTool(name=t.name, description=t.description, args_schema=_nullable(copy.deepcopy(raw)),
+                          func=lambda **kw: t.invoke(_drop_nones(kw)))
+
+
 async def tools_for(user_id: str, toolkits: list[str]) -> list[BaseTool]:
     if not enabled() or not toolkits:
         return []
     try:
-        return list(await asyncio.to_thread(lambda: _session(user_id, tuple(sorted(toolkits))).tools()))
+        tools = await asyncio.to_thread(lambda: _session(user_id, tuple(sorted(toolkits))).tools())
+        return [_lenient(t) for t in tools]
     except Exception as e:  # a connector outage must not break the teammate
         log.warning("composio tools unavailable: %s", e)
         return []

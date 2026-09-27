@@ -108,7 +108,8 @@ export function Chip({ label, color = 'idle', variant = 'outline', size = 'defau
       </Text>
     </>
   )
-  if (!onPress) return <View style={[box, { alignSelf: 'flex-start' }]}>{content}</View>
+  // No alignSelf: chips sit in rows and follow the row's alignment (flex-start pinned them to the top).
+  if (!onPress) return <View style={box}>{content}</View>
   return (
     <Press
       radius={h / 2}
@@ -117,7 +118,6 @@ export function Chip({ label, color = 'idle', variant = 'outline', size = 'defau
       hitSlop={8}
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected: !!selected }}
-      outerStyle={{ alignSelf: 'flex-start' }}
       style={box}
     >
       {content}

@@ -205,3 +205,16 @@ def test_paid_openrouter_models_are_refused():
         raise AssertionError("a paid model was constructed")
     except llm.PaidModelError:
         pass
+
+
+def test_composio_null_defaults_accept_null_and_are_dropped():
+    from app.connectors import _drop_nones, _nullable
+    schema = {"properties": {
+        "q": {"type": "array", "items": {"properties": {"use_case": {"type": "string"}, "known_fields": {"type": "string", "default": None}}}},
+        "session": {"$ref": "#/$defs/S", "default": None},
+    }}
+    out = _nullable(schema)
+    assert out["properties"]["q"]["items"]["properties"]["known_fields"]["type"] == ["string", "null"]
+    assert out["properties"]["q"]["items"]["properties"]["use_case"]["type"] == "string"
+    assert out["properties"]["session"]["anyOf"] == [{"$ref": "#/$defs/S"}, {"type": "null"}]
+    assert _drop_nones({"q": [{"use_case": "x", "known_fields": None}], "session": None}) == {"q": [{"use_case": "x"}]}

@@ -157,6 +157,22 @@ async def post_message(thread_id: str, body: MessageIn, user: User = Depends(cur
     return {"message": {**message, "run_id": run_id}, "run_id": run_id}
 
 
+@app.post("/messages/{message_id}/retry")
+async def retry_message(message_id: str, user: User = Depends(current_user)):
+    """Run the user's message again, in place: no second copy of it; the failed attempt's error notes go."""
+    m = await owned("messages", message_id, user, "message")
+    if m["sender_type"] != "user":
+        raise HTTPException(400, "Only your own messages can be retried.")
+    thread = await owned("threads", m["thread_id"], user, "conversation")
+    await db.delete("messages", {"thread_id": f"eq.{m['thread_id']}", "kind": "eq.error", "created_at": f"gt.{m['created_at']}"})
+    attachments = (m.get("meta") or {}).get("attachments") or []
+    prompt = await _quoted(m["thread_id"], m.get("reply_to")) + m["text"] + await files.describe(user["id"], attachments)
+    run_id = await runs.start(user["id"], m["thread_id"], prompt, mentions=m.get("mentions") or [],
+                              teammate_id=thread.get("teammate_id"))
+    await db.update("messages", {"id": f"eq.{message_id}"}, {"run_id": run_id})
+    return {"run_id": run_id}
+
+
 @app.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, user: User = Depends(current_user)):
     await runs.cancel(await owned("runs", run_id, user, "run"))

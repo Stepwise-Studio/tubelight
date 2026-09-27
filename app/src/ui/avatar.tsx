@@ -1,7 +1,8 @@
 import { createAvatar } from '@dicebear/core'
 import * as notionists from '@dicebear/notionists'
+import { Skia } from '@shopify/react-native-skia'
 import { memo } from 'react'
-import { Pressable, View } from 'react-native'
+import { Image, PixelRatio, Pressable, View } from 'react-native'
 import { SvgXml } from 'react-native-svg'
 
 import type { Teammate } from '@/lib/types'
@@ -31,6 +32,31 @@ function faceSvg(seed: string, color: string) {
   return svg
 }
 
+const pngs = new Map<string, string | null>()
+/**
+ * The face as a PNG data URI, drawn once per seed, colour and size with Skia's native SVG renderer and cached.
+ * Plain images decode off the JS thread and scroll for free; a dozen live SVG trees stalled the teammate sheet.
+ * null when Skia can't draw it (then the SVG is used).
+ */
+function facePng(seed: string, color: string, size: number) {
+  const px = Math.round(size * PixelRatio.get())
+  const key = `${seed}|${color}|${px}`
+  if (pngs.has(key)) return pngs.get(key)!
+  let uri: string | null = null
+  try {
+    const svg = Skia.SVG.MakeFromString(faceSvg(seed, color))
+    const surface = svg && Skia.Surface.Make(px, px)
+    if (svg && surface) {
+      surface.getCanvas().drawSvg(svg, px, px)
+      uri = `data:image/png;base64,${surface.makeImageSnapshot().encodeToBase64()}`
+    }
+  } catch {
+    uri = null
+  }
+  pngs.set(key, uri)
+  return uri
+}
+
 export interface TeammateAvatarProps {
   teammate: Pick<Teammate, 'avatar_shape' | 'color' | 'name'>
   size?: number
@@ -47,6 +73,7 @@ export interface TeammateAvatarProps {
 export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40, state = 'default', onPress }: TeammateAvatarProps) {
   const { c } = useTheme()
   const working = state === 'working'
+  const png = facePng(faceSeed(teammate), teammate.color, size)
   const face = (
     <View
       style={{ width: size, height: size, opacity: state === 'sleeping' ? 0.5 : 1 }}
@@ -54,7 +81,11 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
       accessibilityRole={onPress ? 'button' : 'image'}
       accessibilityLabel={working ? `${teammate.name}, working` : teammate.name}
     >
-      <SvgXml xml={faceSvg(faceSeed(teammate), teammate.color)} width={size} height={size} />
+      {png ? (
+        <Image source={{ uri: png }} style={{ width: size, height: size }} fadeDuration={0} />
+      ) : (
+        <SvgXml xml={faceSvg(faceSeed(teammate), teammate.color)} width={size} height={size} />
+      )}
       {working && (
         <View
           pointerEvents="none"

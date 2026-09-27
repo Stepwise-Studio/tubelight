@@ -64,7 +64,7 @@ export default function Thread() {
   const retryRun = async () => {
     const lastUser = t.messages.find((m) => m.sender_type === 'user' && !m.local)
     if (!lastUser) return toast({ title: 'Nothing to retry', body: 'Send a new message instead.' })
-    const err = await t.send(lastUser.text, lastUser.mentions)
+    const err = await t.rerun(lastUser)
     if (err) toast({ title: 'Unable to retry', body: err, tone: 'error' })
   }
 

@@ -159,6 +159,17 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     return post(m, m.mentions)
   }
 
+  /** Runs a sent message again, in place (no second copy); the failed attempt's error notes go. */
+  const rerun = async (m: ChatMessage) => {
+    try {
+      await api(`/messages/${m.id}/retry`, { method: 'POST' })
+      setMessages((prev) => prev.filter((p) => !(p.kind === 'error' && p.created_at > m.created_at)))
+      return null
+    } catch (e) {
+      return e instanceof ApiError ? e.message : 'Unable to retry. Check your connection and try again.'
+    }
+  }
+
   const discard = (id: string) => setMessages((prev) => prev.filter((p) => p.id !== id))
 
   const refreshApprovals = async () => {
@@ -166,5 +177,5 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     if (data) setApprovals(Object.fromEntries((data as Approval[]).map((x) => [x.id, x])))
   }
 
-  return { messages, loading, error, reload: load, hasMore, loadOlder, loadingOlder, approvals, refreshApprovals, statuses, ghosts, send, retry, discard }
+  return { messages, loading, error, reload: load, hasMore, loadOlder, loadingOlder, approvals, refreshApprovals, statuses, ghosts, send, retry, rerun, discard }
 }
