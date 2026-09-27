@@ -106,6 +106,8 @@ async def env(monkeypatch):
     async def no_tz(user_id: str) -> None:
         return None
     monkeypatch.setattr(db, "user_timezone", no_tz)
+    from app import learn
+    monkeypatch.setattr(learn, "schedule", lambda *a: None)  # tested on its own in test_learn
     fake = FakeLLM(script=[], calls=[])
     monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None: fake)
 

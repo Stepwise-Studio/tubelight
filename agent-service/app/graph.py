@@ -138,16 +138,24 @@ PLAYBOOKS = {
 }
 
 
+def local_now(ctx: RunCtx) -> datetime:
+    try:
+        return datetime.now(ZoneInfo(ctx.timezone))
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now(UTC)
+
+
 async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: list[str]) -> str:
     query = _last_human(msgs)[:500]
-    profile = [r["text"] for r in await memory.listing(memory.ns("user", ctx.owner_id), limit=20)]
+    shelf = memory.ns("user", ctx.owner_id)
+    owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
+    prefs = await memory.listing(shelf, limit=12, kind="preference")
+    seen = {r["key"] for r in owed + prefs}
+    profile = [r for r in await memory.search_rows(shelf, query, limit=8) if r["key"] not in seen]
     own = await memory.search(memory.ns("teammate", tm["id"]), query)
     proj = await memory.search(memory.ns("project", ctx.project["id"]), query) if ctx.project else []
 
-    try:
-        now = datetime.now(ZoneInfo(ctx.timezone))
-    except (ZoneInfoNotFoundError, ValueError):
-        now = datetime.now(UTC)
+    now = local_now(ctx)
     lines = [
         f"You are {tm['name']} (@{tm['handle']}), the team's {tm['role']}. You work for {ctx.user_name} as a teammate, "
         f"not as a generic assistant. It is {now:%A, %B %d, %Y, %I:%M %p} where the user is ({now.tzname()}). "
@@ -183,8 +191,13 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     guides = [PLAYBOOKS[t] for t in tm.get("allowed_toolkits") or [] if t in PLAYBOOKS]
     if guides:
         lines.append("\n\n".join(guides))
+    if prefs:
+        lines.append("How the user likes things (follow these):\n" + "\n".join(f"- {r['text']}" for r in prefs))
+    if owed:
+        lines.append("Open commitments (bring them up when relevant, e.g. near a due date or when the person writes again):\n"
+                     + "\n".join(f"- {r['text']}" + (f" (due {r['due']})" if r.get("due") else "") for r in owed))
     if profile:
-        lines.append("What you know about the user:\n" + "\n".join(f"- {t}" for t in profile))
+        lines.append("What you know that may be relevant:\n" + "\n".join(f"- {r['text']}" for r in profile))
     if own:
         lines.append("Your relevant memories:\n" + "\n".join(f"- {t}" for t in own))
     if proj:

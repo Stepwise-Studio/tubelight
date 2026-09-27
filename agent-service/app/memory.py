@@ -116,29 +116,58 @@ def ns(scope: str, id: str) -> tuple[str, ...]:
     return (id, "memories")
 
 
+# A memory is {text, kind, about, due, done}: kind is person | commitment | preference | lesson | fact,
+# about names the people, companies or topics it concerns (the Memory graph links them), and commitments
+# carry an optional due date and a done flag. Older rows are just {text}.
+KINDS = ("person", "commitment", "preference", "lesson", "fact")
+
+
 def _row(item) -> dict[str, Any]:
+    v = item.value
     return {
         "key": item.key,
-        "text": item.value.get("text", ""),
+        "text": v.get("text", ""),
+        "kind": v.get("kind") or "fact",
+        "about": v.get("about") or [],
+        "due": v.get("due"),
+        "done": bool(v.get("done")),
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
+        **({"score": item.score} if getattr(item, "score", None) is not None else {}),
     }
 
 
-async def add(namespace: tuple[str, ...], text: str) -> str:
+async def add(namespace: tuple[str, ...], text: str, **meta: Any) -> str:
     key = str(uuid.uuid4())
-    await store.aput(namespace, key, {"text": text})
+    await store.aput(namespace, key, {"text": text, **{k: v for k, v in meta.items() if v is not None}})
     return key
 
 
-async def listing(namespace: tuple[str, ...], limit: int = 100) -> list[dict[str, Any]]:
-    items = await store.asearch(namespace, limit=limit)
+async def get(namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
+    item = await store.aget(namespace, key)
+    return _row(item) if item else None
+
+
+async def update(namespace: tuple[str, ...], key: str, **changes: Any) -> bool:
+    """Merge changes into a memory (text, done, due, about...). False when it no longer exists."""
+    item = await store.aget(namespace, key)
+    if not item:
+        return False
+    await store.aput(namespace, key, {**item.value, **{k: v for k, v in changes.items() if v is not None}})
+    return True
+
+
+async def listing(namespace: tuple[str, ...], limit: int = 100, **filter: Any) -> list[dict[str, Any]]:
+    items = await store.asearch(namespace, filter=filter or None, limit=limit)
     return sorted((_row(i) for i in items), key=lambda r: r["created_at"], reverse=True)
 
 
+async def search_rows(namespace: tuple[str, ...], query: str, limit: int = 4) -> list[dict[str, Any]]:
+    return [_row(i) for i in await store.asearch(namespace, query=query or None, limit=limit)]
+
+
 async def search(namespace: tuple[str, ...], query: str, limit: int = 4) -> list[str]:
-    items = await store.asearch(namespace, query=query or None, limit=limit)
-    return [i.value.get("text", "") for i in items]
+    return [r["text"] for r in await search_rows(namespace, query, limit)]
 
 
 async def remove(namespace: tuple[str, ...], key: str) -> None:

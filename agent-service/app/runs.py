@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import db, graph, llm, memory, sandbox
+from . import db, graph, learn, llm, memory, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -127,6 +127,11 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
                 await db.update("runs", {"id": f"eq.{run_id}"}, {"status": "waiting_approval"})
             else:
                 await _finish(run_id, owner_id, thread_id, "done", teammate_id=active)
+                tm = next((m for m in ctx.members if m["id"] == active), None) or (
+                    ctx.members[0] if len(ctx.members) == 1 else None)
+                if tm:
+                    learn.schedule(owner_id, ctx.user_name, tm, ctx.project["id"] if ctx.project else None, run_id,
+                                   state.values.get("messages") or [], f"{graph.local_now(ctx):%A, %B %d, %Y}")
     except asyncio.CancelledError:
         await _finish(run_id, owner_id, thread_id, "cancelled", teammate_id=active)
     except Exception as e:

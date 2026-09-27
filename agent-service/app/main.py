@@ -333,6 +333,38 @@ async def add_memory(body: MemoryIn, user: User = Depends(current_user)):
     return {"key": await memory.add(await _memory_ns(body.scope, body.id, user), body.text.strip())}
 
 
+@app.get("/memories/all")
+async def all_memories(user: User = Depends(current_user)):
+    """Everything the teammates have learned, across shelves, for the Memory screen."""
+    shelves = [("user", user["id"], "You")]
+    shelves += [("teammate", t["id"], t["name"]) for t in await db.select("teammates", {"owner_id": f"eq.{user['id']}"})]
+    shelves += [("project", p["id"], p["name"]) for p in await db.select("projects", {"owner_id": f"eq.{user['id']}"})]
+    out = []
+    for scope, id, name in shelves:
+        for r in await memory.listing(memory.ns(scope, id), limit=500):
+            out.append({**r, "scope": scope, "scope_id": id, "scope_name": name})
+    return sorted(out, key=lambda r: r["updated_at"], reverse=True)
+
+
+class MemoryPatch(BaseModel):
+    scope: Literal["teammate", "project", "user"]
+    id: str
+    key: str
+    text: str | None = None
+    done: bool | None = None
+
+
+@app.patch("/memories")
+async def patch_memory(body: MemoryPatch, user: User = Depends(current_user)):
+    if body.text is not None and not body.text.strip():
+        raise HTTPException(400, "A memory needs some text.")
+    ok = await memory.update(await _memory_ns(body.scope, body.id, user), body.key,
+                             text=body.text.strip()[:500] if body.text else None, done=body.done)
+    if not ok:
+        raise HTTPException(404, "That memory was not found.")
+    return {"ok": True}
+
+
 @app.delete("/memories")
 async def delete_memory(scope: str, id: str, key: str, user: User = Depends(current_user)):
     await memory.remove(await _memory_ns(scope, id, user), key)

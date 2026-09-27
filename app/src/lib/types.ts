@@ -183,3 +183,18 @@ export const threadIdFor = {
   dm: (teammateId: string) => `dm:${teammateId}`,
   project: (projectId: string) => `proj:${projectId}`,
 }
+
+/** A long-term memory, as the Memory screen lists it (GET /memories/all). */
+export interface MemoryItem {
+  key: string
+  text: string
+  kind: 'person' | 'commitment' | 'preference' | 'lesson' | 'fact'
+  about: string[]
+  due: string | null
+  done: boolean
+  created_at: string
+  updated_at: string
+  scope: 'user' | 'teammate' | 'project'
+  scope_id: string
+  scope_name: string
+}

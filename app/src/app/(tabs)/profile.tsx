@@ -3,11 +3,11 @@ import * as Clipboard from 'expo-clipboard'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
-import { router } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
-  Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, ViewIcon, ViewOffIcon,
+  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -18,7 +18,7 @@ import { ApiError, api } from '@/lib/api'
 import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type Toolkit } from '@/lib/catalog'
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
-import type { Profile } from '@/lib/types'
+import type { MemoryItem, Profile } from '@/lib/types'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
   Button, Chip, Divider, ListRow, Press, Segment, Skeleton, Surface, Text, TextField, Toggle,
@@ -62,6 +62,7 @@ export default function ProfileScreen() {
       <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 36 }}>
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
         <AppsSection />
+        <MemorySection />
         <Appearance />
         <PushSection />
         <WebhookSection profile={profile} onChanged={setProfile} />
@@ -214,6 +215,23 @@ function PushSection() {
 }
 
 /** Connected apps, a grid of popular ones to connect in a tap, and the way into all of Composio's catalog. */
+/** What the teammates have learned, in one row: open to-dos, people, preferences. */
+function MemorySection() {
+  const [items, setItems] = useState<MemoryItem[] | null>(null)
+  useFocusEffect(useCallback(() => { api<MemoryItem[]>('/memories/all').then(setItems, () => setItems([])) }, []))
+  const count = (k: MemoryItem['kind']) => (items ?? []).filter((m) => m.kind === k && !m.done).length
+  const summary = items === null ? 'Loading…' : items.length === 0 ? 'Nothing yet: it fills in as you chat'
+    : [[count('commitment'), 'to do'], [count('person'), count('person') === 1 ? 'person' : 'people'], [count('preference'), count('preference') === 1 ? 'preference' : 'preferences']]
+      .filter(([n]) => n).map(([n, w]) => `${n} ${w}`).join(' · ') || `${items.length} things`
+  return (
+    <FormSection title="Memory" hint="People, to-dos and preferences your teammates pick up as you work together.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow title="Open memory" subtitle={summary} icon={Brain02Icon} chevron onPress={() => router.push('/memory')} />
+      </Surface>
+    </FormSection>
+  )
+}
+
 function AppsSection() {
   const { c } = useTheme()
   const { connections, reload } = useConnections()
