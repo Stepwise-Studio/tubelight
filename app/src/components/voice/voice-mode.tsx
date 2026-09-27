@@ -6,37 +6,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, KeyboardIcon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
 
 import { api } from '@/lib/api'
-import { stripCues } from '@/lib/format'
+import { LIVE_WS, frameText } from '@/lib/live'
+import { plainText } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
 import { motion, useTheme } from '@/theme'
-import { Button, IconButton, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
+import { Button, IconButton, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
 import { VoiceBeam, type VoiceBeamMode } from '@/vendor/voice-glow-native/VoiceBeam'
 
 import { LiveAudio } from '../../../modules/live-audio'
 
 type Phase = 'connecting' | 'listening' | 'speaking' | 'working' | 'muted' | 'error'
 
-const LIVE_WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
 const TASK_TIMEOUT_MS = 120_000
 
-/** Gemini Live sends JSON in binary frames. */
-const utf8 = (buf: ArrayBuffer) => {
-  const TD = (globalThis as { TextDecoder?: new () => { decode(b: Uint8Array): string } }).TextDecoder
-  const bytes = new Uint8Array(buf)
-  if (TD) return new TD().decode(bytes)
-  let out = ''
-  for (let i = 0; i < bytes.length;) {
-    const b = bytes[i++]
-    const cp = b < 0x80 ? b
-      : b < 0xe0 ? ((b & 0x1f) << 6) | (bytes[i++] & 0x3f)
-      : b < 0xf0 ? ((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f)
-      : ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f)
-    out += String.fromCodePoint(cp)
-  }
-  return out
-}
-const plain = (s: string) => stripCues(s).replace(/```[\s\S]*?```/g, ' (code in the chat) ').replace(/[*_`#>[\]]/g, '').replace(/\s+/g, ' ').trim()
+const plain = plainText
 /** Linear RMS → the raw level voice-glow's driver expects (its base gain 5 × default sensitivity 3.1). */
 const toBeam = (rms: number) => Math.min(1, rms * 15.5)
 
@@ -69,6 +53,8 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
   const [caption, setCaption] = useState('')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+  // "Better as text": the teammate offered to continue in the chat (code, tables, long lists).
+  const [offer, setOffer] = useState<{ id: string; name: string; request: string; reason: string } | null>(null)
 
   const ws = useRef<WebSocket | null>(null)
   const phaseRef = useRef<Phase>('connecting')
@@ -164,6 +150,11 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       if (m.toolCall) {
         flushUser()
         for (const fc of m.toolCall.functionCalls ?? []) {
+          if (fc.name === 'switch_to_text') {
+            haptic.light()
+            setOffer({ id: fc.id, name: fc.name, request: String(fc.args?.request ?? ''), reason: String(fc.args?.reason ?? '') })
+            continue
+          }
           tasks.current += 1
           if (phaseRef.current === 'listening') go('working')
           queue.current = queue.current.then(() => runTask(fc.id, fc.name, String(fc.args?.request ?? '')))
@@ -209,7 +200,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       sock.binaryType = 'arraybuffer'
       ws.current = sock
       sock.onopen = () => sock.send(JSON.stringify({ setup: {} })) // the setup comes from the token
-      sock.onmessage = (e) => onMessage(typeof e.data === 'string' ? e.data : utf8(e.data as ArrayBuffer))
+      sock.onmessage = (e) => onMessage(frameText(e.data))
       sock.onerror = () => {}
       sock.onclose = (e) => {
         if (cancelled || ws.current !== sock) return
@@ -256,6 +247,23 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     LiveAudio.clear()
     go(idle())
   }
+  // Take the offer: the teammate writes the full answer in the chat (your spoken words are already saved there).
+  const toText = async () => {
+    if (!offer) return
+    haptic.tap()
+    const { request } = offer
+    setOffer(null)
+    close()
+    await onTask(request)
+  }
+  const stayInVoice = () => {
+    if (!offer) return
+    haptic.tap()
+    ws.current?.send(JSON.stringify({ toolResponse: { functionResponses: [{ id: offer.id, name: offer.name, response: {
+      result: 'They want to stay in voice. Give a short spoken version, and offer to put the full one in the chat.',
+    } }] } }))
+    setOffer(null)
+  }
   const retry = () => { setError(''); setCaption(''); go('connecting'); setAttempt((a) => a + 1) }
 
   const name = teammate?.name ?? title
@@ -293,6 +301,25 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
           {phase === 'error' && <Button label="Try again" variant="soft" onPress={retry} />}
         </View>
       </Pressable>
+
+      {offer && (
+        <Animated.View
+          entering={FadeIn.duration(motion.duration.fast)}
+          exiting={FadeOut.duration(motion.duration.quick)}
+          style={{ position: 'absolute', left: 16, right: 16, bottom: insets.bottom + 120 }}
+        >
+          <Surface radius={24} padding={16} elevated style={{ gap: 12 }}>
+            <View style={{ gap: 2 }}>
+              <Text variant="headline">Better as text</Text>
+              <Text variant="caption" color="ink3">{offer.reason || `${name} will write it out in the chat so you can read and copy it.`}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button label="Keep talking" variant="outline" onPress={stayInVoice} style={{ flex: 1 }} />
+              <Button label="Switch to text" onPress={toText} style={{ flex: 1 }} />
+            </View>
+          </Surface>
+        </Animated.View>
+      )}
 
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
         <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={close} />

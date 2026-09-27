@@ -9,10 +9,13 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { pickDocuments, pickPhotos, takePhoto, upload, type Draft } from '@/lib/attachments'
+import { plainText } from '@/lib/format'
 import type { Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, SendOptions } from '@/lib/use-thread'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import { Icon, IconButton, ListRow, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast } from '@/ui'
+
+import { Dictation } from './dictation'
 
 import { useSenderName } from './message-row'
 
@@ -46,6 +49,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const kb = useReanimatedKeyboardAnimation()
   const input = useRef<TextInput>(null)
   const [text, setText] = useState('')
+  const [dictating, setDictating] = useState(false)
   const [sel, setSel] = useState(0)
   const [stopping, setStopping] = useState(false)
   const [files, setFiles] = useState<Item[]>([])
@@ -123,6 +127,16 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           </ScrollView>
         </Animated.View>
       )}
+      {dictating ? (
+        <Dictation
+          onDone={(said) => {
+            setText((t) => (t.trim() ? `${t.trimEnd()} ${said}` : said))
+            setDictating(false)
+            setTimeout(() => input.current?.focus(), 50)
+          }}
+          onCancel={() => setDictating(false)}
+        />
+      ) : (
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', padding: 4 }}>
         <IconButton icon={Add01Icon} round accessibilityLabel="Attach photos or files" size={36} iconSize={20} color={c.ink2} disabled={files.length >= MAX_FILES} onPress={attachMenu} />
         <TextInput
@@ -149,6 +163,10 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           size={36}
           iconSize={18}
           disabled={showStop ? stopping : showMic ? false : !canSend}
+          // Tap: voice mode. Hold: dictate into the message box.
+          onLongPress={showMic ? () => { haptic.medium(); setDictating(true) } : undefined}
+          delayLongPress={350}
+          accessibilityHint={showMic ? 'Hold to dictate instead' : undefined}
           onPress={async () => {
             if (showMic) { haptic.tap(); return onVoice?.() }
             if (!showStop) return send()
@@ -160,6 +178,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           style={{ marginLeft: 4 }}
         />
       </View>
+      )}
     </Squircle>
   )
 
@@ -194,7 +213,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
 function ReplyStrip({ m, onCancel }: { m: ChatMessage; onCancel?: () => void }) {
   const { c } = useTheme()
   const name = useSenderName(m)
-  const preview = m.text.replace(/\s+/g, ' ').trim() || (m.meta.attachments?.length ? 'Attachment' : '')
+  const preview = plainText(m.text) || (m.meta.attachments?.length ? 'Attachment' : '')
   return (
     <Animated.View
       entering={FadeIn.duration(motion.duration.fast)}

@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard'
 import * as WebBrowser from 'expo-web-browser'
-import { memo, useState, type ReactNode } from 'react'
-import { Linking, ScrollView, Text as RNText, View, type TextStyle } from 'react-native'
+import { Children, isValidElement, memo, useState, type ReactElement, type ReactNode } from 'react'
+import { Linking, ScrollView, Text as RNText, View, type TextStyle, type ViewStyle } from 'react-native'
 import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked'
 import { Highlight, themes } from 'prism-react-renderer'
 import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
@@ -54,10 +54,59 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   )
 }
 
+/** Plain text of an already-rendered cell (the library parses cells to Text elements before the table sees them). */
+function textOf(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  if (isValidElement(node)) return textOf((node as ReactElement<{ children?: ReactNode }>).props.children)
+  return ''
+}
+
+const CELL_MIN = 64
+const CELL_MAX = 220
+const CHAR_W = 7.6 // average width of a 14px Inter character
+
+/**
+ * Tables sized from their content: each column is as wide as its longest cell needs, between 64 and 220, so short
+ * columns stay tight and long cells wrap to a readable measure instead of one word per line. Wider than the bubble:
+ * it scrolls sideways. Header row on a wash, hairlines between rows.
+ */
+function Table({ header, rows, c }: { header: ReactNode[][]; rows: ReactNode[][][]; c: Palette }) {
+  const cols = header.length
+  const widths = Array.from({ length: cols }, (_, i) => {
+    const longest = Math.max(...[header[i], ...rows.map((r) => r[i])].map((cell) => {
+      const words = textOf(cell).split(/\s+/)
+      // A column needs at least its longest word; beyond that, wrap long text around ~26 characters a line.
+      return Math.max(Math.max(...words.map((w) => w.length)), Math.min(textOf(cell).length, 26))
+    }))
+    return Math.round(Math.min(CELL_MAX, Math.max(CELL_MIN, longest * CHAR_W + 24)))
+  })
+  const cell = (content: ReactNode[], i: number, head: boolean): ReactNode => (
+    <View key={i} style={{ width: widths[i], paddingHorizontal: 12, paddingVertical: 9, justifyContent: 'center' } as ViewStyle}>
+      {head ? <RNText style={{ fontFamily: fonts.semibold, fontSize: 13, lineHeight: 18, color: c.ink }}>{Children.map(content, (n) => n)}</RNText> : content}
+    </View>
+  )
+  return (
+    <Squircle style={{ borderRadius: radius.md, borderWidth: 1, borderColor: c.line, overflow: 'hidden', marginVertical: 6 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
+        <View>
+          <View style={{ flexDirection: 'row', backgroundColor: c.panel2 }}>{header.map((h, i) => cell(h, i, true))}</View>
+          {rows.map((r, k) => (
+            <View key={k} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: c.line }}>{r.map((d, i) => cell(d, i, false))}</View>
+          ))}
+        </View>
+      </ScrollView>
+    </Squircle>
+  )
+}
+
 class TubeRenderer extends Renderer {
   constructor(private c: Palette) { super({ selectable: false }) }
   code(text: string, language?: string): ReactNode {
     return <CodeBlock key={this.getKey()} code={text} language={language} />
+  }
+  table(header: ReactNode[][], rows: ReactNode[][][]): ReactNode {
+    return <Table key={this.getKey()} header={header} rows={rows} c={this.c} />
   }
   codespan(text: string): ReactNode {
     // Upright mono on a panel2 wash; thin spaces stand in for padding (inline Text can't pad).
@@ -89,20 +138,19 @@ function useStyles(c: Palette): MarkedStyles {
     strong: { fontFamily: fonts.semibold, fontWeight: 'normal' },
     em: { fontStyle: 'italic' },
     link: { color: c.tube, textDecorationLine: 'none', fontStyle: 'normal' },
-    h1: { ...typeScale.heading, color: c.ink, marginTop: 4, marginBottom: 6 },
-    h2: { ...typeScale.headline, color: c.ink, marginTop: 4, marginBottom: 6 },
-    h3: { ...typeScale.bodyMedium, color: c.ink, marginBottom: 4 },
+    h1: { ...typeScale.heading, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },
+    h2: { ...typeScale.headline, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },
+    h3: { ...typeScale.bodyMedium, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink, marginBottom: 4 },
     h4: { ...typeScale.bodyMedium, color: c.ink2 },
     blockquote: { borderLeftWidth: 2, borderLeftColor: c.lineStrong, paddingLeft: 10, marginBottom: 8 },
     hr: { height: 1, backgroundColor: c.line, marginVertical: 10 },
     list: { marginBottom: 8 },
     li: { ...text },
-    table: { borderWidth: 1, borderColor: c.line, marginBottom: 8 },
-    tableCell: { padding: 6 },
+    tableCell: { padding: 0 },
   }
 }
 
-/** Light markdown for teammate messages: text, lists, links, code blocks with copy + horizontal scroll. */
+/** Light markdown for teammate messages: text, lists, links, tables and code blocks (both scroll sideways when wide). */
 export const Markdown = memo(function Markdown({ value }: { value: string }) {
   const { c, scheme } = useTheme()
   const renderer = new TubeRenderer(c)

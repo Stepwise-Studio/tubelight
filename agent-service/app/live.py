@@ -25,9 +25,21 @@ SPEAKING = """## How you talk (this is a live voice call)
 - When a result comes back, say the gist in a sentence or two. If there's more, say the details are in the chat.
 - Sending, posting or scheduling always waits for their approval in the chat. When a result says approval is
   needed, tell them it's ready for them to approve in the chat.
-- Small talk, advice and quick questions you can answer yourself: just answer, no tool."""
+- Small talk, advice and quick questions you can answer yourself: just answer, no tool.
+- Some answers are better read than heard: code, tables, long lists, drafts to copy, anything with many numbers or
+  steps. Don't read those out. Say in one short sentence that it's better as text, then call switch_to_text with the
+  full request. If they'd rather stay in voice, give a short spoken version and offer the full one in the chat."""
 
 RUN_TASK = {"functionDeclarations": [{
+    "name": "switch_to_text",
+    "description": "Offer to continue in text when the answer is better read than heard (code, tables, long lists, "
+                   "drafts to copy). The app shows a Switch to text button; if they take it, the teammate writes the "
+                   "full answer in the chat.",
+    "parameters": {"type": "OBJECT", "properties": {
+        "request": {"type": "STRING", "description": "The full request to answer in text"},
+        "reason": {"type": "STRING", "description": "A few words, e.g. 'It's code you'll want to copy'"}},
+        "required": ["request"]},
+}, {
     "name": "run_task",
     "behavior": "NON_BLOCKING",
     "description": "Have the teammate do something with the user's apps and tools (email, calendar, Teams, Notion, "
@@ -89,6 +101,11 @@ def setup(tm: dict, system: str) -> dict[str, Any]:
         },
         "contextWindowCompression": {"slidingWindow": {}},
     }
+
+
+def dictation_setup() -> dict[str, Any]:
+    """Speech to text only (the long-press on the mic): no persona, no replies, just the transcript."""
+    return {"model": f"models/{config.DICTATE_MODEL}", "inputAudioTranscription": {}}
 
 
 async def mint(session_setup: dict) -> str:

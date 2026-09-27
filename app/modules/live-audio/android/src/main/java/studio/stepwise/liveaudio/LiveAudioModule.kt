@@ -64,6 +64,7 @@ class LiveAudioModule : Module() {
   @SuppressLint("MissingPermission")
   private fun start() {
     if (running.get()) return
+    muted.set(false) // a new session always starts listening
     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     audioManager = am
     am.mode = AudioManager.MODE_IN_COMMUNICATION

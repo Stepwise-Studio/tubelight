@@ -246,6 +246,18 @@ async def voice_live(body: LiveIn, user: User = Depends(current_user)):
     return {"token": token, "model": config.LIVE_MODEL, "teammate_id": tm["id"]}
 
 
+@app.post("/voice/dictate")
+async def voice_dictate(user: User = Depends(current_user)):
+    """Start dictation: a single-use token for Gemini's live transcription, nothing else."""
+    if not config.env("GEMINI_API_KEY"):
+        raise HTTPException(503, "Dictation needs a Gemini API key on the server.")
+    try:
+        return {"token": await live.mint(live.dictation_setup())}
+    except httpx.HTTPError:
+        log.exception("dictation token failed")
+        raise HTTPException(502, "Could not start dictation. Try again in a moment.")
+
+
 class TranscriptIn(BaseModel):
     thread_id: str
     turns: list[dict[str, str]]

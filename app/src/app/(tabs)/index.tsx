@@ -12,7 +12,7 @@ import { FabMenu } from '@/components/fab-menu'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ThreadAvatar } from '@/components/thread-avatar'
 import { openSheet } from '@/components/sheet-screen'
-import { isUnread, relativeTime, stripCues } from '@/lib/format'
+import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
 import { useWorkspace, type Preview } from '@/lib/workspace'
 import { motion, type as typeScale, useTheme } from '@/theme'
@@ -230,7 +230,7 @@ function Inbox({ query }: { query: string }) {
 function previewText(p: Preview | undefined, thread: Thread, name: (id: string | null) => string | undefined) {
   if (!p) return thread.kind === 'dm' ? 'No messages yet' : 'No messages yet. Say hello to the team.'
   const who = p.sender_type === 'user' ? 'You: ' : thread.kind === 'project' && p.sender_type === 'teammate' && p.kind === 'text' ? `${name(p.teammate_id) ?? 'Teammate'}: ` : ''
-  const body = p.kind === 'error' ? 'A run failed' : stripCues(p.text).replace(/[`*_#>]/g, '').replace(/\s+/g, ' ').trim()
+  const body = p.kind === 'error' ? 'A run failed' : plainText(p.text)
   return who + body
 }
 

@@ -20,7 +20,7 @@ async def test_live_session_locks_the_teammate_persona(api, env, monkeypatch):
     assert r.json()["token"] == "auth_tokens/abc"
     system = minted["systemInstruction"]["parts"][0]["text"]
     assert "You are Calendy" in system and "You schedule meetings." in system and "run_task" in system
-    assert minted["tools"][0]["functionDeclarations"][0]["name"] == "run_task"
+    assert [f["name"] for f in minted["tools"][0]["functionDeclarations"]] == ["switch_to_text", "run_task"]
     assert minted["generationConfig"]["responseModalities"] == ["AUDIO"]
 
 
@@ -43,3 +43,17 @@ async def test_voice_task_message_is_flagged_hidden(api, env):
     r = await api.post(f"/threads/dm:{cal['id']}/messages", json={"text": "Check my calendar for tonight", "voice_task": True})
     assert r.status_code == 200
     assert fdb.rows("messages", sender_type="user")[0]["meta"] == {"voice_task": True}
+
+
+async def test_dictation_token_is_transcription_only(api, env, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    minted = {}
+
+    async def fake_mint(setup):
+        minted.update(setup)
+        return "auth_tokens/d"
+
+    monkeypatch.setattr(live, "mint", fake_mint)
+    r = await api.post("/voice/dictate")
+    assert r.json()["token"] == "auth_tokens/d"
+    assert minted == {"model": "models/gemini-3.5-transcribe-live", "inputAudioTranscription": {}}

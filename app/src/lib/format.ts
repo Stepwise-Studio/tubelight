@@ -49,6 +49,19 @@ export function ago(iso: string, now = new Date()) {
 /** Voice replies carry Orpheus vocal cues like [cheerful] or [sigh]: spoken, never shown. Links ([x](url)) are left alone. */
 export const stripCues = (s: string) => s.replace(/\s?\[[a-z]+(?: [a-z]+)?\](?!\()/g, '')
 
+/**
+ * A message as one line of plain text (reply quotes, the inbox, spoken results): code becomes "(code)", table rows
+ * become "a · b", links keep their words, markdown marks go.
+ */
+export const plainText = (s: string) => stripCues(s)
+  .replace(/```[\s\S]*?(```|$)/g, ' (code) ')
+  .replace(/^[ \t]*\|?[ \t]*:?-{3,}.*$/gm, '')
+  .replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_, row: string) => `${row.split('|').map((c) => c.trim()).filter(Boolean).join(' · ')};`)
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/[*_`#>~]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+
 /** After copying: Android already shows its own clipboard confirmation, so only iOS gets our toast. */
 export function copied() {
   if (Platform.OS === 'ios') toast({ title: 'Copied', tone: 'success' })

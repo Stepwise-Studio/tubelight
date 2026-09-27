@@ -19,6 +19,7 @@ DEFAULT_MODEL = env("DEFAULT_MODEL", "openrouter:nvidia/nemotron-3-super-120b-a1
 ROUTER_MODEL = env("ROUTER_MODEL", DEFAULT_MODEL)
 LEARN_MODEL = env("LEARN_MODEL", "gemini:gemini-3.5-flash-lite")
 LIVE_MODEL = env("LIVE_MODEL", "gemini-3.8-live")
+DICTATE_MODEL = env("DICTATE_MODEL", "gemini-3.5-transcribe-live")
 COMPOSIO_API_KEY = env("COMPOSIO_API_KEY")
 GITHUB_TOKEN = env("GITHUB_TOKEN")  # optional, used only by the approved git_push tool
 APP_URL = env("APP_URL", "http://localhost:3000")

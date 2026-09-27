@@ -8,7 +8,7 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
-import { copied, fullTime, stripCues } from '@/lib/format'
+import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
@@ -110,7 +110,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
       <TeammateBlock teammate={t} first={first} paused={false} working>
         {/* Same label and bubble the final row carries, so the swap doesn't shift anything. */}
         {proactive && <EventLabel />}
-        <Bubble side="left" first={first} last={last}>
+        <Bubble side="left" first={first} last={last} style={hasWideBlock(item.g.text) ? { width: '100%' } : undefined}>
           <View accessibilityLiveRegion="none"><Markdown value={stripCues(item.g.text)} /></View>
         </Bubble>
       </TeammateBlock>
@@ -150,6 +150,13 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
 }
 
 /** Squircle bubble. Corners on the sender's side tighten where it meets the next bubble in its group. */
+/**
+ * Code blocks and tables scroll sideways, and a bubble that shrink-wraps them gets mismeasured on Android (Yoga sizes
+ * it at the block's full scroll width first, the text beside it wraps a letter per line, and the bubble ends up
+ * thousands of pixels tall). Bubbles holding them take the full width instead.
+ */
+const hasWideBlock = (text: string) => /```|^\s*\|.*\|\s*$\n^\s*\|?\s*:?-{3,}/m.test(text)
+
 function Bubble({ side, first, last, tone = 'panel', highlighted, style, children }: {
   side: 'left' | 'right'; first: boolean; last: boolean; tone?: 'panel' | 'mine'; highlighted?: boolean; style?: ViewStyle; children: React.ReactNode
 }) {
@@ -220,7 +227,7 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
     <SwipeToReply onReply={() => onReply(m)}>
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working}>
         {m.proactive && <EventLabel type={m.meta.event_type} />}
-        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={{ maxWidth: '100%' }}>
+        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={hasWideBlock(m.text) ? { width: '100%' } : { maxWidth: '100%' }}>
           <Bubble side="left" first={first} last={last} highlighted={highlighted}>
             {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
             <Markdown value={stripCues(m.text)} />
@@ -281,7 +288,7 @@ function ReplyQuote({ id, target }: { id: string; target?: ChatMessage | null })
   const { c } = useTheme()
   const { jumpTo } = useActions()
   const name = useSenderName(target)
-  const preview = target ? target.text.replace(/\s+/g, ' ').trim() || (target.meta.attachments?.length ? 'Attachment' : '') : 'Earlier message'
+  const preview = target ? plainText(target.text) || (target.meta.attachments?.length ? 'Attachment' : '') : 'Earlier message'
   return (
     <Pressable
       onPress={() => target && jumpTo(id)}
