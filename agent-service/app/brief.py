@@ -105,11 +105,12 @@ def _parse(text: str) -> dict[str, Any]:
 
 
 def _local(s: Any, zone: ZoneInfo) -> datetime | None:
+    """A model-written time is the user's wall-clock time: any offset it tacks on ("Z") is dropped, not honoured."""
     try:
-        d = datetime.fromisoformat(str(s)) if s and str(s).lower() != "null" else None
+        d = datetime.fromisoformat(str(s).strip().rstrip("Z")) if s and str(s).lower() != "null" else None
     except ValueError:
         return None
-    return (d if d.tzinfo else d.replace(tzinfo=zone)) if d else None
+    return d.replace(tzinfo=zone) if d else None
 
 
 async def decide(user: str, roster: str, now: datetime, brief: str, pending: str, lines: list[str]) -> dict[str, Any]:
@@ -172,16 +173,26 @@ async def refresh(owner_id: str, thread_id: str, user: str, tz: str) -> dict[str
                             check_by=_local(a.get("check_by"), zone), poll_hours=a.get("poll_hours") or None,
                             set_by="keeper", set_at=f"{now:%a %b %d, %I:%M %p}")
         done["add"] += 1
+    # Follow-ups set during the messages being read are the latest intent: the keeper can't undo them.
+    fresh = {f["id"] for f in pend if (f.get("created") or "") >= rows[0]["created_at"]}
+    closed: set[str] = set()  # met while its owner was already on it here: shown as "done", not "dropped"
     for m in plan.get("met") or []:
         f = ids.get(str((m or {}).get("id")))
         if not f:
             continue
-        if not f.get("until"):  # "met" on a timed one means it's already handled: nothing left to fire
+        # Firing wakes someone who isn't on it yet. A timed one marked met is already handled, and so is a condition
+        # whose owner (any teammate, for the group's) already spoke in these messages in its own chat.
+        on_it = f["thread_id"] == thread_id and any(
+            r["sender_type"] == "teammate" and (f["owner"] == "group" or r["teammate_id"] == f["owner"]) for r in rows)
+        if not f.get("until") or on_it:
             plan.setdefault("cancel", []).append(f["id"])
+            fresh.discard(f["id"])
+            closed.add(f["id"])
         elif await followups.fire(f["id"], "met", str(m.get("evidence") or "")[:200]):
             done["met"] += 1
     for k in dict.fromkeys(plan.get("cancel") or []):
-        if str(k) in ids and await followups.cancel(str(k), owner_id):
+        if str(k) in ids and str(k) not in fresh and await followups.cancel(
+                str(k), owner_id, "done" if str(k) in closed else "dropped"):
             done["cancel"] += 1
     return done
 

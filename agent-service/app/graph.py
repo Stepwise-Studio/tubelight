@@ -231,7 +231,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
     lines.append(f"When {ctx.user_name} asks you to circle back, remind them or check on something later, or you promise "
                  "to get back to them, call follow_up: with a time, or with a condition to wait for (\"once the design "
-                 "tweak is done\"); it fires in this chat on its own." + (
+                 "tweak is done\"); it fires in this chat on its own. That's different from a calendar event, which "
+                 "books time in people's schedules: use follow_up to come back to something here, and a calendar event "
+                 "only when they ask to book it." + (
                      " In this group, when the team agrees to circle back, set it with the owner who should lead then, "
                      "or 'group'." if ctx.project else "") + " Use search_chat for the exact words of anything said "
                  "earlier in this chat.")
@@ -337,7 +339,8 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
 
 
 def _ids(ctx: RunCtx, tm: dict) -> dict:
-    return {"run_id": ctx.run_id, "teammate_id": tm["id"]}
+    # event_type lets the app label a streaming reply the way its saved message will be (no swap when it lands).
+    return {"run_id": ctx.run_id, "teammate_id": tm["id"], **({"event_type": ctx.event_type} if ctx.event_type else {})}
 
 
 def make_teammate(ctx: RunCtx, tm: dict):
@@ -388,7 +391,8 @@ def make_teammate(ctx: RunCtx, tm: dict):
             await db.insert("messages", {
                 "thread_id": ctx.thread_id, "owner_id": ctx.owner_id, "sender_type": "teammate", "teammate_id": tm["id"],
                 "text": text, "kind": "text", "proactive": ctx.proactive, "run_id": ctx.run_id,
-                "meta": {"stream_id": stream_id, "tool_calls": ctx.turn_tools.pop(tm["id"], [])},
+                "meta": {"stream_id": stream_id, "tool_calls": ctx.turn_tools.pop(tm["id"], []),
+                         **({"event_type": ctx.event_type} if ctx.event_type else {})},
             })
             if ctx.proactive:
                 await push.notify(ctx.owner_id, tm["name"], text, ctx.thread_id)

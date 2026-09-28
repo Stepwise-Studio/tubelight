@@ -117,4 +117,4 @@ async def schedule_loop() -> None:
             await tick()
         except Exception as e:
             log.warning("schedule tick failed: %s", e)
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)  # follow-ups fire within 30 s of their time

@@ -132,6 +132,7 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
             paused = bool(state.interrupts)
             if paused:
                 await db.update("runs", {"id": f"eq.{run_id}"}, {"status": "waiting_approval"})
+                brief.schedule(owner_id, thread_id, ctx.user_name, ctx.timezone)  # track the plan while it waits
             else:
                 await _finish(run_id, owner_id, thread_id, "done", teammate_id=active)
                 brief.schedule(owner_id, thread_id, ctx.user_name, ctx.timezone)

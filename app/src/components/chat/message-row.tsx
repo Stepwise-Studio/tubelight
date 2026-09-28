@@ -110,7 +110,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     return (
       <TeammateBlock teammate={t} first={first} paused={false} working bleed={hasWideBlock(item.g.text)}>
         {/* Same label and layout the final row carries, so the swap doesn't shift anything. */}
-        {proactive && <Inset><EventLabel /></Inset>}
+        {proactive && item.g.event_type !== 'follow_up' && <Inset><EventLabel type={item.g.event_type} /></Inset>}
         <View accessibilityLiveRegion="none" style={{ alignSelf: 'stretch' }}><Reply text={item.g.text} first={first} last={last} /></View>
       </TeammateBlock>
     )
@@ -291,7 +291,8 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
   return (
     <SwipeToReply onReply={() => onReply(m)}>
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
-        {m.proactive && <Pad><EventLabel type={m.meta.event_type} /></Pad>}
+        {/* A follow-up's capsule above already says why they're speaking up. */}
+        {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} /></Pad>}
         <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
           <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
             tail={m.meta.attachments?.length ? <Attachments items={m.meta.attachments} /> : undefined} />
@@ -488,11 +489,15 @@ function HandoffMessage({ m, first, last, paused }: { m: ChatMessage; first: boo
   return <TeammateMessage m={{ ...m, text }} teammate={from} first={first} last={last} paused={paused} />
 }
 
+/** A centred capsule for things that happen in the chat (like WhatsApp's "X changed the group name"). */
 function SystemRow({ icon, text }: { icon: typeof FlashIcon; text: string }) {
+  const { c } = useTheme()
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 16 }}>
-      <Icon icon={icon} size={14} color="ink3" />
-      <Text variant="footnote" color="ink3" numberOfLines={2} style={{ flexShrink: 1 }}>{text}</Text>
+    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 24 }} accessible accessibilityLabel={text}>
+      <Squircle style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 14, backgroundColor: c.panel2 }}>
+        <Icon icon={icon} size={13} color="ink3" />
+        <Text variant="footnote" color="ink2" style={{ flexShrink: 1, textAlign: 'center' }}>{text}</Text>
+      </Squircle>
     </View>
   )
 }

@@ -182,7 +182,7 @@ export interface TubelightEvent {
 /** Broadcast payloads on the private `thread:<id>` channel. */
 export type LiveState = 'thinking' | 'tool' | 'writing' | 'waiting' | 'idle'
 export interface StatusEvent { run_id: string; teammate_id: string; state: LiveState; label?: string }
-export interface DeltaEvent { run_id: string; teammate_id: string; stream_id: string; text: string }
+export interface DeltaEvent { run_id: string; teammate_id: string; stream_id: string; text: string; event_type?: string }
 export interface DoneEvent { run_id: string; teammate_id: string; stream_id: string }
 
 export const threadIdFor = {

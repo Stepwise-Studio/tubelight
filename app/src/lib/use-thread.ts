@@ -8,7 +8,7 @@ const PAGE = 50
 
 /** A message as the UI holds it: DB rows plus optimistic sends. */
 export type ChatMessage = Message & { local?: 'sending' | 'failed' }
-export interface Ghost { stream_id: string; run_id: string; teammate_id: string; text: string; done: boolean }
+export interface Ghost { stream_id: string; run_id: string; teammate_id: string; text: string; done: boolean; event_type?: string }
 export interface LiveStatus { run_id: string; teammate_id: string; state: LiveState; label?: string }
 export interface SendOptions { reply_to?: string | null; attachments?: Attachment[]; voiceTask?: boolean; apps?: string[] }
 
@@ -100,7 +100,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
         })
         .on('broadcast', { event: 'delta' }, ({ payload }) => {
           const d = payload as DeltaEvent
-          setGhosts((g) => ({ ...g, [d.stream_id]: { stream_id: d.stream_id, run_id: d.run_id, teammate_id: d.teammate_id, text: d.text, done: false } }))
+          setGhosts((g) => ({ ...g, [d.stream_id]: { stream_id: d.stream_id, run_id: d.run_id, teammate_id: d.teammate_id, text: d.text, done: false, event_type: d.event_type } }))
         })
         .on('broadcast', { event: 'done' }, ({ payload }) => {
           const d = payload as DoneEvent & { discarded?: boolean }

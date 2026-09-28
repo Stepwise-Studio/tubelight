@@ -82,8 +82,9 @@ async def test_time_follow_up_fires_once_with_a_visible_note(api, env):
     fake.script = [ai("Deploy is green.")]
     assert await followups.tick(datetime.now(UTC) + timedelta(hours=4)) == 1
     await settle()
-    note = fdb.rows("messages", kind="event")[-1]
-    assert note["text"] == "Follow-up: check whether the deploy went green" and note["meta"] == {"followup": "time"}
+    notes = [(m["meta"]["followup"], m["text"]) for m in fdb.rows("messages", kind="event")]
+    assert notes[0][0] == "created" and notes[0][1].startswith("Dev set a follow-up for ")
+    assert notes[-1] == ("fired", "Follow-up: check whether the deploy went green")
     msg = fdb.rows("messages", sender_type="teammate")[-1]
     assert msg["text"] == "Deploy is green." and msg["proactive"]
     assert "It's time now" in fake.calls[-1][-1].content
@@ -206,7 +207,7 @@ async def test_keeper_adds_marks_met_across_chats_and_cancels(env):
     assert fdb.rows("messages", sender_type="teammate")[-1]["thread_id"] == group
     assert "Its condition is met: Sol's design tweak is done. (Sol said it's uploaded)" in fake.calls[-1][-1].content
 
-    said(fdb, group, "2026-09-28T06:00:00+00:00", "forget the copy check, it's done")
+    said(fdb, group, (datetime.now(UTC) + timedelta(seconds=1)).isoformat(), "forget the copy check, it's done")
     copy = pend["circle back on the launch copy"]["id"]
     fake.script = [keeper(cancel=[copy])]
     assert (await brief.refresh(OWNER, group, "Akhil", "UTC"))["cancel"] == 1
@@ -222,3 +223,33 @@ async def test_follow_ups_api_lists_per_chat_and_cancels_only_your_own(api, env)
     assert (await api.delete(f"/followups/{other}")).status_code == 404
     assert (await api.delete(f"/followups/{key}")).status_code == 200
     assert (await api.get(f"/threads/dm:{dev['id']}/followups")).json() == []
+    assert fdb.rows("messages", kind="event")[-1]["text"] == "You cancelled a follow-up: x"
+
+
+async def test_keeper_reads_times_as_local_and_cannot_undo_fresh_follow_ups(env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    thread = f"dm:{dev['id']}"
+    said(fdb, thread, datetime.now(UTC).isoformat(), "set a follow-up for tonight")
+    fresh = await followups.add(OWNER, thread, dev["id"], "check tonight", at=datetime.now(UTC) + timedelta(hours=5))
+    local = (datetime.now(UTC) + timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M")  # 2.5 h from now, read as IST
+    fake.script = [keeper(add=[{"what": "later check", "owner": "dev", "at": local + ":00Z"}], cancel=[fresh])]
+    await brief.refresh(OWNER, thread, "Akhil", "Asia/Kolkata")
+    pend = {f["what"]: f for f in await followups.pending(OWNER, thread)}
+    assert "check tonight" in pend  # set during these messages: not undone
+    # "Z" ignored: the wall-clock time is read in Asia/Kolkata (UTC+5:30)
+    got = datetime.fromisoformat(pend["later check"]["at"])
+    assert abs((got - (datetime.fromisoformat(local).replace(tzinfo=UTC) - timedelta(hours=5, minutes=30))).total_seconds()) < 60
+
+
+async def test_met_condition_whose_owner_already_answered_here_is_closed_not_fired(env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    thread = f"dm:{dev['id']}"
+    cond = await followups.add(OWNER, thread, dev["id"], "deploy", until="the design is done")
+    said(fdb, thread, "2026-09-28T05:00:00+00:00", "the design is done")
+    said(fdb, thread, "2026-09-28T05:00:05+00:00", "Deploying now.", dev["id"])
+    fake.script = [keeper(met=[{"id": cond, "evidence": "design done"}])]
+    changes = await brief.refresh(OWNER, thread, "Akhil", "UTC")
+    assert changes["met"] == 0 and changes["cancel"] == 1
+    assert [m["meta"]["followup"] for m in fdb.rows("messages", kind="event")] == ["noted", "done"]  # no second wake-up

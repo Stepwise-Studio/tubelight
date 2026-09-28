@@ -31,6 +31,7 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 - Code-only redeploy (fast, ~20 KB): ship `app/` + `teammates/` as a thin layer: tar a temp dir with
   `Dockerfile` = `FROM tubelight-agent` / `COPY app /srv/app` / `COPY teammates /srv/teammates`, pipe it to
   `ssh akhil@192.168.0.6 docker build -t tubelight-agent -`, then `docker rm -f` + the `docker run` above.
+  The slim image has no system zoneinfo: `tzdata` (requirements) must stay installed, or every user's time silently becomes UTC (startup logs an error if it's missing).
   NumPy/fastembed can't load on this CPU (no SSE4.2): never switch it back to local embeddings.
   The laptop's local service (`tl-svc`) must stay stopped while the server runs (both would fire schedules).
 - Full redeploy (new deps): `cd agent-service && docker build -t tubelight-agent . && docker save tubelight-agent | gzip -1 | ssh akhil@192.168.0.6 docker load` (slow Wi-Fi, ~10 min; run as a systemd user unit), then re-run the container.

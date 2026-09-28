@@ -3,6 +3,7 @@ fastapi>=0.141,<1
 uvicorn[standard]>=0.54
 httpx>=0.28
 python-dotenv>=1.2
+tzdata>=2025.2  # slim images have no system zoneinfo: without it every user's time zone silently became UTC
 pyyaml>=6
 langchain-core>=1.6,<2
 langchain-openai>=1.6,<2

@@ -33,20 +33,50 @@ def _iso(d: datetime | None) -> str | None:
     return d.astimezone(UTC).isoformat() if d else None
 
 
+async def note(f: dict[str, Any], event: str, by: str = "") -> None:
+    """A capsule in the chat for each step of a follow-up's life, so everyone sees what's pending and why."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        zone = ZoneInfo(await db.user_timezone(f["owner_id"]) or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    if f.get("at"):
+        at = _utc(f["at"]).astimezone(zone)
+        clock = f"{at:%I:%M %p}".lstrip("0")
+        when = f"for {clock}" if at.date() == datetime.now(zone).date() else f"for {at:%a %b %d}, {clock}"
+    else:
+        when = f"for when {f['until']}"
+    text = {
+        "created": f"{by} set a follow-up {when}: {f['what']}",
+        "noted": f"Follow-up noted {when}: {f['what']}",
+        "cancelled": f"{by} cancelled a follow-up: {f['what']}",
+        "dropped": f"Follow-up dropped: {f['what']}",
+        "done": f"Follow-up done: {f['what']}",
+        "fired": f"Follow-up: {f['what']}",
+    }[event]
+    await db.insert("messages", {"thread_id": f["thread_id"], "owner_id": f["owner_id"], "sender_type": "system",
+                                 "kind": "event", "text": text,
+                                 "meta": {"followup": event}})
+
+
 async def add(owner_id: str, thread_id: str, owner: str, what: str, *, at: datetime | None = None,
               until: str | None = None, check_by: datetime | None = None, poll_hours: float | None = None,
-              set_by: str = "", set_at: str = "") -> str:
-    """owner: a teammate id, or "group". Needs `at` or `until`."""
+              set_by: str = "", set_at: str = "", by: str = "") -> str:
+    """owner: a teammate id, or "group". Needs `at` or `until`. `by`: who set it, for the chat's capsule
+    ("Calendy set a follow-up..."); empty when the keeper picked it up from the chat ("Follow-up noted...")."""
     if not (at or until):
         raise ValueError("a follow-up needs a time or a condition")
     key = str(uuid.uuid4())
     # Not embedded (index=False): found by owner/thread/time, never by meaning.
-    await memory.store.aput(NS, key, {
+    value = {
         "owner_id": owner_id, "thread_id": thread_id, "owner": owner, "what": what[:500], "at": _iso(at),
         "until": (until or "")[:300] or None, "check_by": _iso(check_by),
         "poll_hours": max(poll_hours, MIN_POLL_H) if poll_hours else None, "last_poll": None, "claimed": None,
         "created": _iso(datetime.now(UTC)), "set_by": set_by, "set_at": set_at,
-    }, index=False)
+    }
+    await memory.store.aput(NS, key, value, index=False)
+    await note(value, "created" if by else "noted", by)
     return key
 
 
@@ -58,11 +88,13 @@ async def pending(owner_id: str, thread_id: str | None = None) -> list[dict[str,
     return sorted(rows, key=lambda f: f.get("at") or f.get("check_by") or "9999")
 
 
-async def cancel(key: str, owner_id: str) -> bool:
+async def cancel(key: str, owner_id: str, event: str = "cancelled", by: str = "You") -> bool:
+    """event: cancelled (by someone), dropped (no longer needed) or done (already handled)."""
     item = await memory.store.aget(NS, key)
     if not item or item.value.get("owner_id") != owner_id:
         return False
     await memory.store.adelete(NS, key)
+    await note(item.value, event, by)
     return True
 
 
@@ -104,13 +136,11 @@ async def fire(key: str, reason: str, evidence: str = "") -> bool:
         "deadline": f"[Follow-up set {f.get('set_at') or 'earlier'}: {f['what']}] Still waiting on: {f['until']}, and "
                     "it's past the time to check. Ask where it stands and decide what to do.",
     }[reason]
-    # Everyone sees why someone is speaking up.
-    await db.insert("messages", {"thread_id": f["thread_id"], "owner_id": f["owner_id"], "sender_type": "system",
-                                 "kind": "event", "text": f"Follow-up: {f['what']}", "meta": {"followup": reason}})
+    await note(f, "fired")  # everyone sees why someone is speaking up
     # A DM's teammate; in a group the owner, or the floor director when it's the group's (or the owner has left).
     teammate = thread["teammate_id"] if thread["kind"] == "dm" else None if f["owner"] == "group" else f["owner"]
     await runs.start(f["owner_id"], f["thread_id"], f"{lead}{late} Pick it up and message them here.",
-                     trigger="schedule", teammate_id=teammate, sender="follow_up")
+                     trigger="schedule", teammate_id=teammate, sender="follow_up", event_type="follow_up")
     await memory.store.adelete(NS, key)
     return True
 
@@ -138,7 +168,7 @@ async def poll(key: str, now: datetime | None = None) -> None:
         f["owner_id"], f["thread_id"],
         f"[Checking a follow-up: is this done yet? \"{f['until']}\". Check with your apps. If it isn't, reply exactly "
         f"NOT_YET and nothing else. If it is, say so here and pick up: {f['what']}]",
-        trigger="schedule", teammate_id=owner, sender="follow_up_check")
+        trigger="schedule", teammate_id=owner, sender="follow_up_check", event_type="follow_up")
     _polls[run_id] = key
 
 
@@ -146,7 +176,10 @@ async def after_run(run_id: str) -> None:
     """A check run that spoke found the condition met, and already acted: the follow-up is done."""
     key = _polls.pop(run_id, None)
     if key and await db.select("messages", {"run_id": f"eq.{run_id}", "sender_type": "eq.teammate", "select": "id"}):
-        await memory.store.adelete(NS, key)
+        item = await memory.store.aget(NS, key)
+        if item:
+            await memory.store.adelete(NS, key)
+            await note(item.value, "done")
 
 
 async def tick(now: datetime | None = None) -> int:

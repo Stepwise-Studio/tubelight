@@ -5,6 +5,7 @@ import re
 import signal
 import sys
 import uuid
+import zoneinfo
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -44,6 +45,10 @@ async def lifespan(_: FastAPI):
         await memory.close()
         memory.config.SUPABASE_DB_URL = ""
         await memory.init()
+    try:  # times are wrong for everyone without a zone database (slim images): say so loudly
+        zoneinfo.ZoneInfo("Asia/Kolkata")
+    except zoneinfo.ZoneInfoNotFoundError:
+        log.error("No time zone database: every user's time would be UTC. Install the tzdata package.")
     runs.docker_ok = await asyncio.to_thread(sandbox.available)
     await runs.sweep_orphans()
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
