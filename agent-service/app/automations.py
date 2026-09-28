@@ -255,10 +255,13 @@ async def in_thread(owner_id: str, thread_id: str) -> list[dict[str, Any]]:
 DRAFT = """You turn someone's request into an automation their AI teammate {name} ({role}) will carry out on its own.
 Now: {now}, their time zone. Apps {name} can use: {apps}.
 Return JSON only, with these keys:
-"name": 2-4 words saying what it does, not when ("Inbox brief", "New issue triage").
-"instructions": what {name} does on each run, self-contained, addressed to {name}: what to check, what counts, how
-  to report. 1-4 sentences. Keep the person's specifics (senders, projects, thresholds). Anything that sends, posts or
-  changes things is only prepared and asked about first.
+"name": 2-4 plain words in sentence case saying what it does, not when ("Inbox brief", "New issue triage").
+"instructions": what {name} does on each run, self-contained, addressed to {name} as "you": what to check, what
+  counts, what to tell them. 1-4 sentences. Each run's result is {name}'s message in the chat, where they read it:
+  never report by email or a draft to them. Keep their specifics (senders, projects, thresholds) and read their
+  meaning, not their literal words ("what's urgent" is what needs them soon, not mails containing the word "urgent").
+  Anything that would send, post or change things for them (a reply, a comment, an issue update) is prepared and
+  asked about first.
 "kind": "schedule" for anything time-based ("every morning", "hourly", "on Fridays at 5"); "app" for "whenever /
   as soon as something happens in an app" (a new mail, a new issue).
 "cron": for a schedule, a 5-field cron in their local time, at most every 15 minutes; else null. A daily thing with

@@ -1,11 +1,13 @@
 """Automation evals: does a teammate turn a plain request into the right automation (or follow-up)?
 
     .venv/bin/python -m evals.automations [model ...]     e.g. gemini:gemini-3.5-flash-lite groq:openai/gpt-oss-120b
+    .venv/bin/python -m evals.automations --drafts [model ...]   the app's "describe it" (automations.draft)
 
 Each case gives the teammate its real instructions and tools and checks its first tool call. Nothing is executed.
 When a teammate sets up the wrong thing in the app, add the request here first, then improve the prompt.
 """
 import asyncio
+import json
 import sys
 import time
 
@@ -13,7 +15,7 @@ from croniter import croniter
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 
-from app import graph, llm, memory, tools as T
+from app import automations, graph, llm, memory, tools as T
 
 OWNER = "00000000-0000-0000-0000-00000000e7a1"  # no data: an empty workspace
 IVY = {"id": "00000000-0000-0000-0000-00000000e7a2", "name": "Ivy", "handle": "ivy", "role": "Inbox chief of staff", "system_prompt":
@@ -111,6 +113,47 @@ async def second_call(tm: dict, request: str, app: str) -> dict | None:
     return res.tool_calls[0] if res.tool_calls else {"name": "text", "args": {"text": res.text[:300]}}
 
 
+# Plain words -> the app's form (automations.draft). Checks the reading, not the wording.
+def _no_email_report(d):
+    t = d["instructions"].lower()
+    return not any(w in t for w in ("email to yourself", "email yourself", "draft a summary email", "send them an email", "notification email"))
+
+
+DRAFTS = [
+    ("weekday urgent inbox", IVY, "every weekday at 9 go through my inbox and tell me what's urgent",
+     lambda d: d["kind"] == "schedule" and d["cron"] == "0 9 * * 1-5" and _no_email_report(d)
+     and '"urgent"' not in d["instructions"] and "the word" not in d["instructions"].lower()),
+    ("3-hour brief", IVY, "3 hour brief of my mails",
+     lambda d: d["cron"] == "0 */3 * * *" and _no_email_report(d) and d["apps"] == ["GMAIL"]),
+    ("mail from a sender", IVY, "ping me immediately whenever a mail from priya@acme.com arrives",
+     lambda d: d["kind"] == "app" and d["trigger"] == "GMAIL_NEW_GMAIL_MESSAGE"
+     and "priya@acme.com" in json.dumps(d["settings"]) + json.dumps(d["keywords"]) and _no_email_report(d)),
+    ("linear pickup", DEV, "whenever I create a linear issue take it up and ask me before doing anything",
+     lambda d: d["kind"] == "app" and (d["trigger"] or "").startswith("LINEAR_") and "ISSUE" in (d["trigger"] or "")),
+    ("no time given", IVY, "a morning summary of my calendar and mail",
+     lambda d: d["kind"] == "schedule" and (d["cron"] or "").split()[1:2] in (["7"], ["8"], ["9"])),
+]
+
+
+async def run_drafts(model: str) -> int:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app import config
+    config.KEEPER_MODEL = model
+    passed = 0
+    for name, tm, text, check in DRAFTS:
+        t = time.monotonic()
+        d = await automations.draft(text, tm, ["GMAIL", "GOOGLECALENDAR", "LINEAR", "GITHUB"], datetime.now(ZoneInfo("Asia/Kolkata")))
+        ok = check(d)
+        passed += ok
+        print(f"{'PASS' if ok else 'FAIL'} {time.monotonic() - t:4.1f}s  draft: {name}: {d['name']!r} {d['kind']} {d['cron'] or d['trigger']} "
+              f"{d['settings']} | {d['instructions'][:140]}")
+        await asyncio.sleep(3)
+    print(f"== drafts {model}: {passed}/{len(DRAFTS)}\n")
+    return passed
+
+
 async def run(model: str) -> int:
     passed = 0
     for name, tm, request, check in CASES:
@@ -135,8 +178,9 @@ async def run(model: str) -> int:
 
 async def main():
     await memory.init()
-    for model in sys.argv[1:] or ["gemini:gemini-3.5-flash-lite"]:
-        await run(model)
+    args = [a for a in sys.argv[1:] if a != "--drafts"]
+    for model in args or ["gemini:gemini-3.5-flash-lite"]:
+        await (run_drafts(model) if "--drafts" in sys.argv else run(model))
     await memory.close()
 
 asyncio.run(main())
