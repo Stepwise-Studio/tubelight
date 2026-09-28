@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox
 from .auth import current_user
@@ -546,30 +546,109 @@ def _automation_view(r: dict[str, Any], last: str | None) -> dict[str, Any]:
             zone = zoneinfo.ZoneInfo("UTC")
         nxt = croniter(m["cron"], datetime.now(zone)).get_next(datetime).isoformat()
     return {"id": r["id"], "name": r["name"], "instructions": r["instructions"], "kind": r["event_type"],
-            "when": automations.describe(r), "enabled": r["enabled"], "teammate_id": r["teammate_id"],
-            "last_run": last, "next_run": nxt}
+            "when": m.get("when") or "", "enabled": r["enabled"], "teammate_id": r["teammate_id"],
+            "thread_id": automations.thread_of(r), "created_at": r.get("created_at"),
+            "cron": m.get("cron"), "tz": m.get("tz"), "trigger": m.get("trigger"), "settings": m.get("config") or {},
+            "keywords": m.get("contains") or [], "last_run": last, "next_run": nxt}
 
 
-@app.get("/threads/{thread_id}/automations")
-async def thread_automations(thread_id: str, user: User = Depends(current_user)):
-    await owned("threads", thread_id, user, "conversation")
-    out = []
-    for r in await automations.in_thread(user["id"], thread_id):
-        last = await db.select("events", {"rule_id": f"eq.{r['id']}", "status": "eq.routed", "order": "created_at.desc",
-                                          "limit": "1", "select": "created_at"})
-        out.append(_automation_view(r, last[0]["created_at"] if last else None))
-    return out
+async def _last_runs(rule_ids: list[str]) -> dict[str, str]:
+    if not rule_ids:
+        return {}
+    rows = await db.select("events", {"rule_id": f"in.({','.join(rule_ids)})", "status": "eq.routed",
+                                      "order": "created_at.desc", "limit": "500", "select": "rule_id,created_at"})
+    last: dict[str, str] = {}
+    for e in rows:
+        last.setdefault(e["rule_id"], e["created_at"])
+    return last
+
+
+@app.get("/automations")
+async def list_automations(user: User = Depends(current_user)):
+    """Every automation (schedules and app events), newest first; the app groups them by chat or teammate."""
+    rules = await db.select("event_rules", {"owner_id": f"eq.{user['id']}", "event_type": "in.(schedule,app)",
+                                            "order": "created_at.desc"})
+    last = await _last_runs([r["id"] for r in rules])
+    return [_automation_view(r, last.get(r["id"])) for r in rules]
+
+
+def _outcome(event: dict[str, Any], run: dict[str, Any] | None, posted: str | None) -> str:
+    if event["status"] != "routed":
+        return {"ignored": "filtered", "rate_limited": "limited"}.get(event["status"], "failed")
+    status = (run or {}).get("status")
+    if status in ("running", "waiting_approval", "error", "cancelled"):
+        return {"running": "working", "waiting_approval": "approval", "error": "failed", "cancelled": "cancelled"}[status]
+    return "posted" if posted else "quiet"
+
+
+@app.get("/automations/{rule_id}")
+async def get_automation(rule_id: str, user: User = Depends(current_user)):
+    """One automation with its last 20 runs: when, and how each went (posted, quiet, approval, working, failed,
+    filtered out, over the hourly limit), with the start of what it posted."""
+    rule = await owned("event_rules", rule_id, user, "automation")
+    evs = await db.select("events", {"rule_id": f"eq.{rule_id}", "order": "created_at.desc", "limit": "20",
+                                     "select": "id,status,created_at,run_id"})
+    run_ids = [e["run_id"] for e in evs if e.get("run_id")]
+    runs_by, posted = {}, {}
+    if run_ids:
+        ids = f"in.({','.join(run_ids)})"
+        runs_by = {r["id"]: r for r in await db.select("runs", {"id": ids, "select": "id,status"})}
+        for m in await db.select("messages", {"run_id": ids, "sender_type": "eq.teammate", "order": "created_at",
+                                              "select": "id,run_id,text"}):
+            posted.setdefault(m["run_id"], m)
+    history = [{"at": e["created_at"], "outcome": _outcome(e, runs_by.get(e.get("run_id")), posted.get(e.get("run_id"))),
+                "preview": (posted.get(e.get("run_id")) or {}).get("text", "")[:200],
+                "message_id": (posted.get(e.get("run_id")) or {}).get("id")} for e in evs]
+    last = next((h["at"] for h, e in zip(history, evs) if e["status"] == "routed"), None)
+    return {**_automation_view(rule, last), "runs": history}
+
+
+class NewAutomation(BaseModel):
+    teammate_id: str
+    project_id: str | None = None  # None: the teammate's direct chat
+    name: str = Field(min_length=1, max_length=80)
+    instructions: str = Field(min_length=1, max_length=2000)
+    cron: str  # in the user's time zone
+    when: str = Field("", max_length=120)
+    tz: str = "UTC"
+
+
+@app.post("/automations")
+async def new_automation(body: NewAutomation, user: User = Depends(current_user)):
+    """Set up a scheduled automation from the app (app-event ones are set up in chat: the teammate finds the event)."""
+    tm = await owned("teammates", body.teammate_id, user, "teammate")
+    if body.project_id:
+        await owned("projects", body.project_id, user, "project")
+        if not await db.one("project_members", {"project_id": f"eq.{body.project_id}", "teammate_id": f"eq.{tm['id']}"}):
+            raise HTTPException(400, f"{tm['name']} isn't in that project.")
+    try:
+        rule = await automations.create(user["id"], tm, body.project_id, name=body.name.strip(), instructions=body.instructions.strip(),
+                                        cron=body.cron, tz=body.tz, when=body.when, by="You")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _automation_view(rule, None)
 
 
 class AutomationPatch(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    name: str | None = Field(None, max_length=80)
+    instructions: str | None = Field(None, max_length=2000)
+    cron: str | None = None  # schedules only, in the user's time zone
+    when: str | None = Field(None, max_length=120)  # the schedule in plain words, shown everywhere
 
 
 @app.patch("/automations/{rule_id}")
 async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Depends(current_user)):
     rule = await owned("event_rules", rule_id, user, "automation")
-    row = await automations.set_enabled(rule, body.enabled, "You")
-    return _automation_view(row, None)
+    try:
+        if body.name or body.instructions or body.cron:
+            rule = await automations.update(rule, "You", name=(body.name or "").strip(), instructions=(body.instructions or "").strip(),
+                                            cron=body.cron, when=body.when or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if body.enabled is not None and body.enabled != rule["enabled"]:
+        rule = await automations.set_enabled(rule, body.enabled, "You")
+    return _automation_view(rule, None)
 
 
 @app.delete("/automations/{rule_id}")

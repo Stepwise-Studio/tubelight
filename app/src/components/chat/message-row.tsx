@@ -8,6 +8,7 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
+import { openAutomation, openAutomationOfRun } from '@/lib/automations'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { appToken, mentionParts } from '@/lib/mentions'
 import { supabase } from '@/lib/supabase'
@@ -120,7 +121,12 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   const m = item.m
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
-    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]} />
+    case 'event': {
+      // An automation's capsule opens it (unless it was deleted).
+      const rule = m.meta.automation && m.meta.automation !== 'deleted' ? String(m.meta.rule_id ?? '') : ''
+      return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]}
+        onPress={rule ? () => openAutomation(rule) : undefined} />
+    }
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':
@@ -354,7 +360,7 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
     <SwipeToReply onReply={() => onReply(m)}>
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
         {/* A follow-up's capsule above already says why they're speaking up. */}
-        {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} /></Pad>}
+        {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} runId={m.run_id} /></Pad>}
         <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply, onReact) }} delayLongPress={350} accessibilityHint="Long press to react, reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
           <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
             tail={m.meta.attachments?.length ? <Attachments items={m.meta.attachments} /> : undefined} />
@@ -496,14 +502,21 @@ function FileChip({ a }: { a: Attachment }) {
   )
 }
 
-function EventLabel({ type }: { type?: string }) {
-  // An automation's reply says which automation ("Automation · Mail brief"); other events say what came in.
+function EventLabel({ type, runId }: { type?: string; runId?: string | null }) {
+  // An automation's reply says which automation ("Automation · Mail brief") and opens it; other events say what came in.
   const auto = type?.startsWith('automation:') ? type.slice('automation:'.length) : null
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+  const label = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <Icon icon={auto ? RepeatIcon : FlashIcon} size={13} color="ink3" />
       <Text variant="footnote" color="ink3" numberOfLines={1}>{auto ? `Automation · ${auto}` : `Started by an event${type ? `: ${type}` : ''}`}</Text>
     </View>
+  )
+  if (!auto || !runId) return <View style={{ marginBottom: 4 }}>{label}</View>
+  return (
+    <Press radius={8} static onPress={() => openAutomationOfRun(runId)} accessibilityHint="Opens the automation"
+      outerStyle={{ alignSelf: 'flex-start', marginBottom: 4 }} style={{ paddingVertical: 2, paddingRight: 4 }}>
+      {label}
+    </Press>
   )
 }
 
@@ -568,20 +581,22 @@ const FOLLOWUP_TONE: Record<string, Tone> = {
 /** Automation capsules: set up / changed / back on (accent), paused (amber), deleted (red). */
 const AUTOMATION_TONE: Record<string, Tone> = { created: 'tube', updated: 'tube', resumed: 'tube', paused: 'warning', deleted: 'danger' }
 
-function SystemRow({ text, tone = 'neutral' }: { text: string; tone?: Tone }) {
+function SystemRow({ text, tone = 'neutral', onPress }: { text: string; tone?: Tone; onPress?: () => void }) {
   const { c } = useTheme()
   const bg = tone === 'neutral' ? c.panel2 : c[`${tone}Soft`]
   const ink = tone === 'neutral' ? c.ink2 : c[tone]
   const cut = text.indexOf(': ')
   const [head, rest] = cut > 0 ? [text.slice(0, cut), text.slice(cut + 2)] : [text, '']
   return (
-    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 32 }} accessible accessibilityLabel={text}>
-      <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: bg }}>
-        <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>
-          <Text variant="footnote" style={{ fontFamily: fonts.medium, color: ink }}>{head}</Text>
-          {rest ? `: ${rest}` : ''}
-        </Text>
-      </Squircle>
+    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 32 }} accessible={!onPress} accessibilityLabel={text}>
+      <Press radius={14} static disabled={!onPress} onPress={onPress} accessibilityLabel={text} accessibilityHint={onPress ? 'Opens it' : undefined}>
+        <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: bg }}>
+          <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>
+            <Text variant="footnote" style={{ fontFamily: fonts.medium, color: ink }}>{head}</Text>
+            {rest ? `: ${rest}` : ''}
+          </Text>
+        </Squircle>
+      </Press>
     </View>
   )
 }

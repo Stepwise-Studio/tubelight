@@ -108,8 +108,10 @@ async def stop_trigger(trigger_id: str | None) -> None:
 # ------------------------------------------------------------------ lifecycle
 async def create(owner_id: str, teammate: dict[str, Any], project_id: str | None, *, name: str, instructions: str,
                  cron: str | None = None, tz: str = "UTC", trigger: str | None = None,
-                 config: dict[str, Any] | None = None, contains: list[str] | None = None, when: str = "") -> dict[str, Any]:
-    """Set up a schedule (cron) or app-event (trigger) automation. Raises ValueError with a readable reason."""
+                 config: dict[str, Any] | None = None, contains: list[str] | None = None, when: str = "",
+                 by: str | None = None) -> dict[str, Any]:
+    """Set up a schedule (cron) or app-event (trigger) automation. Raises ValueError with a readable reason.
+    by: who the capsule credits (the teammate, or "You" from the app)."""
     if bool(cron) == bool(trigger):
         raise ValueError("Give either a schedule or an app event, not both.")
     if cron and (why := check_cron(cron)):
@@ -129,7 +131,7 @@ async def create(owner_id: str, teammate: dict[str, Any], project_id: str | None
         "project_id": project_id, "teammate_id": teammate["id"], "instructions": instructions[:2000], "enabled": True,
         "max_per_hour": 20,
     })
-    await note(rule, "created", teammate["name"])
+    await note(rule, "created", by or teammate["name"])
     return rule
 
 

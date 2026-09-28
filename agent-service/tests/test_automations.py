@@ -22,8 +22,8 @@ async def test_teammate_sets_up_a_schedule_from_chat_with_a_capsule(api, env, mo
     r = rule_of(fdb)
     assert r["event_type"] == "schedule" and r["match"]["cron"] == "0 */3 * * *" and r["teammate_id"] == ivy["id"]
     assert fdb.rows("messages", kind="event")[-1]["text"] == "Ivy set up an automation: Mail brief · every 3 hours"
-    [shown] = (await api.get(f"/threads/dm:{ivy['id']}/automations")).json()
-    assert shown["name"] == "Mail brief" and shown["enabled"] and shown["next_run"]
+    [shown] = (await api.get("/automations")).json()
+    assert shown["name"] == "Mail brief" and shown["enabled"] and shown["next_run"] and shown["thread_id"] == f"dm:{ivy['id']}"
 
 
 async def test_too_frequent_or_bad_schedules_are_refused():
@@ -120,3 +120,39 @@ async def test_run_now_fires_a_scheduled_automation(api, env):
     assert (await api.post(f"/automations/{rule['id']}/run")).status_code == 200
     await settle()
     assert fdb.rows("messages", sender_type="teammate")[-1]["text"] == "Here's your brief."
+
+
+async def test_detail_shows_each_run_and_edits_come_with_a_capsule(api, env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "email")
+    rule = await automations.create(OWNER, ivy, None, name="Brief", instructions="Brief.", cron="0 8 * * *",
+                                    tz="Asia/Kolkata", when="every day at 8 AM")
+    fake.script = [ai("QUIET")]
+    await api.post(f"/automations/{rule['id']}/run")
+    await settle()
+    fake.script = [ai("Two new mails.")]
+    await api.post(f"/automations/{rule['id']}/run")
+    await settle()
+    d = (await api.get(f"/automations/{rule['id']}")).json()
+    assert [h["outcome"] for h in d["runs"]] == ["posted", "quiet"] and d["runs"][0]["preview"] == "Two new mails."
+    assert d["last_run"] and d["when"] == "every day at 8 AM"
+
+    r = await api.patch(f"/automations/{rule['id']}", json={"cron": "*/5 * * * *"})
+    assert r.status_code == 400 and "too often" in r.json()["detail"]
+    r = (await api.patch(f"/automations/{rule['id']}", json={"cron": "0 9 * * 1-5", "when": "weekdays at 9 AM",
+                                                           "instructions": "Brief me."})).json()
+    assert r["cron"] == "0 9 * * 1-5" and r["when"] == "weekdays at 9 AM" and r["instructions"] == "Brief me."
+    assert fdb.rows("messages", kind="event")[-1]["text"] == "You updated an automation: Brief · weekdays at 9 AM"
+
+
+async def test_set_up_from_the_app_in_a_project_the_teammate_is_in(api, env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "email")
+    fdb.tables.setdefault("projects", []).append({"id": "p1", "owner_id": OWNER, "name": "Launch"})
+    body = {"teammate_id": ivy["id"], "project_id": "p1", "name": "Weekly wrap", "instructions": "Sum up the week.",
+            "cron": "0 17 * * 5", "when": "Fridays at 5:00 PM", "tz": "Asia/Kolkata"}
+    assert (await api.post("/automations", json=body)).status_code == 400  # not a member
+    fdb.tables.setdefault("project_members", []).append({"project_id": "p1", "teammate_id": ivy["id"], "owner_id": OWNER})
+    a = (await api.post("/automations", json=body)).json()
+    assert a["thread_id"] == "proj:p1" and a["next_run"] and a["tz"] == "Asia/Kolkata"
+    assert fdb.rows("messages", kind="event")[-1]["text"] == "You set up an automation: Weekly wrap · Fridays at 5:00 PM"

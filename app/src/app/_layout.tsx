@@ -71,6 +71,8 @@ function Root() {
               <Stack.Screen name="project/[id]/settings" />
               <Stack.Screen name="connections" />
               <Stack.Screen name="memory" />
+              <Stack.Screen name="automations" />
+              <Stack.Screen name="automation/[id]" />
             </Stack.Protected>
           </Stack>
           {signedIn && <SheetsHost />}

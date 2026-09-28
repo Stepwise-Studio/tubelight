@@ -2,11 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
-import Animated, { Keyframe } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon, BubbleChatIcon, Delete02Icon, MoreHorizontalIcon } from '@hugeicons/core-free-icons'
 
 import { ActivityRow } from '@/components/activity-row'
+import { AutomationRows } from '@/components/automation-rows'
 import { FormSection } from '@/components/form-bits'
 import { MemoryList } from '@/components/memory-list'
 import { ScreenHeader } from '@/components/screen-header'
@@ -14,28 +14,21 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import {
   TeammateFields, draftOf, handleTakenError, sameDraft, validateTeammate, type DraftErrors, type TeammateDraft,
 } from '@/components/teammate-form'
+import { SAVE_BAR_SPACE, SaveBar } from '@/components/save-bar'
 import { openSheet } from '@/components/sheet-screen'
 import { isShown } from '@/lib/activity'
+import { useAutomations } from '@/lib/automations'
 import { modelName, useModels } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Activity, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
-import { motion, useTheme } from '@/theme'
+import { useTheme } from '@/theme'
 import {
   Button, Divider, EmptyState, IconButton, ListRow, Segment, Skeleton, Surface, TeammateAvatar, Text,
   confirm, haptic, showMenu, toast,
 } from '@/ui'
 
 type Tab = 'overview' | 'settings'
-
-const barIn = new Keyframe({
-  0: { opacity: 0, transform: [{ translateY: motion.distance.base }] },
-  100: { opacity: 1, transform: [{ translateY: 0 }], easing: motion.ease.smoothOut },
-}).duration(motion.duration.fast)
-const barOut = new Keyframe({
-  0: { opacity: 1, transform: [{ translateY: 0 }] },
-  100: { opacity: 0, transform: [{ translateY: motion.distance.base }], easing: motion.ease.smoothOut },
-}).duration(motion.duration.quick)
 
 const openThread = (threadId: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId } })
 
@@ -138,7 +131,7 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
           />
         }
       />
-      <KeyboardAwareScrollView bottomOffset={dirty ? 170 : 96} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + (dirty ? 170 : 40) }}>
+      <KeyboardAwareScrollView bottomOffset={dirty ? SAVE_BAR_SPACE : 96} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + (dirty ? SAVE_BAR_SPACE : 40) }}>
         <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingTop: 24, gap: 12 }}>
           <TeammateAvatar teammate={draft} size={88} live state={working ? 'working' : 'default'} />
           <View style={{ alignItems: 'center', gap: 2 }}>
@@ -173,23 +166,12 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
       </KeyboardAwareScrollView>
 
       {dirty && (
-        <Animated.View
-          entering={barIn}
-          exiting={barOut}
-          style={{ position: 'absolute', zIndex: 10, left: 12, right: 12, bottom: Math.max(insets.bottom, 12), borderRadius: 24, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.25)' }}
-        >
-          {/* A heading and one line of context, then the two choices side by side at full width. */}
-          <Surface radius={24} padding={16} style={{ gap: 14 }} accessibilityRole="alert">
-            <View style={{ gap: 2 }}>
-              <Text variant="headline">Unsaved changes</Text>
-              <Text variant="caption" color="ink3">Save to update {t?.name ?? 'this teammate'}, or discard to keep things as they were.</Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button label="Discard" variant="outline" onPress={() => { setEdit(null); setErrors({}) }} style={{ flex: 1 }} />
-              <Button label="Save changes" loading={saving} onPress={save} style={{ flex: 1 }} />
-            </View>
-          </Surface>
-        </Animated.View>
+        <SaveBar
+          body={`Save to update ${t.name}, or discard to keep things as they were.`}
+          saving={saving}
+          onDiscard={() => { setEdit(null); setErrors({}) }}
+          onSave={save}
+        />
       )}
     </View>
   )
@@ -199,6 +181,8 @@ function Overview({ t }: { t: Teammate }) {
   const ws = useWorkspace()
   const [recent, setRecent] = useState<Activity[] | null>(null)
   const projects = ws.projects.filter((p) => ws.members.some((m) => m.project_id === p.id && m.teammate_id === t.id))
+  const autos = useAutomations()
+  const mine = autos.list?.filter((a) => a.teammate_id === t.id) ?? null
 
   useEffect(() => {
     supabase.from('activity').select('*').eq('teammate_id', t.id).not('type', 'in', '(run_start,run_end)')
@@ -210,6 +194,20 @@ function Overview({ t }: { t: Teammate }) {
     <View style={{ gap: 32 }}>
       <FormSection title="Memory" hint={`Facts ${t.name} keeps between conversations.`}>
         <MemoryList scope="teammate" id={t.id} owner={t.name} />
+      </FormSection>
+
+      <FormSection
+        title="Automations"
+        hint={mine?.length ? `What ${t.name} does on their own.` : undefined}
+        action={<Button label="New" size="sm" variant="soft" icon={Add01Icon} onPress={() => router.push({ pathname: '/automation/[id]', params: { id: 'new', teammate: t.id } })} />}
+      >
+        {mine === null ? (
+          <Surface padding={16} style={{ gap: 10 }}><Skeleton width="70%" /><Skeleton width="45%" /></Surface>
+        ) : mine.length === 0 ? (
+          <Text variant="caption" color="ink3">None yet. Ask {t.name} in chat, like “every morning at 8, brief me on what’s new”.</Text>
+        ) : (
+          <AutomationRows items={mine} show="where" onToggle={autos.toggle} />
+        )}
       </FormSection>
 
       <FormSection title="Projects">

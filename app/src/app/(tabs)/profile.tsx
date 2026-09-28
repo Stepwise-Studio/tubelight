@@ -7,7 +7,7 @@ import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
-  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, ViewIcon, ViewOffIcon,
+  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -15,6 +15,8 @@ import { FormSection } from '@/components/form-bits'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ApiError, api } from '@/lib/api'
+import type { Automation } from '@/lib/automations'
+import { whenLabel } from '@/lib/format'
 import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type Toolkit } from '@/lib/catalog'
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
@@ -62,6 +64,7 @@ export default function ProfileScreen() {
       <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 36 }}>
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
         <AppsSection />
+        <AutomationsSection />
         <MemorySection />
         <Appearance />
         <PushSection />
@@ -215,6 +218,23 @@ function PushSection() {
 }
 
 /** Connected apps, a grid of popular ones to connect in a tap, and the way into all of Composio's catalog. */
+/** What runs on its own, in one row: how many are on and when the next one runs. */
+function AutomationsSection() {
+  const [items, setItems] = useState<Automation[] | null>(null)
+  useFocusEffect(useCallback(() => { api<Automation[]>('/automations').then(setItems, () => setItems([])) }, []))
+  const on = (items ?? []).filter((a) => a.enabled)
+  const next = on.map((a) => a.next_run).filter((x): x is string => !!x).sort()[0]
+  const summary = items === null ? 'Loading…' : items.length === 0 ? 'None yet: ask a teammate to do something on a schedule'
+    : [`${on.length} on`, items.length > on.length && `${items.length - on.length} paused`, next && `next ${whenLabel(next)}`].filter(Boolean).join(' · ')
+  return (
+    <FormSection title="Automations" hint="What your teammates do on their own, on a schedule or when something happens in an app.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow title="Open automations" subtitle={summary} icon={RepeatIcon} chevron onPress={() => router.push('/automations')} />
+      </Surface>
+    </FormSection>
+  )
+}
+
 /** What the teammates have learned, in one row: open to-dos, people, preferences. */
 function MemorySection() {
   const [items, setItems] = useState<MemoryItem[] | null>(null)

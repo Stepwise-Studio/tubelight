@@ -6,20 +6,21 @@ import { KeyboardAwareScrollView, useReanimatedKeyboardAnimation } from 'react-n
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, AlertCircleIcon, Cancel01Icon, Clock01Icon, Delete02Icon, Link01Icon, Mail01Icon, MinusSignIcon,
+  Add01Icon, AlertCircleIcon, Cancel01Icon, Delete02Icon, Link01Icon, Mail01Icon, MinusSignIcon,
   SourceCodeIcon, UserAdd01Icon, UserRemove01Icon, WebhookIcon,
 } from '@hugeicons/core-free-icons'
 
 import { CodeBlock, ColorSwatches, FormSection, RowWithAction, TeammateToggles } from '@/components/form-bits'
 import { MemoryList } from '@/components/memory-list'
+import { AutomationRows } from '@/components/automation-rows'
 import { ScreenHeader } from '@/components/screen-header'
 import { api } from '@/lib/api'
 import { COLORS, REPO_RE } from '@/lib/catalog'
-import { CRON_PRESETS, cronError, describeCron } from '@/lib/cron'
+import { useAutomations } from '@/lib/automations'
 import { supabase } from '@/lib/supabase'
 import type { EventRule, Project, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
-import { type as typeScale, useTheme } from '@/theme'
+import { useTheme } from '@/theme'
 import {
   AvatarStack, Button, Chip, Divider, EmptyState, Icon, IconButton, NumberPop, Sheet, Skeleton, Surface,
   TeammateAvatar, Text, TextField, Toggle, confirm, haptic, toast, type IconSvgElement,
@@ -31,7 +32,6 @@ const TYPES: { value: string; label: string; icon: IconSvgElement }[] = [
   { value: 'error', label: 'Error', icon: AlertCircleIcon },
   { value: 'email', label: 'Email', icon: Mail01Icon },
   { value: 'github_issue', label: 'GitHub issue', icon: SourceCodeIcon },
-  { value: 'schedule', label: 'Schedule', icon: Clock01Icon },
   { value: 'custom', label: 'Custom', icon: WebhookIcon },
 ]
 const typeOf = (v: string) => TYPES.find((t) => t.value === v) ?? { value: v, label: v.replace(/_/g, ' '), icon: WebhookIcon }
@@ -97,6 +97,7 @@ function Settings({ p }: { p: Project }) {
         <FormSection title="Memory" hint="Facts every member knows about this project.">
           <MemoryList scope="project" id={p.id} owner={p.name} />
         </FormSection>
+        <Automations p={p} members={members} />
         <Rules p={p} members={members} />
         <FormSection title="Delete">
           <Text variant="caption" color="ink3">Deleting the project removes its chat and rules. Your teammates stay.</Text>
@@ -219,7 +220,6 @@ interface RuleDraft {
   type: string // one of TYPES, or a custom type name
   custom: string
   match: { k: string; v: string }[]
-  cron: string
   teammate_id: string | null
   instructions: string
   max_per_hour: number
@@ -227,25 +227,44 @@ interface RuleDraft {
 }
 
 const blankRule = (teammateId: string | null): RuleDraft => ({
-  name: '', type: 'error', custom: '', match: [], cron: '0 9 * * *', teammate_id: teammateId, instructions: '', max_per_hour: 6, enabled: true,
+  name: '', type: 'error', custom: '', match: [], teammate_id: teammateId, instructions: '', max_per_hour: 6, enabled: true,
 })
 
 function toDraft(r: EventRule): RuleDraft {
   const known = TYPES.some((t) => t.value === r.event_type && t.value !== 'custom')
-  const { cron, tz: _tz, when: _when, ...rest } = r.match as Record<string, string>
+  const rest = r.match as Record<string, string>
   return {
     id: r.id, name: r.name, type: known ? r.event_type : 'custom', custom: known ? '' : r.event_type,
-    match: Object.entries(rest).map(([k, v]) => ({ k, v: String(v) })), cron: cron ?? '0 9 * * *',
+    match: Object.entries(rest).map(([k, v]) => ({ k, v: String(v) })),
     teammate_id: r.teammate_id, instructions: r.instructions, max_per_hour: r.max_per_hour, enabled: r.enabled,
   }
 }
 
 function ruleSummary(r: EventRule, name: (id: string) => string | undefined) {
-  const filters = Object.entries(r.match).filter(([k]) => !['cron', 'tz', 'when'].includes(k))
+  const filters = Object.entries(r.match)
   const where = filters.length ? ` where ${filters[0][0]} is ${String(filters[0][1])}${filters.length > 1 ? ` and ${filters.length - 1} more` : ''}` : ''
-  const m = r.match as Record<string, string | undefined>
-  const what = r.event_type === 'schedule' ? m.when || describeCron(m.cron ?? '', !!m.tz) : typeOf(r.event_type).label + where
+  const what = typeOf(r.event_type).label + where
   return `${what} · ${name(r.teammate_id) ?? 'Removed teammate'} · up to ${r.max_per_hour} an hour`
+}
+
+function Automations({ p, members }: { p: Project; members: Teammate[] }) {
+  const autos = useAutomations()
+  const here = autos.list?.filter((a) => a.thread_id === `proj:${p.id}`) ?? null
+  return (
+    <FormSection
+      title="Automations"
+      hint={here?.length ? 'What members do here on their own.' : undefined}
+      action={<Button label="New" size="sm" variant="soft" icon={Add01Icon} disabled={!members.length} onPress={() => router.push({ pathname: '/automation/[id]', params: { id: 'new', thread: `proj:${p.id}` } })} />}
+    >
+      {here === null ? (
+        <Surface padding={16} style={{ gap: 10 }}><Skeleton width="70%" /><Skeleton width="45%" /></Surface>
+      ) : here.length === 0 ? (
+        <Text variant="caption" color="ink3">None yet. Ask a member in the chat, like “every Friday at 5, sum up the week”.</Text>
+      ) : (
+        <AutomationRows items={here} show="who" onToggle={autos.toggle} />
+      )}
+    </FormSection>
+  )
 }
 
 function Rules({ p, members }: { p: Project; members: Teammate[] }) {
@@ -257,8 +276,8 @@ function Rules({ p, members }: { p: Project; members: Teammate[] }) {
   const [session, setSession] = useState(0) // remounts the sheet per edit, so old errors don't linger
 
   const load = useCallback(() => Promise.all([
-    // App-event automations run on a Composio trigger: they're managed in the chat's Scheduled sheet.
-    supabase.from('event_rules').select('*').eq('project_id', p.id).neq('event_type', 'app').order('created_at'),
+    // Webhook rules only: schedules and app events are automations (the section above).
+    supabase.from('event_rules').select('*').eq('project_id', p.id).not('event_type', 'in', '(schedule,app)').order('created_at'),
     supabase.from('profiles').select('webhook_token').single(),
   ]).then(([r, prof]) => {
     setRules((r.data ?? []) as EventRule[])
@@ -277,8 +296,8 @@ function Rules({ p, members }: { p: Project; members: Teammate[] }) {
   }
 
   const url = token ? `${AGENT_URL}/events/${token}` : null
-  const sample = rules?.find((r) => r.event_type !== 'schedule')
-  const payload = { ...(sample ? Object.fromEntries(Object.entries(sample.match).filter(([k]) => k !== 'cron')) : {}), message: 'TypeError: Cannot read properties of undefined (reading \'id\')' }
+  const sample = rules?.[0]
+  const payload = { ...(sample ? sample.match : {}), message: 'TypeError: Cannot read properties of undefined (reading \'id\')' }
   const curl = url && `curl -X POST ${url} \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify({ type: sample?.event_type ?? 'error', source: 'sentry', payload })}'`
 
   return (
@@ -350,26 +369,24 @@ function RuleSheet({ open, draft, project, members, onChange, onClose, onSaved }
 }) {
   const { height } = useWindowDimensions()
   const kb = useReanimatedKeyboardAnimation()
-  const [errors, setErrors] = useState<{ name?: string; custom?: string; cron?: string; teammate?: string }>({})
+  const [errors, setErrors] = useState<{ name?: string; custom?: string; teammate?: string }>({})
   const [busy, setBusy] = useState<'save' | 'test' | null>(null)
   const scroll = useAnimatedStyle(() => ({ maxHeight: Math.max(220, height * 0.72 + kb.height.value) }))
   if (!draft) return null
   const d = draft
   const set = <K extends keyof RuleDraft>(k: K, v: RuleDraft[K]) => onChange({ ...d, [k]: v })
-  const schedule = d.type === 'schedule'
   const eventType = d.type === 'custom' ? d.custom.trim().toLowerCase().replace(/\s+/g, '_') : d.type
 
   const save = async () => {
     const e: typeof errors = {}
     if (!d.name.trim()) e.name = 'Name the rule so you can find it later.'
     if (d.type === 'custom' && !eventType) e.custom = 'Name the event type your service sends, like deploy_failed.'
-    if (schedule && cronError(d.cron)) e.cron = cronError(d.cron)!
     if (!d.teammate_id) e.teammate = 'Pick who handles it.'
     setErrors(e)
     if (Object.keys(e).length) return
     setBusy('save')
     // Schedules run in the user's own time zone, like the ones set up from chat.
-    const match = schedule ? { cron: d.cron.trim(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, when: describeCron(d.cron, true) } : Object.fromEntries(d.match.filter((m) => m.k.trim()).map((m) => [m.k.trim(), m.v]))
+    const match = Object.fromEntries(d.match.filter((m) => m.k.trim()).map((m) => [m.k.trim(), m.v]))
     const row = {
       name: d.name.trim(), event_type: eventType, match, project_id: project.id, teammate_id: d.teammate_id!,
       instructions: d.instructions.trim(), max_per_hour: d.max_per_hour, enabled: d.enabled,
@@ -423,25 +440,7 @@ function RuleSheet({ open, draft, project, members, onChange, onClose, onSaved }
           {d.type === 'custom' && (
             <TextField label="Event type" value={d.custom} onChangeText={(v) => set('custom', v)} placeholder="deploy_failed" autoCapitalize="none" autoCorrect={false} error={errors.custom} hint="The “type” your service sends in the webhook body." />
           )}
-          {schedule ? (
-            <View style={{ gap: 10 }}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {CRON_PRESETS.map((pr) => <Chip key={pr.cron} label={pr.label} selected={d.cron.trim() === pr.cron} onPress={() => set('cron', pr.cron)} />)}
-              </View>
-              <TextField
-                label="Cron (your time)"
-                value={d.cron}
-                onChangeText={(v) => set('cron', v)}
-                autoCapitalize="none"
-                autoCorrect={false}
-                error={errors.cron}
-                hint={describeCron(d.cron, true)}
-                inputStyle={{ fontFamily: typeScale.mono.fontFamily }}
-              />
-            </View>
-          ) : (
-            <MatchRows rows={d.match} onChange={(m) => set('match', m)} />
-          )}
+          <MatchRows rows={d.match} onChange={(m) => set('match', m)} />
         </FormSection>
 
         <FormSection title="Who handles it">
