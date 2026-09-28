@@ -22,8 +22,8 @@ log = logging.getLogger(__name__)
 HISTORY_CHARS = 6000  # recent chat the director reads verbatim (~1.5k tokens); older is in the brief
 QUIET_MAX = 40  # "nobody replies" is only trusted for short messages (ok, thanks, got it)
 
-PROMPT = """You direct the floor of a group chat between {user} and their AI teammates. For {user}'s latest message,
-decide who replies, in what order, and what each one's part is.
+PROMPT = """You direct the floor of a group chat between {user} and their AI teammates. It is {now} for {user}. For
+{user}'s latest message, decide who replies, in what order, and what each one's part is.
 
 Members:
 {roster}
@@ -40,8 +40,9 @@ How to read the message:
 - Everyone given a task in the message is addressed, in the order the work happens ("ask @tess to test it and
   @dev to fix what she finds": Tess, then Dev).
 - timing: "later" when the message asks for the thing to happen at a later time or once something else happens
-  ("roast Sol at 6 pm", "deploy once the design is done"); then pick only the one member best placed to confirm it
-  and set a follow-up, and nobody does the thing itself now. Otherwise "now".
+  ("roast Sol at 6 pm", "deploy once the design is done", even a time a minute away); then pick only one member to
+  confirm it and set a follow-up: the one addressed (tagged or named), or if the whole group was, the one best placed.
+  Nobody does the thing itself now. Otherwise "now".
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
 - The latest message may be a scheduled follow-up the chat set earlier: the group picking a topic back up, now
   (timing "now"). Its owner leads, first. Then add every member who took part in that topic or would naturally
@@ -123,11 +124,12 @@ def tagged(text: str, members: list[dict]) -> list[dict]:
     return [m for m in members if m["handle"] in handles]
 
 
-async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: str, brief: str = "") -> Plan:
+async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: str, brief: str = "",
+               now: str = "now") -> Plan:
     roster = "\n".join(f"- @{m['handle']}: {m['name']}, {m['role']}. {(m.get('bio') or '')[:160]}" for m in members)
     try:
         res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
-            SystemMessage(PROMPT.format(user=user, roster=roster)),
+            SystemMessage(PROMPT.format(user=user, roster=roster, now=now)),
             HumanMessage((f"Brief of the whole chat so far:\n{brief}\n\nRecent messages:\n" if brief else "")
                          + transcript(msgs, members, user)),
         ])

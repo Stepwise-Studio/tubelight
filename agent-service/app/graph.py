@@ -423,7 +423,8 @@ def make_router(ctx: RunCtx):
             return {"active": queue[0], "queue": queue[1:]}
         if len(ctx.members) == 1:
             return {"active": ctx.members[0]["id"], "queue": []}
-        p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]), ctx.brief)
+        p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]), ctx.brief,
+                             f"{local_now(ctx):%A, %I:%M %p}")
         # A fired follow-up's owner always speaks first; the director decides who follows.
         ask = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
         lead = (ask.additional_kwargs.get("lead") if ask else None)
