@@ -1,6 +1,7 @@
 """Fakes: an in-memory PostgREST (db.*), a scripted chat model, and in-memory LangGraph memory."""
 import asyncio
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -161,6 +162,11 @@ async def api(env):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def plan(*speakers: tuple[str, str], read: str = "") -> AIMessage:
+    """The floor director's reply: ordered (handle, part) pairs."""
+    return AIMessage(json.dumps({"read": read, "speakers": [{"handle": h, "part": p} for h, p in speakers]}))
 
 
 def ai(text: str = "", calls: list[tuple[str, dict]] | None = None) -> AIMessage:

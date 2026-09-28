@@ -2,7 +2,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
 from app import connectors, graph
-from tests.conftest import ai, project, settle, teammate
+from tests.conftest import ai, plan, project, settle, teammate
 
 
 async def test_dm_run_posts_message_and_streams(api, env):
@@ -70,23 +70,27 @@ async def test_project_routes_by_mention(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
     p = project(fdb, [dev, tess])
-    fake.script = [ai("Tess checking in.")]
+    fake.script = [plan(("tess", "Test it.")), ai("Tess checking in.")]
     await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "@tess test it", "mentions": [tess["id"]]})
     await settle()
     [m] = fdb.rows("messages", sender_type="teammate")
     assert m["teammate_id"] == tess["id"]
-    assert len(fake.calls) == 1  # no router call when mentioned
+    # the director reads the chat with the latest message marked; tags are evidence it weighs, not orders
+    assert "LATEST MESSAGE — Akhil: @tess test it" in fake.calls[0][-1].content
 
 
 async def test_project_routes_by_router_model(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
     p = project(fdb, [dev, tess])
-    fake.script = [ai('{"handle": "tess"}'), ai("On it.")]
+    fake.script = [plan(("tess", "Check whether login works."), read="A testing question for Tess."), ai("On it.")]
     await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "does login still work?"})
     await settle()
     [m] = fdb.rows("messages", sender_type="teammate")
     assert m["teammate_id"] == tess["id"]
+    # the speaker gets the shared reading and its own part
+    assert "What's happening: A testing question for Tess." in fake.calls[1][0].content
+    assert "Your part: Check whether login works." in fake.calls[1][0].content
 
 
 async def test_router_falls_back_to_first_member(api, env):
@@ -126,15 +130,44 @@ async def test_at_all_asks_everyone(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
     p = project(fdb, [dev, tess])
-    fake.script = [ai("Dev: tabs."), ai("Tess: spaces.")]
+    fake.script = [plan(("dev", "Pick one."), ("tess", "Pick one.")), ai("Dev: tabs."), ai("Tess: spaces.")]
     await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "@all tabs or spaces?"})
     await settle()
     said = fdb.rows("messages", kind="text", sender_type="teammate")
     assert [m["teammate_id"] for m in said] == [dev["id"], tess["id"]]
     # each knows the turn order, so nobody replies to someone who hasn't spoken yet
-    dev_sys, tess_sys = fake.calls[0][0].content, fake.calls[1][0].content
+    dev_sys, tess_sys = fake.calls[1][0].content, fake.calls[2][0].content
     assert "Replying after you: Tess" in dev_sys and "Already replied" not in dev_sys
     assert "Already replied to the latest message: Dev" in tess_sys and "Replying after you" not in tess_sys
+
+
+async def test_plan_orders_the_round_and_speakers_may_pass(api, env):
+    fdb, fake = env
+    dev, tess, ivy = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester"), teammate(fdb, "ivy", "email")
+    p = project(fdb, [dev, tess, ivy])
+    fake.script = [plan(("tess", "Roast Dev."), ("ivy", "Roast Dev."), ("dev", "You're the target: fire back last.")),
+                   ai("one"), ai("PASS"), ai("three")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "I want everyone to roast @dev", "mentions": [dev["id"]]})
+    await settle()
+    said = fdb.rows("messages", kind="text", sender_type="teammate")
+    assert [(m["teammate_id"], m["text"]) for m in said] == [(tess["id"], "one"), (dev["id"], "three")]  # Ivy passed
+    assert "Your part: You're the target: fire back last." in fake.calls[3][0].content
+
+
+async def test_plan_may_choose_nobody_for_a_short_ack_only(api, env):
+    fdb, fake = env
+    dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, tess])
+    fake.script = [plan()]
+    r = await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "ok thanks!"})
+    await settle()
+    assert not fdb.rows("messages", sender_type="teammate")
+    assert fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "done"
+    # a real question never goes unanswered: an empty plan falls back to a speaker
+    fake.script = [plan(), ai("Dev here.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "can someone look at why the deploy failed last night?"})
+    await settle()
+    assert [m["teammate_id"] for m in fdb.rows("messages", sender_type="teammate")] == [dev["id"]]
 
 
 def _gmail_tool(sent: list):

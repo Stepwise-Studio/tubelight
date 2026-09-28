@@ -55,13 +55,15 @@ async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str]
     run = await db.insert("runs", {"owner_id": owner_id, "thread_id": thread_id, "trigger": trigger,
                                    "teammate_id": teammate_id, "status": "running"})
     await db.activity(owner_id, "run_start", trigger, run_id=run["id"], thread_id=thread_id, teammate_id=teammate_id)
-    queue = [teammate_id] if teammate_id else list(mentions or [])
+    # A named teammate (a DM, an event, a schedule) answers; in a group, the floor plan decides (floor.py): tags are
+    # evidence there, not orders ("everyone roast @dev" is for the whole group).
+    queue = [teammate_id] if teammate_id else []
     # With the message's id, a retry replaces the failed attempt's copy in the history instead of adding a second one.
     kw: dict[str, Any] = {"id": f"user:{message_id}"} if message_id else {}
     if apps:
         kw["additional_kwargs"] = {"apps": list(apps)}
     state = {"messages": [HumanMessage(text, name=sender, **kw) if sender else HumanMessage(text, **kw)],
-             "queue": queue, "active": None, "handoffs": 0, "pending": [], "decisions": {}}
+             "queue": queue, "active": None, "handoffs": 0, "plan": {}, "pending": [], "decisions": {}}
     _spawn(run["id"], _execute(run["id"], owner_id, thread_id, trigger, state, event_type))
     return run["id"]
 

@@ -35,7 +35,7 @@ See `supabase/migrations/0001_init.sql`. Key rules:
 - `messages.kind`:
   - `text`: normal message. `meta.tool_calls?: [{name, status}]` short summary for the UI.
   - `approval`: teammate asked to do something risky. `meta.approval_id`, `meta.tool_name`.
-  - `handoff` (legacy, no longer written): `meta.to_teammate_id`, `meta.note`; shown as a message that @mentions the receiver. Teammates now bring each other in by @mentioning handles in their replies (`graph.mentioned`; `@all` = everyone), capped at `MAX_HANDOFFS` turns per run.
+  - `handoff` (legacy, no longer written): `meta.to_teammate_id`, `meta.note`; shown as a message that @mentions the receiver. Who answers a group message is decided by the floor plan (`floor.py`); teammates bring each other in by @mentioning handles in their replies (`floor.tagged`; `@all` = everyone), capped at `MAX_HANDOFFS` turns per run.
   - `error`: run failed. Text is short and human-readable.
   - `event`: an external event arrived (proactive). `meta.event_id`, `meta.event_type`, `meta.rule_id`.
 - `messages.proactive = true` when a teammate posted without being asked (event/schedule).

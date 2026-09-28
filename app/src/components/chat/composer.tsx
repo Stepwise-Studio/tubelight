@@ -1,6 +1,6 @@
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Text as RNText, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, Text as RNText, ScrollView, TextInput, View } from 'react-native'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -17,7 +17,7 @@ import type { ChatMessage, SendOptions } from '@/lib/use-thread'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import { Icon, IconButton, ListRow, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast } from '@/ui'
 
-import { EdgeBlur } from '@/components/bottom-edge'
+import { BottomEdge } from '@/components/bottom-edge'
 
 import { Dictation } from './dictation'
 
@@ -30,8 +30,6 @@ const PILL = 23
 
 export interface ComposerProps {
   placeholder: string
-  /** The chat behind the composer (a BlurTargetView), blurred where it scrolls under. */
-  blurTarget?: React.RefObject<View | null>
   /** Project members for @mentions. Empty in DMs (no picker). */
   members: Teammate[]
   live: boolean
@@ -50,7 +48,7 @@ type Item = Draft & { att?: Attachment }
  * trailing action (mic when empty, send when there's something, stop while a run is live). Behind it there's no solid
  * band: the chat fades into the canvas and blurs more toward the bottom edge.
  */
-export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, blurTarget }: ComposerProps) {
+export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice }: ComposerProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const kb = useReanimatedKeyboardAnimation()
@@ -210,15 +208,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
 
   return (
     <Animated.View style={[{ paddingHorizontal: focused ? 8 : 16, paddingTop: 10 }, pad]}>
-      {/* Behind the bar: transparent at the top, easing into the canvas colour, and blurred only along the screen's
-          bottom edge, more the nearer the edge. The chrome tints match the canvas (near-black in dark, near-white in
-          light), so the blur steps add no grey band. */}
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { top: -36 }]}>
-        <EdgeBlur blurTarget={blurTarget} />
-        <View style={[StyleSheet.absoluteFill, {
-          experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}00 20%, ${c.canvas}40 45%, ${c.canvas}8C 70%, ${c.canvas}CC 100%)`,
-        }]} />
-      </View>
+      {/* Behind the bar: the chat fades out smoothly toward the bottom edge, clear at the top. */}
+      <BottomEdge style={{ top: -36 }} />
       {(people.length > 0 || appRows.length > 0 || offerAll) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}

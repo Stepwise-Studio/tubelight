@@ -1,6 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { BlurTargetView } from 'expo-blur'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
@@ -103,8 +102,7 @@ export default function Thread() {
   const [highlight, setHighlight] = useState<string | null>(null)
   const [voice, setVoice] = useState(false)
   const list = useRef<FlatList<ChatItem>>(null)
-  // The composer floats over the chat (which scrolls under its blur): the list keeps its height clear.
-  const blurTarget = useRef<View>(null)
+  // The composer floats over the chat (which scrolls under its fade): the list keeps its height clear.
   const [composerH, setComposerH] = useState(64)
 
   const send = async (text: string, mentions: string[], opts: SendOptions = {}) => {
@@ -224,7 +222,7 @@ export default function Thread() {
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         {/* In flow, so it shrinks above the keyboard; the composer is pinned to its bottom (absolute children skip the padding). */}
         <View style={{ flex: 1 }}>
-        <BlurTargetView ref={blurTarget} style={{ flex: 1, backgroundColor: c.canvas }}>
+        <View style={{ flex: 1 }}>
         {t.loading ? (
           <View style={{ flex: 1, justifyContent: 'flex-end', padding: 16, paddingBottom: 16 + composerH, gap: 18 }} accessible accessibilityLabel="Loading messages">
             <View style={{ flexDirection: 'row', gap: 10 }}><Skeleton width={28} height={28} radius={14} /><View style={{ flex: 1, gap: 8 }}><Skeleton width="30%" /><Skeleton width="85%" /><Skeleton width="60%" /></View></View>
@@ -258,10 +256,9 @@ export default function Thread() {
             keyboardShouldPersistTaps="handled"
           />
         )}
-        </BlurTargetView>
+        </View>
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         <Composer
-          blurTarget={blurTarget}
           placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team, @ to mention' : 'Message the project'}
           members={isDm ? [] : people}
           live={live}

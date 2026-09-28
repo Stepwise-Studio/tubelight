@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import config, connectors, db, llm, memory, push, tools as T
+from . import config, connectors, db, floor, llm, memory, push, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ class State(TypedDict, total=False):
     active: str | None  # teammate id whose turn it is
     queue: list[str]  # teammate ids still to answer (mentions, in order)
     handoffs: int
+    plan: dict  # the floor plan for the latest group message: {"read": str, "parts": {teammate id: part}}
     pending: list[dict]  # [{approval_id, tool_call_id}] for the active AI message
     decisions: dict[str, dict]  # approval_id -> {action, args, note}
 
@@ -357,6 +358,8 @@ def make_teammate(ctx: RunCtx, tm: dict):
         if ai.tool_calls or not text:
             if text or not ai.tool_calls:  # streamed tool-call chatter or an empty reply: no DB row follows
                 await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
+        elif ctx.project and text.strip(" .").upper() == "PASS":  # nothing to add to this round
+            await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
         elif ctx.event_type == "email" and text.upper().startswith("SKIP"):
             await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
             await db.activity(ctx.owner_id, "event", "email_ignored", run_id=ctx.run_id, thread_id=ctx.thread_id,
@@ -370,33 +373,12 @@ def make_teammate(ctx: RunCtx, tm: dict):
             })
             if ctx.proactive:
                 await push.notify(ctx.owner_id, tm["name"], text, ctx.thread_id)
-            asked = [m["id"] for m in mentioned(text, ctx.members) if m["id"] != tm["id"]]
+            asked = [m["id"] for m in floor.tagged(text, ctx.members) if m["id"] != tm["id"]]
             if asked:
                 return {"messages": [*updates, ai], **_ask(state, asked)}
         return {"messages": [*updates, ai]}
 
     return node
-
-
-async def _route_with_model(ctx: RunCtx, msgs: list[BaseMessage]) -> list[str]:
-    roster = "\n".join(f"- {m['handle']}: {m['name']}, {m['role']}. {m.get('bio', '')}" for m in ctx.members)
-    # Enough of the chat to resolve "apologise to him" or "you were right" to the member who did the thing.
-    said = [m for m in msgs if not isinstance(m, ToolMessage) and not (isinstance(m, AIMessage) and not m.text.strip())]
-    recent = "\n".join(line[:300] for line in _transcript(said[-12:]).split("\n"))
-    try:
-        res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
-            SystemMessage(f"You route messages in a team chat. Members:\n{roster}\n\nPick who should answer the latest "
-                          "message: usually the one member it fits best; everyone when it speaks to the whole group "
-                          "(everyone, all of you, a debate or game with the team). Work out who 'him', 'her', 'you' or "
-                          "'they' mean from what was said: 'apologise to him' goes to whoever did the thing, not to "
-                          'the one it was done to. Reply with JSON only, like {"handles": ["dev"]}.'),
-            HumanMessage(recent),
-        ])
-        handles = re.findall(r'"@?([a-z0-9_-]+)"', res.text.split(":", 1)[-1]) or [res.text.strip().lstrip("@").lower()]
-    except Exception:
-        handles = []
-    picked = [t["id"] for h in dict.fromkeys(handles) for t in ctx.members if t["handle"] == h]
-    return picked or [ctx.members[0]["id"]]
 
 
 def make_router(ctx: RunCtx):
@@ -406,9 +388,10 @@ def make_router(ctx: RunCtx):
             return {"active": queue[0], "queue": queue[1:]}
         if len(ctx.members) == 1:
             return {"active": ctx.members[0]["id"], "queue": []}
-        last = _last_human(state["messages"])
-        picked = [m["id"] for m in mentioned(last, ctx.members)] or await _route_with_model(ctx, state["messages"])
-        return {"active": picked[0], "queue": picked[1:]}
+        p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]))
+        log.info("floor: %s -> %s", p.read, [ctx.member(i)["handle"] for i in p.speakers])
+        return {"active": p.speakers[0] if p.speakers else None, "queue": p.speakers[1:],
+                "plan": {"read": p.read, "parts": p.parts}}
 
     return router
 
@@ -564,10 +547,16 @@ def turn_note(ctx: RunCtx, tm: dict, state: State) -> str:
     start = next((i for i in range(len(msgs) - 1, -1, -1) if isinstance(msgs[i], HumanMessage) and not msgs[i].name), 0)
     spoke = list(dict.fromkeys(m.name for m in msgs[start:] if isinstance(m, AIMessage) and m.text.strip() and m.name != tm["handle"]))
     later = [ctx.member(i)["name"] for i in state.get("queue") or [] if i != tm["id"]]
-    if not spoke and not later:
+    plan = state.get("plan") or {}
+    part = (plan.get("parts") or {}).get(tm["id"])
+    if not spoke and not later and not part:
         return ""
     names = {m["handle"]: m["name"] for m in ctx.members}
     lines = ["\n\n## This turn"]
+    if plan.get("read"):
+        lines.append(f"What's happening: {plan['read']}")
+    if part:
+        lines.append(f"Your part: {part}")
     if spoke:
         lines.append("Already replied to the latest message: " + ", ".join(names.get(h, h) for h in spoke)
                      + ". Build on or push back on what they said; don't repeat their points or wording.")
@@ -579,16 +568,10 @@ def turn_note(ctx: RunCtx, tm: dict, state: State) -> str:
                                  and tag.search(m.text)))
     if callers:
         lines.append(", ".join(names.get(h, h) for h in callers) + " @mentioned you: answer what they said to you.")
+    if spoke or later:
+        lines.append("If you truly have nothing to add to this round, reply with just PASS.")
     lines.append("Give your own answer now, in your own voice.")
     return "\n".join(lines)
-
-
-def mentioned(text: str, members: list[dict]) -> list[dict]:
-    """Members @mentioned in a message, in member order; @all / @everyone means the whole group."""
-    handles = {h.lower() for h in re.findall(r"(?<![\w@])@([a-z0-9][a-z0-9_-]*)", text, re.I)}
-    if handles & {"all", "everyone"}:
-        return list(members)
-    return [m for m in members if m["handle"] in handles]
 
 
 def _ask(state: State, ids: list[str]) -> dict:
@@ -615,7 +598,9 @@ def build(ctx: RunCtx, checkpointer):
     targets = list(node_of.values())
 
     def to_active(state: State) -> str:
-        return node_of.get(state.get("active") or "", targets[0])
+        if not state.get("active"):
+            return END  # the floor plan chose nobody (ok, thanks)
+        return node_of.get(state["active"], targets[0])
 
     def after_teammate(state: State) -> str:
         last = state["messages"][-1]
@@ -624,7 +609,7 @@ def build(ctx: RunCtx, checkpointer):
         return "router" if state.get("queue") else END
 
     g.add_edge(START, "router")
-    g.add_conditional_edges("router", to_active, targets)
+    g.add_conditional_edges("router", to_active, [*targets, END])
     for n in targets:
         g.add_conditional_edges(n, after_teammate, ["gate", "router", END])
     g.add_conditional_edges("gate", lambda s: "wait" if _undecided(s) else "tools", ["wait", "tools"])
