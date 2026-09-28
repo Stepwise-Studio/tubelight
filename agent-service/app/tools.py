@@ -221,7 +221,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 return f"No member @{handle} here. Use a member's handle, or 'group'."
         stamp = f"{now.astimezone(zone):%a %b %d, %I:%M %p}"
         await followups.add(ctx.owner_id, ctx.thread_id, who, what, at=at, until=None if at else until, check_by=by,
-                            poll_hours=poll_hours, set_by=f"teammate:{tm['id']}", set_at=stamp, by=tm["name"])
+                            poll_hours=poll_hours, set_by=f"teammate:{tm['id']}", set_at=stamp, by=tm["name"], tz=ctx.timezone)
         return (f"Follow-up set for {at.astimezone(zone):%a %b %d, %I:%M %p}." if at
                 else f"Follow-up set for once {until}." + (" I'll check on it with the apps." if poll_hours else "")
                 + " It shows in the chat's follow-ups and fires here on its own.")

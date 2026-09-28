@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Image } from 'expo-image'
 import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { Add01Icon, Message01Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import type { ReactElement } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
@@ -14,15 +14,13 @@ import { supabase } from '@/lib/supabase'
 import type { Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, radius, useTheme } from '@/theme'
-import { Button, Card, Chip, EmptyState, Icon, IconButton, Press, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
+import { Button, Card, Chip, EmptyState, Icon, Press, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
 
 const openProfile = (id: string) => router.push({ pathname: '/teammate/[id]', params: { id } })
-const openChat = (id: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId: `dm:${id}` } })
 
 const GAP = 12
 const BAND = 72 // the colour wash at the top of a card
 const FACE = 56
-const ADD = 'add' // the trailing "New teammate" cell
 
 /** The Crew page of Chats: every teammate as a profile card in a two-column grid, filtered by the shared search. */
 export function CrewList({ header, query }: { header?: ReactElement; query: string }) {
@@ -59,13 +57,13 @@ export function CrewList({ header, query }: { header?: ReactElement; query: stri
     )
   }
 
-  const data: (Teammate | typeof ADD)[] = q || !crew.length ? crew : [...crew, ADD]
   return (
     <FlatList
-      data={data}
+      data={crew}
       numColumns={2}
-      keyExtractor={(t) => (t === ADD ? ADD : t.id)}
+      keyExtractor={(t) => t.id}
       ListHeaderComponent={header}
+      ListFooterComponent={q || !crew.length ? null : <NewTeammateCard />}
       ListEmptyComponent={ws.teammates.length === 0 ? <StarterTemplates /> : <EmptyState title="No one matches" body={`Nobody in your crew matches "${query.trim()}".`} />}
       contentContainerStyle={{ paddingBottom: inset + 96, gap: GAP }}
       columnWrapperStyle={{ gap: GAP, paddingHorizontal: 16 }}
@@ -74,9 +72,7 @@ export function CrewList({ header, query }: { header?: ReactElement; query: stri
       refreshControl={refreshControl}
       renderItem={({ item, index }) => (
         <Animated.View entering={index < 8 ? FadeIn.duration(motion.duration.slow).delay(motion.staggerDelay(index)) : undefined} style={{ width: cell }}>
-          {item === ADD
-            ? <NewTeammateCard />
-            : <TeammateCard t={item} logos={logos} working={ws.isWorking(item.id)} />}
+          <TeammateCard t={item} logos={logos} working={ws.isWorking(item.id)} />
         </Animated.View>
       )}
     />
@@ -116,16 +112,13 @@ function TeammateCard({ t, logos, working }: { t: Teammate; logos: Record<string
       <View style={{ flex: 1, paddingHorizontal: 14, paddingTop: 16, paddingBottom: 12 }}>
         <Text variant="headline" numberOfLines={1}>{t.name}</Text>
         <Text variant="footnote" color="ink2" numberOfLines={1}>{t.role}</Text>
-        {/* Two lines kept even when shorter, so cards in a row line up. */}
-        <Text variant="caption" color="ink3" numberOfLines={2} style={{ marginTop: 6, minHeight: 36 }}>{t.bio || 'No description yet.'}</Text>
         <View style={{ flex: 1 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} accessibilityLabel={apps.length ? `Apps: ${apps.map(toolkitName).join(', ')}` : 'No apps'}>
             {shown.map((tk, i) => <AppDot key={tk} toolkit={tk} logo={logos[tk]} style={{ marginLeft: i ? -7 : 0, zIndex: shown.length - i }} />)}
             {more > 0 && <Text variant="footnote" color="ink3" tabular style={{ marginLeft: 6 }}>+{more}</Text>}
-            {!apps.length && <Text variant="footnote" color="ink4">No apps</Text>}
+            {!apps.length && <Text variant="footnote" color="ink4">No apps yet</Text>}
           </View>
-          <IconButton icon={Message01Icon} variant="soft" round size={32} iconSize={16} accessibilityLabel={`Message ${t.name}`} onPress={() => { haptic.tap(); openChat(t.id) }} />
         </View>
       </View>
     </Card>
@@ -142,25 +135,27 @@ function AppDot({ toolkit, logo, style }: { toolkit: string; logo?: string; styl
   )
 }
 
-/** The grid's last cell: a dotted card that starts a new teammate. */
+/** Under the grid, full width: a friendly way to bring someone new onto the team. */
 function NewTeammateCard() {
   const { c } = useTheme()
   return (
     <Press
       radius={radius.xl}
-      onPress={() => openSheet('teammate')}
+      onPress={() => { haptic.tap(); openSheet('teammate') }}
       accessibilityRole="button"
-      accessibilityLabel="New teammate"
-      outerStyle={{ flex: 1 }}
-      style={{ flex: 1, minHeight: 200, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16 }}
+      accessibilityLabel="Add a teammate"
+      accessibilityHint="Start from a ready-made role or build your own"
+      outerStyle={{ marginHorizontal: 16, marginTop: 4 }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.line }}
     >
-      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon icon={Add01Icon} size={20} color={c.ink2} />
+      <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon icon={Add01Icon} size={22} color={c.tube} />
       </View>
-      <View style={{ alignItems: 'center', gap: 2 }}>
-        <Text variant="label">New teammate</Text>
-        <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>From a template or your own</Text>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text variant="headline">Add a teammate</Text>
+        <Text variant="footnote" color="ink3">Start from a role like Dev or Sol, or build your own.</Text>
       </View>
+      <Icon icon={ArrowRight01Icon} size={18} color="ink3" />
     </Press>
   )
 }

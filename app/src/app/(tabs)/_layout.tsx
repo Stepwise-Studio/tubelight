@@ -13,7 +13,7 @@ export default function TabsLayout() {
       // Content fades and blurs under the floating capsule (the capsule itself stays sharp above it).
       screenLayout={({ children }) => <EdgeScreen height={inset}>{children}</EdgeScreen>}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: c.canvas } }}>
-      <Tabs.Screen name="index" options={{ title: 'Chats' }} />
+      <Tabs.Screen name="index" options={{ title: 'Inbox' }} />
       <Tabs.Screen name="approvals" options={{ title: 'Approvals' }} />
       <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

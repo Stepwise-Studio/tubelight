@@ -16,6 +16,7 @@ export { Collapse, IconSwap, NumberPop, Reveal, Rise, Skeleton, SuccessCheck, Te
 export { Portal, PortalHost } from './portal'
 export { Press, usePressFeedback } from './press'
 export { Segment } from './segment'
+export { EmojiPickerHost, showEmojiPicker, warmEmojis } from './emoji-picker'
 export { MenuHost, Sheet, showMenu, type MenuItem } from './sheet'
 export { AnimatedSquircle, Squircle } from './squircle'
 export { Card, Surface, elevation } from './surface'

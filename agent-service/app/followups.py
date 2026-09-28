@@ -38,8 +38,8 @@ async def note(f: dict[str, Any], event: str, by: str = "") -> None:
     """A capsule in the chat for each step of a follow-up's life, so everyone sees what's pending and why."""
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-    try:
-        zone = ZoneInfo(await db.user_timezone(f["owner_id"]) or "UTC")
+    try:  # the time zone it was set in; looking it up is only the fallback for older ones
+        zone = ZoneInfo(f.get("tz") or await db.user_timezone(f["owner_id"]) or "UTC")
     except (ZoneInfoNotFoundError, ValueError):
         zone = ZoneInfo("UTC")
     if f.get("at"):
@@ -64,7 +64,7 @@ async def note(f: dict[str, Any], event: str, by: str = "") -> None:
 
 async def add(owner_id: str, thread_id: str, owner: str, what: str, *, at: datetime | None = None,
               until: str | None = None, check_by: datetime | None = None, poll_hours: float | None = None,
-              set_by: str = "", set_at: str = "", by: str = "", note_as: str | None = None) -> str:
+              set_by: str = "", set_at: str = "", by: str = "", note_as: str | None = None, tz: str | None = None) -> str:
     """owner: a teammate id, or "group". Needs `at` or `until`. `by`: who set it, for the chat's capsule
     ("Calendy set a follow-up..."); empty when the keeper picked it up from the chat ("Follow-up noted...")."""
     if not (at or until):
@@ -75,7 +75,7 @@ async def add(owner_id: str, thread_id: str, owner: str, what: str, *, at: datet
         "owner_id": owner_id, "thread_id": thread_id, "owner": owner, "what": what[:500], "at": _iso(at),
         "until": (until or "")[:300] or None, "check_by": _iso(check_by),
         "poll_hours": max(poll_hours, MIN_POLL_H) if poll_hours else None, "last_poll": None, "claimed": None,
-        "created": _iso(datetime.now(UTC)), "set_by": set_by, "set_at": set_at,
+        "created": _iso(datetime.now(UTC)), "set_by": set_by, "set_at": set_at, "tz": tz,
     }
     await memory.store.aput(NS, key, value, index=False)
     await note(value, note_as or ("created" if by else "noted"), by)

@@ -171,7 +171,7 @@ async def refresh(owner_id: str, thread_id: str, user: str, tz: str) -> dict[str
                  else by_handle.get(str(a.get("owner", "")).lstrip("@").lower(), "group"))
         await followups.add(owner_id, thread_id, owner, str(a["what"]), at=at, until=None if at else str(until),
                             check_by=_local(a.get("check_by"), zone), poll_hours=a.get("poll_hours") or None,
-                            set_by="keeper", set_at=f"{now:%a %b %d, %I:%M %p}")
+                            set_by="keeper", set_at=f"{now:%a %b %d, %I:%M %p}", tz=tz)
         done["add"] += 1
     # Follow-ups set during the messages being read are the latest intent: the keeper can't undo them.
     fresh = {f["id"] for f in pend if (f.get("created") or "") >= rows[0]["created_at"]}

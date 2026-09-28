@@ -435,7 +435,7 @@ def make_router(ctx: RunCtx):
             now = local_now(ctx)
             if p.until or (p.at and now < p.at < now + timedelta(days=60)):
                 await followups.add(ctx.owner_id, ctx.thread_id, "group", p.what, at=p.at, until=p.until,
-                                    set_by="floor", set_at=f"{now:%a %b %d, %I:%M %p}", note_as="set")
+                                    set_by="floor", set_at=f"{now:%a %b %d, %I:%M %p}", note_as="set", tz=ctx.timezone)
             else:
                 log.warning("floor: unusable follow-up time %s", p.at)
         said = ask.id[5:] if ask and not ask.name and str(ask.id or "").startswith("user:") else None

@@ -207,7 +207,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   )
 
   return (
-    <Animated.View style={[{ paddingHorizontal: focused ? 8 : 16, paddingTop: 10 }, pad]}>
+    <Animated.View style={[{ paddingHorizontal: focused ? 8 : 28, paddingTop: 10 }, pad]}>
       {/* Behind the bar: the chat fades out smoothly toward the bottom edge, clear at the top. */}
       <BottomEdge style={{ top: -36 }} />
       {(people.length > 0 || appRows.length > 0 || offerAll) && (

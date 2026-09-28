@@ -14,7 +14,7 @@ import { usePushRouting } from '@/lib/push-routing'
 import { useSession } from '@/lib/session'
 import { WorkspaceProvider } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
-import { ConfirmHost, MenuHost, PortalHost, ToastHost } from '@/ui'
+import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@/ui'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
@@ -76,6 +76,7 @@ function Root() {
           {signedIn && <SheetsHost />}
           <PortalHost />
           <MenuHost />
+          <EmojiPickerHost />
           <ConfirmHost />
           <ToastHost />
         </View>

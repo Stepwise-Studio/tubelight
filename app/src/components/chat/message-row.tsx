@@ -17,7 +17,7 @@ import { useTeammate } from '@/lib/workspace'
 import { fonts, motion, useTheme } from '@/theme'
 import {
   Collapse, Icon, ListRow, Markdown, Notice, Press, Sheet, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
-  showMenu, useFlip,
+  showEmojiPicker, showMenu, useFlip, warmEmojis,
 } from '@/ui'
 
 import { ConnectCard, QuestionCard } from './prompt-cards'
@@ -120,7 +120,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   const m = item.m
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
-    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
+    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={FOLLOWUP_TONE[String(m.meta.followup)]} />
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':
@@ -273,13 +273,15 @@ function TeammateBlock({ teammate, first, paused, working, bleed, children }: {
   )
 }
 
-const EMOJI = ['👍', '❤️', '😂', '🔥', '🙏', '👀'] as const
+const EMOJI = ['👍', '❤️', '😂', '🔥', '🙏'] as const  // the sixth slot opens every emoji
 
 function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void, onReact?: (m: ChatMessage, emoji: string) => void) {
+  if (onReact) warmEmojis()
   showMenu({
     title: fullTime(m.created_at),
     reactions: onReact && !m.local
-      ? { emojis: EMOJI, selected: m.meta.reactions?.find((r) => r.by === 'user')?.emoji, onPick: (e) => onReact(m, e) }
+      ? { emojis: EMOJI, selected: m.meta.reactions?.find((r) => r.by === 'user')?.emoji, onPick: (e) => onReact(m, e),
+          onMore: () => showEmojiPicker((e) => onReact(m, e), 320) }  // after the menu's close animation
       : undefined,
     items: [
       ...(onReply ? [{ label: 'Reply', icon: ArrowTurnBackwardIcon, onPress: () => onReply(m) }] : []),
@@ -555,15 +557,24 @@ function HandoffMessage({ m, first, last, paused }: { m: ChatMessage; first: boo
  * A centred capsule for things that happen in the chat (like WhatsApp's "X changed the group name"): what happened in
  * medium weight, then the detail after the colon ("Calendy set a follow-up for 6 PM: review the copy").
  */
-function SystemRow({ text }: { text: string }) {
+type Tone = 'neutral' | 'tube' | 'warning' | 'success' | 'danger'
+/** A follow-up capsule's colour by stage: set (accent), firing now (amber), done (green), cancelled or dropped (red). */
+const FOLLOWUP_TONE: Record<string, Tone> = {
+  created: 'tube', set: 'tube', noted: 'tube', fired: 'warning', time: 'warning', met: 'warning', deadline: 'warning',
+  done: 'success', cancelled: 'danger', dropped: 'danger',
+}
+
+function SystemRow({ text, tone = 'neutral' }: { text: string; tone?: Tone }) {
   const { c } = useTheme()
+  const bg = tone === 'neutral' ? c.panel2 : c[`${tone}Soft`]
+  const ink = tone === 'neutral' ? c.ink2 : c[tone]
   const cut = text.indexOf(': ')
   const [head, rest] = cut > 0 ? [text.slice(0, cut), text.slice(cut + 2)] : [text, '']
   return (
     <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 32 }} accessible accessibilityLabel={text}>
-      <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: c.panel2 }}>
+      <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: bg }}>
         <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>
-          <Text variant="footnote" color="ink2" style={{ fontFamily: fonts.medium }}>{head}</Text>
+          <Text variant="footnote" style={{ fontFamily: fonts.medium, color: ink }}>{head}</Text>
           {rest ? `: ${rest}` : ''}
         </Text>
       </Squircle>

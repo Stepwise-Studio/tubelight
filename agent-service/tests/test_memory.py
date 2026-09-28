@@ -297,4 +297,7 @@ async def test_user_reactions_toggle_and_stay_one_per_person(api, env):
     assert (await api.post(f"/messages/{mid}/react", json={"emoji": "👍"})).json()["reactions"] == [{"by": "user", "emoji": "👍"}]
     assert (await api.post(f"/messages/{mid}/react", json={"emoji": "❤️"})).json()["reactions"] == [{"by": "user", "emoji": "❤️"}]
     assert (await api.post(f"/messages/{mid}/react", json={"emoji": "❤️"})).json()["reactions"] == []
-    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "🍕"})).status_code == 400
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "🍕"})).json()["reactions"] == [{"by": "user", "emoji": "🍕"}]
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "👩‍💻"})).status_code == 200  # a ZWJ sequence
+    for bad in ("lol", "a", "", "👍👍👍👍👍👍👍👍👍"):
+        assert (await api.post(f"/messages/{mid}/react", json={"emoji": bad})).status_code == 400

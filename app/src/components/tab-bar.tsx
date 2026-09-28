@@ -5,7 +5,7 @@ import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
-import { Activity01Icon, BubbleChatIcon, CheckListIcon, UserCircleIcon } from '@hugeicons/core-free-icons'
+import { InboxIcon, Stamp01Icon, UserCircleIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons'
 
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
@@ -22,7 +22,7 @@ export function useTabBarInset() {
 }
 
 const icons: Record<string, IconSvgElement> = {
-  index: BubbleChatIcon, approvals: CheckListIcon, activity: Activity01Icon, profile: UserCircleIcon,
+  index: InboxIcon, approvals: Stamp01Icon, activity: WorkHistoryIcon, profile: UserCircleIcon,
 }
 
 /** Floating capsule (Telegram-style): blurred panel, a pill that slides to the active tab, Approvals badge. */
@@ -79,7 +79,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   style={{ width: 78, alignItems: 'center', justifyContent: 'center', gap: 2 }}
                 >
                   <View>
-                    <Icon icon={icons[route.name] ?? BubbleChatIcon} size={22} color={focused ? 'tube' : 'ink2'} strokeWidth={focused ? 2 : 1.5} />
+                    <Icon icon={icons[route.name] ?? InboxIcon} size={22} color={focused ? 'tube' : 'ink2'} strokeWidth={focused ? 2 : 1.5} />
                     <View style={{ position: 'absolute', top: -5, left: 14 }}><Badge count={count} /></View>
                   </View>
                   <Text variant="footnote" color={focused ? 'tube' : 'ink2'} style={{ fontSize: 11, lineHeight: 13 }} maxFontSizeMultiplier={1.1}>{label}</Text>

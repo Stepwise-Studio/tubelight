@@ -6,6 +6,7 @@ import Animated, {
   runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Add01Icon } from '@hugeicons/core-free-icons'
 
 import { motion, radius, useTheme } from '@/theme'
 
@@ -119,7 +120,7 @@ export interface MenuItem {
   onPress: () => void
 }
 /** An emoji bar above the actions (reacting to a message, as in WhatsApp). */
-export interface MenuReactions { emojis: readonly string[]; selected?: string; onPick: (emoji: string) => void }
+export interface MenuReactions { emojis: readonly string[]; selected?: string; onPick: (emoji: string) => void; onMore?: () => void }
 interface MenuState { title?: string; message?: string; items: MenuItem[]; reactions?: MenuReactions; open: boolean }
 
 let menu: MenuState = { items: [], open: false }
@@ -157,6 +158,18 @@ export function MenuHost() {
               </Press>
             )
           })}
+          {m.reactions.onMore && (
+            <Press
+              radius={24}
+              haptic="tap"
+              onPress={() => { close(); m.reactions?.onMore?.() }}
+              accessibilityRole="button"
+              accessibilityLabel="More reactions"
+              style={{ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}
+            >
+              <Icon icon={Add01Icon} size={22} color="ink2" />
+            </Press>
+          )}
         </View>
       )}
       {(m.title || m.message) && (

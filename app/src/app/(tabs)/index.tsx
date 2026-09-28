@@ -109,7 +109,7 @@ export default function Chats() {
           progress={progress}
           accessibilityLabel="Show chats or your crew"
           options={[
-            { value: 'inbox', label: 'Inbox', count: ws.threads.filter(isUnread).length || undefined },
+            { value: 'inbox', label: 'Chats', count: ws.threads.filter(isUnread).length || undefined },
             { value: 'crew', label: 'Crew', count: ws.teammates.length || undefined },
           ]}
         />

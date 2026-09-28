@@ -266,7 +266,7 @@ export default function Thread() {
         </View>
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         <Composer
-          placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team, @ to mention' : 'Message the project'}
+          placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team' : 'Message the project'}
           members={isDm ? [] : people}
           live={live}
           onSend={send}

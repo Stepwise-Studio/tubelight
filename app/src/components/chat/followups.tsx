@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { whenLabel } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
-import { Badge, Icon, IconButton, Sheet, Text, haptic, toast } from '@/ui'
+import { Badge, Icon, IconButton, Press, Sheet, Text, confirm, haptic, toast } from '@/ui'
 
 /** A pending follow-up (GET /threads/:id/followups): a time (`at`) or a condition (`until`). */
 export interface Followup {
@@ -35,6 +35,7 @@ export function useFollowups(threadId: string, stamp: unknown) {
   useEffect(() => { load() }, [load, stamp])
   const cancel = async (f: Followup) => {
     haptic.tap()
+    if (!await confirm({ title: 'Cancel this follow-up?', body: f.what, confirmLabel: 'Cancel follow-up', cancelLabel: 'Keep it', destructive: true })) return
     setList((l) => l.filter((x) => x.id !== f.id))
     try {
       await api(`/followups/${f.id}`, { method: 'DELETE' })
@@ -69,14 +70,13 @@ export function FollowupsButton({ count, onPress }: { count: number; onPress: ()
 export function FollowupsSheet({ open, onClose, list, done, people, onCancel }: {
   open: boolean; onClose: () => void; list: Followup[]; done: Followup[]; people: Teammate[]; onCancel: (f: Followup) => void
 }) {
+  const finished = done.filter((f) => f.status === 'fired' || f.status === 'done')
+  const dropped = done.filter((f) => f.status === 'cancelled' || f.status === 'dropped')
   const ownerName = (f: Followup) => (f.owner === 'group' ? 'The group' : people.find((p) => p.id === f.owner)?.name ?? 'A teammate')
   return (
     <Sheet open={open} onClose={onClose} title="Follow-ups">
       <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}>
-      <Text variant="caption" color="ink3" style={{ marginBottom: 12 }}>
-        What this chat will come back to: at a time, or once something is done. Teammates set these when you ask them
-        to circle back, and pick up ones agreed in the chat on their own.
-      </Text>
+      <Text variant="caption" color="ink3" style={{ marginBottom: 12 }}>What this chat comes back to, and when. Tap one to read it all.</Text>
       {list.length > 0 && done.length > 0 && <Text variant="footnote" color="ink3" style={{ paddingBottom: 4 }}>Pending</Text>}
       {list.length === 0 && done.length > 0 ? (
         <Text variant="footnote" color="ink3" style={{ paddingVertical: 12 }}>Nothing pending right now.</Text>
@@ -91,12 +91,12 @@ export function FollowupsSheet({ open, onClose, list, done, people, onCancel }: 
       ) : (
         list.map((f) => <Row key={f.id} f={f} owner={ownerName(f)} onCancel={() => onCancel(f)} />)
       )}
-      {done.length > 0 && (
-        <>
-          <Text variant="footnote" color="ink3" style={{ paddingTop: 16, paddingBottom: 4 }}>Done</Text>
-          {done.map((f) => <DoneRow key={f.id} f={f} owner={ownerName(f)} />)}
-        </>
-      )}
+      {[['Done', finished], ['Cancelled', dropped]].map(([label, rows]) => (rows as Followup[]).length > 0 && (
+        <View key={label as string}>
+          <Text variant="footnote" color="ink3" style={{ paddingTop: 16, paddingBottom: 4 }}>{label as string}</Text>
+          {(rows as Followup[]).map((f) => <DoneRow key={f.id} f={f} owner={ownerName(f)} />)}
+        </View>
+      ))}
       </ScrollView>
     </Sheet>
   )
@@ -104,6 +104,7 @@ export function FollowupsSheet({ open, onClose, list, done, people, onCancel }: 
 
 function Row({ f, owner, onCancel }: { f: Followup; owner: string; onCancel: () => void }) {
   const { c } = useTheme()
+  const [full, setFull] = useState(false)
   const when = f.at
     ? whenLabel(f.at)
     : [`When ${f.until}`, f.check_by && `nudge by ${whenLabel(f.check_by)}`, f.poll_hours && `checks every ${f.poll_hours < 1 ? '30 min' : `${f.poll_hours} h`}`]
@@ -113,43 +114,40 @@ function Row({ f, owner, onCancel }: { f: Followup; owner: string; onCancel: () 
       exiting={FadeOut.duration(motion.duration.quick)}
       layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line }}
-      accessible
-      accessibilityLabel={`${f.what}. ${when}. ${owner}.`}
     >
       <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
         <Icon icon={f.at ? Clock01Icon : HourglassIcon} size={17} color="ink2" />
       </View>
-      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text variant="label" numberOfLines={2}>{f.what}</Text>
-        <Text variant="footnote" color="ink3" numberOfLines={2}>{when} · {owner}</Text>
-      </View>
+      <Press radius={10} static onPress={() => setFull((v) => !v)} accessibilityHint={full ? 'Shows less' : 'Shows it all'} outerStyle={{ flex: 1, minWidth: 0 }} style={{ gap: 2 }}>
+        <Text variant="label" numberOfLines={full ? undefined : 2}>{f.what}</Text>
+        <Text variant="footnote" color="ink3" numberOfLines={full ? undefined : 2}>{when} · {owner}</Text>
+      </Press>
       <IconButton icon={Cancel01Icon} round size={36} iconSize={16} color={c.ink3} accessibilityLabel={`Cancel: ${f.what}`} onPress={onCancel} />
     </Animated.View>
   )
 }
 
 const ENDED: Record<NonNullable<Followup['status']>, string> = {
-  fired: 'Picked up', done: 'Done', cancelled: 'Cancelled', dropped: 'Dropped, no longer needed',
+  fired: 'Picked up', done: 'Done', cancelled: 'Cancelled by you', dropped: 'Dropped, no longer needed',
 }
 
 /** A finished follow-up: how it ended and when, so nobody scrolls the chat to find out. */
 function DoneRow({ f, owner }: { f: Followup; owner: string }) {
   const { c } = useTheme()
+  const [full, setFull] = useState(false)
   const ok = f.status === 'fired' || f.status === 'done'
   const ended = [f.status ? ENDED[f.status] : 'Closed', f.closed && whenLabel(f.closed), owner].filter(Boolean).join(' · ')
   return (
     <View
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line }}
-      accessible
-      accessibilityLabel={`${f.what}. ${ended}.`}
     >
       <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
         <Icon icon={ok ? CheckmarkCircle02Icon : MinusSignCircleIcon} size={17} color={ok ? 'success' : 'ink3'} />
       </View>
-      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text variant="label" color="ink2" numberOfLines={2}>{f.what}</Text>
-        <Text variant="footnote" color="ink3" numberOfLines={1}>{ended}</Text>
-      </View>
+      <Press radius={10} static onPress={() => setFull((v) => !v)} accessibilityHint={full ? 'Shows less' : 'Shows it all'} outerStyle={{ flex: 1, minWidth: 0 }} style={{ gap: 2 }}>
+        <Text variant="label" color="ink2" numberOfLines={full ? undefined : 2}>{f.what}</Text>
+        <Text variant="footnote" color="ink3" numberOfLines={full ? undefined : 1}>{ended}</Text>
+      </Press>
     </View>
   )
 }
