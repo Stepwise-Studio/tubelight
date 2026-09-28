@@ -20,6 +20,7 @@ from . import db, memory
 
 log = logging.getLogger(__name__)
 NS = ("followups",)
+DONE = ("followups_done",)  # history: fired, done, cancelled, dropped (shown in the chat's follow-ups sheet)
 LEASE = timedelta(minutes=5)
 MIN_POLL_H, MAX_WAIT = 0.5, timedelta(days=14)  # sensors check at most every 30 min and give up after two weeks
 _polls: dict[str, str] = {}  # check run id -> follow-up id
@@ -49,6 +50,7 @@ async def note(f: dict[str, Any], event: str, by: str = "") -> None:
         when = f"for when {f['until']}"
     text = {
         "created": f"{by} set a follow-up {when}: {f['what']}",
+        "set": f"Follow-up set {when}: {f['what']}",
         "noted": f"Follow-up noted {when}: {f['what']}",
         "cancelled": f"{by} cancelled a follow-up: {f['what']}",
         "dropped": f"Follow-up dropped: {f['what']}",
@@ -62,7 +64,7 @@ async def note(f: dict[str, Any], event: str, by: str = "") -> None:
 
 async def add(owner_id: str, thread_id: str, owner: str, what: str, *, at: datetime | None = None,
               until: str | None = None, check_by: datetime | None = None, poll_hours: float | None = None,
-              set_by: str = "", set_at: str = "", by: str = "") -> str:
+              set_by: str = "", set_at: str = "", by: str = "", note_as: str | None = None) -> str:
     """owner: a teammate id, or "group". Needs `at` or `until`. `by`: who set it, for the chat's capsule
     ("Calendy set a follow-up..."); empty when the keeper picked it up from the chat ("Follow-up noted...")."""
     if not (at or until):
@@ -76,7 +78,7 @@ async def add(owner_id: str, thread_id: str, owner: str, what: str, *, at: datet
         "created": _iso(datetime.now(UTC)), "set_by": set_by, "set_at": set_at,
     }
     await memory.store.aput(NS, key, value, index=False)
-    await note(value, "created" if by else "noted", by)
+    await note(value, note_as or ("created" if by else "noted"), by)
     return key
 
 
@@ -88,12 +90,26 @@ async def pending(owner_id: str, thread_id: str | None = None) -> list[dict[str,
     return sorted(rows, key=lambda f: f.get("at") or f.get("check_by") or "9999")
 
 
+async def _close(key: str, f: dict[str, Any], status: str) -> None:
+    """Move a follow-up to the history with how it ended."""
+    await memory.store.adelete(NS, key)
+    await memory.store.aput(DONE, key, {**f, "status": status, "closed": _iso(datetime.now(UTC))}, index=False)
+
+
+async def history(owner_id: str, thread_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """A chat's finished follow-ups, latest first."""
+    # ponytail: history is never pruned; trim by age if a chat ever piles up hundreds.
+    items = await memory.store.asearch(DONE, filter={"owner_id": owner_id, "thread_id": thread_id}, limit=500)
+    rows = sorted(({"id": i.key, **i.value} for i in items), key=lambda f: f.get("closed") or "", reverse=True)
+    return rows[:limit]
+
+
 async def cancel(key: str, owner_id: str, event: str = "cancelled", by: str = "You") -> bool:
     """event: cancelled (by someone), dropped (no longer needed) or done (already handled)."""
     item = await memory.store.aget(NS, key)
     if not item or item.value.get("owner_id") != owner_id:
         return False
-    await memory.store.adelete(NS, key)
+    await _close(key, item.value, event)
     await note(item.value, event, by)
     return True
 
@@ -143,7 +159,7 @@ async def fire(key: str, reason: str, evidence: str = "") -> bool:
     await runs.start(f["owner_id"], f["thread_id"], f"{lead}{lead_by}{late} Pick it up and message them here.",
                      trigger="schedule", teammate_id=teammate, sender="follow_up", event_type="follow_up",
                      lead=None if f["owner"] == "group" else f["owner"])
-    await memory.store.adelete(NS, key)
+    await _close(key, f, "fired")
     return True
 
 
@@ -188,7 +204,7 @@ async def after_run(run_id: str) -> None:
     if key and await db.select("messages", {"run_id": f"eq.{run_id}", "sender_type": "eq.teammate", "select": "id"}):
         item = await memory.store.aget(NS, key)
         if item:
-            await memory.store.adelete(NS, key)
+            await _close(key, item.value, "done")
             await note(item.value, "done")
 
 

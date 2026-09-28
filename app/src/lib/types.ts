@@ -74,6 +74,8 @@ export interface Message {
     event_id?: string
     event_type?: string
     attachments?: Attachment[]
+    /** Emoji reactions, one per person: by = a teammate id, or "user". */
+    reactions?: { by: string; emoji: string }[]
     /** Apps (toolkit slugs) the user @mentioned: the answering teammate gets them for that request. */
     apps?: string[]
     /** question cards */

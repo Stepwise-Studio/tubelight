@@ -18,7 +18,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import config, connectors, db, events, files, followups, live, llm, memory, runs, sandbox
+from . import config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -157,10 +157,27 @@ async def _mentioned_apps(owner_id: str, asked: list[str]) -> list[str]:
 
 @app.get("/threads/{thread_id}/followups")
 async def thread_followups(thread_id: str, user: User = Depends(current_user)):
-    """Pending follow-ups of one chat, soonest first."""
+    """A chat's follow-ups: pending (soonest first) and finished (latest first, with how they ended)."""
     await owned("threads", thread_id, user, "conversation")
-    keep = ("id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at", "created")
-    return [{k: f.get(k) for k in keep} for f in await followups.pending(user["id"], thread_id)]
+    keep = ("id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at", "created", "status", "closed")
+    return {"pending": [{k: f.get(k) for k in keep} for f in await followups.pending(user["id"], thread_id)],
+            "done": [{k: f.get(k) for k in keep} for f in await followups.history(user["id"], thread_id)]}
+
+
+class ReactIn(BaseModel):
+    emoji: str
+
+
+@app.post("/messages/{message_id}/react")
+async def react(message_id: str, body: ReactIn, user: User = Depends(current_user)):
+    """The user's reaction on a message; the same emoji again removes it."""
+    m = await db.one("messages", {"id": f"eq.{message_id}", "owner_id": f"eq.{user['id']}", "select": "id"})
+    if not m:
+        raise HTTPException(404, "That message is gone.")
+    got = await reactions.react(message_id, "user", body.emoji, toggle=True)
+    if got is None:
+        raise HTTPException(400, "Pick one of the reactions.")
+    return {"reactions": got}
 
 
 @app.delete("/followups/{followup_id}")

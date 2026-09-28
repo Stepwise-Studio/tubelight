@@ -16,7 +16,8 @@ import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
 import { fonts, motion, useTheme } from '@/theme'
 import {
-  Collapse, Icon, Markdown, Notice, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, useFlip,
+  Collapse, Icon, ListRow, Markdown, Notice, Press, Sheet, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
+  showMenu, useFlip,
 } from '@/ui'
 
 import { ConnectCard, QuestionCard } from './prompt-cards'
@@ -50,6 +51,7 @@ export interface ChatActions {
   onDiscardMessage: (m: ChatMessage) => void
   onRetryRun: () => void
   onDecided: () => void
+  onReact: (m: ChatMessage, emoji: string) => void
   handles: Set<string>
   /** Group chat (a project): name each teammate's replies. A DM needs no sender line. */
   group: boolean
@@ -271,9 +273,14 @@ function TeammateBlock({ teammate, first, paused, working, bleed, children }: {
   )
 }
 
-function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void) {
+const EMOJI = ['👍', '❤️', '😂', '🔥', '🙏', '👀'] as const
+
+function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void, onReact?: (m: ChatMessage, emoji: string) => void) {
   showMenu({
     title: fullTime(m.created_at),
+    reactions: onReact && !m.local
+      ? { emojis: EMOJI, selected: m.meta.reactions?.find((r) => r.by === 'user')?.emoji, onPick: (e) => onReact(m, e) }
+      : undefined,
     items: [
       ...(onReply ? [{ label: 'Reply', icon: ArrowTurnBackwardIcon, onPress: () => onReply(m) }] : []),
       { label: 'Copy text', icon: Copy01Icon, onPress: async () => { await Clipboard.setStringAsync(m.text); copied() } },
@@ -281,10 +288,59 @@ function messageMenu(m: ChatMessage, onReply?: (m: ChatMessage) => void) {
   })
 }
 
+/**
+ * Reactions under a bubble, WhatsApp-style: a small pill overlapping its bottom edge with each emoji used and how
+ * many. Tap it to see who reacted (and take yours back).
+ */
+function Reactions({ m, side }: { m: ChatMessage; side: 'left' | 'right' }) {
+  const { c, scheme } = useTheme()
+  const { onReact } = useActions()
+  const [open, setOpen] = useState(false)
+  const list = m.meta.reactions ?? []
+  if (!list.length) return null
+  const kinds = [...new Set(list.map((r) => r.emoji))]
+  return (
+    <>
+      <Animated.View entering={FadeIn.duration(motion.duration.fast)} style={[{ marginTop: -8, zIndex: 1, alignSelf: side === 'left' ? 'flex-start' : 'flex-end', marginHorizontal: 10 }, elevation(scheme, 1)]}>
+        <Press
+          radius={12}
+          onPress={() => { haptic.tap(); setOpen(true) }}
+          accessibilityLabel={`Reactions: ${list.map((r) => r.emoji).join(' ')}`}
+          accessibilityHint="Shows who reacted"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 24, paddingHorizontal: 7, borderRadius: 12, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}
+        >
+          {kinds.slice(0, 3).map((e) => <Text key={e} style={{ fontSize: 13, lineHeight: 17 }}>{e}</Text>)}
+          {list.length > 1 && <Text variant="footnote" color="ink3" tabular style={{ marginLeft: 1 }}>{list.length}</Text>}
+        </Press>
+      </Animated.View>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Reactions">
+        <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
+          {list.map((r) => <ReactorRow key={r.by} by={r.by} emoji={r.emoji} onRemove={r.by === 'user' ? () => { setOpen(false); onReact(m, r.emoji) } : undefined} />)}
+        </View>
+      </Sheet>
+    </>
+  )
+}
+
+function ReactorRow({ by, emoji, onRemove }: { by: string; emoji: string; onRemove?: () => void }) {
+  const { c } = useTheme()
+  const t = useTeammate(by === 'user' ? null : by)
+  return (
+    <ListRow
+      title={by === 'user' ? 'You' : t?.name ?? 'Former teammate'}
+      subtitle={onRemove ? 'Tap to remove' : t?.role}
+      leading={t ? <TeammateAvatar teammate={t} size={32} interactive={false} /> : <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c.panel2 }} />}
+      accessory={<Text style={{ fontSize: 22, lineHeight: 28 }}>{emoji}</Text>}
+      onPress={onRemove}
+      style={{ minHeight: 52 }}
+    />
+  )
+}
+
 function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, highlighted }: {
   m: ChatMessage; teammate?: Teammate; first: boolean; last: boolean; paused: boolean; working?: boolean; replyTo?: ChatMessage | null; highlighted?: boolean
 }) {
-  const { onReply } = useActions()
+  const { onReply, onReact } = useActions()
   const calls = m.meta.tool_calls ?? []
   const wide = hasWideBlock(m.text)
   const Pad = wide ? Inset : Fragment
@@ -293,10 +349,11 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
         {/* A follow-up's capsule above already says why they're speaking up. */}
         {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} /></Pad>}
-        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply) }} delayLongPress={350} accessibilityHint="Long press to reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
+        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply, onReact) }} delayLongPress={350} accessibilityHint="Long press to react, reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
           <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
             tail={m.meta.attachments?.length ? <Attachments items={m.meta.attachments} /> : undefined} />
         </Pressable>
+        <Pad><Reactions m={m} side="left" /></Pad>
         {calls.length > 0 && <Pad><ToolCalls calls={calls} /></Pad>}
       </TeammateBlock>
     </SwipeToReply>
@@ -306,12 +363,12 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
 function UserMessage({ m, first, last, replyTo, highlighted }: {
   m: ChatMessage; first: boolean; last: boolean; replyTo?: ChatMessage | null; highlighted?: boolean
 }) {
-  const { onReply, onRetryMessage, onDiscardMessage, handles } = useActions()
+  const { onReply, onRetryMessage, onDiscardMessage, onReact, handles } = useActions()
   return (
     <SwipeToReply onReply={() => onReply(m)} enabled={!m.local}>
       <View style={{ alignItems: 'flex-end', marginTop: first ? 14 : 2 }}>
         <Pressable
-          onLongPress={() => { haptic.light(); messageMenu(m, m.local ? undefined : onReply) }}
+          onLongPress={() => { haptic.light(); messageMenu(m, m.local ? undefined : onReply, onReact) }}
           delayLongPress={350}
           style={{ maxWidth: '82%' }}
           accessibilityLabel={`You: ${m.text}${m.local === 'failed' ? '. Not sent' : ''}`}
@@ -322,6 +379,7 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
             {!!m.text && <Text selectable>{renderMentions(m.text, m.meta.apps?.length ? new Set([...handles, ...m.meta.apps.map(appToken)]) : handles)}</Text>}
           </Bubble>
         </Pressable>
+        <Reactions m={m} side="right" />
         {m.local === 'failed' && (
           <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
             <Icon icon={Alert02Icon} size={14} color="danger" />

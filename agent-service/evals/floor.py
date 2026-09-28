@@ -41,6 +41,14 @@ def everyone_then(last):
     return lambda got: set(got) == {m["id"] for m in MEMBERS} and got[-1] == last
 
 
+def director_sets(p):
+    """For later with nobody named: no speakers, the director sets it (a time or a condition) and the group reacts."""
+    return not p.speakers and p.later and bool(p.what) and bool(p.at or p.until) and len(p.reacts) >= 2
+
+
+director_sets.wants_plan = True
+
+
 def nobody_or_one(got):
     return len(got) <= 1
 
@@ -64,17 +72,18 @@ CASES = [
     ("open question to the group", [], "what should we name the new feature? everyone pitch one", several),
     ("delegate across roles", [], "ask @tess to test it and @dev to fix what she finds", lambda g: set(g) >= {"tess", "dev"}),
     ("@all", [], "@all quick standup: what are you on today?", lambda g: len(g) == 4),
-    ("group task later, at a time", [], "hey everyone, let's roast Sol again at 6 pm", lambda g: len(g) == 1),
+    ("group task later, at a time", [], "hey everyone, let's roast Sol again at 6 pm", director_sets),
     ("task once something happens", [], "@dev deploy the landing page once Sol finishes the design tweak", only("dev")),
     ("a group follow-up fires", ROAST, "FOLLOWUP:[Follow-up set Mon 12:40 PM: announce the final tabs vs spaces verdict] "
      "It's time now. @sol set it and leads; the members it concerns follow. Pick it up and message them here.",
      lambda g: bool(g) and g[0] == "sol" and len(g) >= 3),
     ("group task a minute away", [], "Everyone, circle back at 1:17 pm and each name the best snack for a late-night debug session",
-     lambda g: len(g) == 1),
+     director_sets),
     ("a minute away, after rounds answered at once",
      [("user", "Everyone, circle back at 1:05 pm and each name the best snack"), ("dev", "Cold pizza."),
       ("sol", "Dark chocolate."), ("tess", "Cold pizza again.")],
-     "Everyone, circle back at 1:17 pm and each name your favourite keyboard shortcut", lambda g: len(g) == 1),
+     "Everyone, circle back at 1:17 pm and each name your favourite keyboard shortcut", director_sets),
+    ("nobody named, a condition", [], "let's ship the landing page once the design tweak is done", director_sets),
     ("a task follow-up fires", [], "FOLLOWUP:[Follow-up set Mon 10:00 AM: send Akhil the benchmark numbers] It's time "
      "now. @dev set it and leads; the members it concerns follow. Pick it up and message them here.", first("dev")),
 ]
@@ -91,7 +100,7 @@ async def run(model: str) -> int:
         t = time.monotonic()
         last = HumanMessage(latest.removeprefix("FOLLOWUP:"), name="follow_up") if latest.startswith("FOLLOWUP:") else HumanMessage(latest)
         p = await floor.plan([*history(lines), last], MEMBERS, "Akhil", latest, now=NOW)
-        ok = check(p.speakers)
+        ok = check(p) if getattr(check, "wants_plan", False) else check(p.speakers)
         passed += ok
         await asyncio.sleep(4)  # stay under the free tier's tokens per minute
         print(f"{'PASS' if ok else 'FAIL'} {time.monotonic() - t:4.1f}s  {name}: {p.speakers}  | {p.read[:110]}")

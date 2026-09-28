@@ -75,7 +75,7 @@ async def test_time_follow_up_fires_once_with_a_visible_note(api, env):
     await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "check the deploy in 3 hours"})
     await settle()
     assert "Follow-up set for" in fake.calls[1][-1].content
-    [f] = (await api.get(f"/threads/dm:{dev['id']}/followups")).json()
+    [f] = (await api.get(f"/threads/dm:{dev['id']}/followups")).json()["pending"]
     assert f["what"] == "check whether the deploy went green" and f["owner"] == dev["id"] and f["at"]
 
     assert await followups.tick(datetime.now(UTC) + timedelta(hours=1)) == 0  # not yet
@@ -89,7 +89,8 @@ async def test_time_follow_up_fires_once_with_a_visible_note(api, env):
     assert msg["text"] == "Deploy is green." and msg["proactive"]
     assert "It's time now" in fake.calls[-1][-1].content
     assert await followups.tick(datetime.now(UTC) + timedelta(days=1)) == 0  # fired once
-    assert (await api.get(f"/threads/dm:{dev['id']}/followups")).json() == []
+    got = (await api.get(f"/threads/dm:{dev['id']}/followups")).json()
+    assert got["pending"] == [] and [(d["what"], d["status"]) for d in got["done"]] == [("check whether the deploy went green", "fired")]
 
 
 async def test_group_follow_up_goes_through_the_floor(api, env):
@@ -231,10 +232,11 @@ async def test_follow_ups_api_lists_per_chat_and_cancels_only_your_own(api, env)
     dev = teammate(fdb, "dev", "developer")
     key = await followups.add(OWNER, f"dm:{dev['id']}", dev["id"], "x", at=datetime.now(UTC) + timedelta(hours=1))
     other = await followups.add("someone-else", f"dm:{dev['id']}", dev["id"], "y", at=datetime.now(UTC) + timedelta(hours=1))
-    assert [f["id"] for f in (await api.get(f"/threads/dm:{dev['id']}/followups")).json()] == [key]
+    assert [f["id"] for f in (await api.get(f"/threads/dm:{dev['id']}/followups")).json()["pending"]] == [key]
     assert (await api.delete(f"/followups/{other}")).status_code == 404
     assert (await api.delete(f"/followups/{key}")).status_code == 200
-    assert (await api.get(f"/threads/dm:{dev['id']}/followups")).json() == []
+    got = (await api.get(f"/threads/dm:{dev['id']}/followups")).json()
+    assert got["pending"] == [] and got["done"][0]["status"] == "cancelled"
     assert fdb.rows("messages", kind="event")[-1]["text"] == "You cancelled a follow-up: x"
 
 
@@ -265,3 +267,34 @@ async def test_met_condition_whose_owner_already_answered_here_is_closed_not_fir
     changes = await brief.refresh(OWNER, thread, "Akhil", "UTC")
     assert changes["met"] == 0 and changes["cancel"] == 1
     assert [m["meta"]["followup"] for m in fdb.rows("messages", kind="event")] == ["noted", "done"]  # no second wake-up
+
+
+async def test_director_sets_a_group_follow_up_when_nobody_was_named_and_the_group_reacts(api, env):
+    import json
+    fdb, fake = env
+    dev, sol, ivy = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "social"), teammate(fdb, "ivy", "email")
+    p = project(fdb, [dev, sol, ivy])
+    at = (datetime.now(UTC) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")  # UTC: no user time zone in tests
+    fake.script = [ai(json.dumps({"read": "A roast of Ivy, later.", "when": at, "what": "roast Ivy", "speakers": [],
+                                  "react": [{"handle": "dev", "emoji": "👍"}, {"handle": "sol", "emoji": "👍"},
+                                            {"handle": "ivy", "emoji": "😂"}, {"handle": "sol", "emoji": "🔥"}]}))]
+    r = await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "lets roast ivy in 2 hours"})
+    await settle()
+    assert not fdb.rows("messages", sender_type="teammate")  # nobody writes; the group reacts
+    [f] = await followups.pending(OWNER, f"proj:{p['id']}")
+    assert f["owner"] == "group" and f["what"] == "roast Ivy" and f["set_by"] == "floor"
+    assert fdb.rows("messages", kind="event")[-1]["text"].startswith("Follow-up set for ")
+    [mine] = fdb.rows("messages", id=r.json()["message"]["id"])
+    assert mine["meta"]["reactions"] == [{"by": dev["id"], "emoji": "👍"}, {"by": sol["id"], "emoji": "👍"},
+                                         {"by": ivy["id"], "emoji": "😂"}]  # one per member
+
+
+async def test_user_reactions_toggle_and_stay_one_per_person(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    said(fdb, f"dm:{dev['id']}", datetime.now(UTC).isoformat(), "hello", dev["id"])
+    mid = fdb.rows("messages")[0]["id"]
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "👍"})).json()["reactions"] == [{"by": "user", "emoji": "👍"}]
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "❤️"})).json()["reactions"] == [{"by": "user", "emoji": "❤️"}]
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "❤️"})).json()["reactions"] == []
+    assert (await api.post(f"/messages/{mid}/react", json={"emoji": "🍕"})).status_code == 400

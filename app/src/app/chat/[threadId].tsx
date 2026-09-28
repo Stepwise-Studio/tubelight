@@ -131,6 +131,7 @@ export default function Thread() {
     onDiscardMessage: (m) => latest.current.t.discard(m.id),
     onRetryRun: () => latest.current.retryRun(),
     onDecided: () => { latest.current.t.refreshApprovals(); latest.current.ws.refresh() },
+    onReact: (m, emoji) => latest.current.t.react(m, emoji),
     handles: new Set([...handleKey.split(','), ...(isDm ? [] : ['all', 'everyone'])]),
     group: !isDm,
   }
@@ -282,6 +283,7 @@ export default function Thread() {
         open={showFollowups}
         onClose={() => setShowFollowups(false)}
         list={fu.list}
+        done={fu.done}
         people={isDm ? (dmMate ? [dmMate] : []) : people}
         onCancel={fu.cancel}
       />

@@ -13,6 +13,7 @@ import { haptic } from './haptics'
 import { Icon, type IconSvgElement } from './icon'
 import { ListRow } from './list-row'
 import { Portal } from './portal'
+import { Press } from './press'
 import { elevation } from './surface'
 import { AnimatedSquircle } from './squircle'
 import { Text } from './text'
@@ -117,23 +118,47 @@ export interface MenuItem {
   destructive?: boolean
   onPress: () => void
 }
-interface MenuState { title?: string; message?: string; items: MenuItem[]; open: boolean }
+/** An emoji bar above the actions (reacting to a message, as in WhatsApp). */
+export interface MenuReactions { emojis: readonly string[]; selected?: string; onPick: (emoji: string) => void }
+interface MenuState { title?: string; message?: string; items: MenuItem[]; reactions?: MenuReactions; open: boolean }
 
 let menu: MenuState = { items: [], open: false }
 const menuListeners = new Set<() => void>()
 const setMenu = (m: MenuState) => { menu = m; menuListeners.forEach((l) => l()) }
 
 /** Action sheet: `showMenu({ title, items: [{ label, icon, onPress }] })`. Needs <MenuHost/>. */
-export function showMenu(opts: { title?: string; message?: string; items: MenuItem[] }) {
+export function showMenu(opts: { title?: string; message?: string; items: MenuItem[]; reactions?: MenuReactions }) {
   haptic.light()
   setMenu({ ...opts, open: true })
 }
 
 export function MenuHost() {
   const m = useSyncExternalStore((l) => { menuListeners.add(l); return () => { menuListeners.delete(l) } }, () => menu, () => menu)
+  const { c } = useTheme()
   const close = () => setMenu({ ...menu, open: false })
   return (
     <Sheet open={m.open} onClose={close} accessibilityLabel={m.title ?? 'Actions'}>
+      {m.reactions && (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12 }} accessibilityRole="toolbar">
+          {m.reactions.emojis.map((e) => {
+            const on = m.reactions?.selected === e
+            return (
+              <Press
+                key={e}
+                radius={24}
+                haptic="tap"
+                onPress={() => { close(); m.reactions?.onPick(e) }}
+                accessibilityRole="button"
+                accessibilityLabel={on ? `Remove ${e} reaction` : `React ${e}`}
+                accessibilityState={{ selected: on }}
+                style={{ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : c.panel2 }}
+              >
+                <Text style={{ fontSize: 24, lineHeight: 30 }}>{e}</Text>
+              </Press>
+            )
+          })}
+        </View>
+      )}
       {(m.title || m.message) && (
         <View style={{ paddingHorizontal: 20, paddingBottom: 8, gap: 2 }}>
           {m.title && <Text variant="label" color="ink2">{m.title}</Text>}

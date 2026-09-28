@@ -13,7 +13,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import config, connectors, db, floor, followups, llm, memory, push, tools as T
+from . import config, connectors, db, floor, followups, llm, memory, push, reactions, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -431,6 +431,16 @@ def make_router(ctx: RunCtx):
         if lead and any(m["id"] == lead for m in ctx.members):
             p.speakers = [lead, *(s for s in p.speakers if s != lead)]
         log.info("floor: %s -> %s", p.read, [ctx.member(i)["handle"] for i in p.speakers])
+        if p.later and not p.speakers:  # for later, nobody addressed: the director sets it for the group
+            now = local_now(ctx)
+            if p.until or (p.at and now < p.at < now + timedelta(days=60)):
+                await followups.add(ctx.owner_id, ctx.thread_id, "group", p.what, at=p.at, until=p.until,
+                                    set_by="floor", set_at=f"{now:%a %b %d, %I:%M %p}", note_as="set")
+            else:
+                log.warning("floor: unusable follow-up time %s", p.at)
+        said = ask.id[5:] if ask and not ask.name and str(ask.id or "").startswith("user:") else None
+        for tid, emoji in p.reacts if said else []:
+            await reactions.react(said, tid, emoji)
         return {"active": p.speakers[0] if p.speakers else None, "queue": p.speakers[1:],
                 "plan": {"read": p.read, "parts": p.parts}}
 

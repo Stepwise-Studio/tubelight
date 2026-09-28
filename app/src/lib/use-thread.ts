@@ -173,10 +173,23 @@ export function useThread(threadId: string, ownerId: string | undefined) {
 
   const discard = (id: string) => setMessages((prev) => prev.filter((p) => p.id !== id))
 
+  /** Your reaction on a message (the same emoji again removes it): shown at once, then confirmed by the server. */
+  const react = async (m: ChatMessage, emoji: string) => {
+    const mine = (m.meta.reactions ?? []).find((r) => r.by === 'user')
+    const rest = (m.meta.reactions ?? []).filter((r) => r.by !== 'user')
+    const next = mine?.emoji === emoji ? rest : [...rest, { by: 'user', emoji }]
+    setMessages((prev) => prev.map((p) => (p.id === m.id ? { ...p, meta: { ...p.meta, reactions: next } } : p)))
+    try {
+      await api(`/messages/${m.id}/react`, { method: 'POST', json: { emoji } })
+    } catch {
+      setMessages((prev) => prev.map((p) => (p.id === m.id ? { ...p, meta: { ...p.meta, reactions: m.meta.reactions } } : p)))
+    }
+  }
+
   const refreshApprovals = async () => {
     const { data } = await supabase.from('approvals').select('*').eq('thread_id', threadId)
     if (data) setApprovals(Object.fromEntries((data as Approval[]).map((x) => [x.id, x])))
   }
 
-  return { messages, loading, error, reload: load, hasMore, loadOlder, loadingOlder, approvals, refreshApprovals, statuses, ghosts, send, retry, rerun, discard }
+  return { messages, loading, error, reload: load, hasMore, loadOlder, loadingOlder, approvals, refreshApprovals, statuses, ghosts, send, retry, rerun, discard, react }
 }

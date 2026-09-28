@@ -19,6 +19,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from . import config, llm
+from .reactions import EMOJI
 
 log = logging.getLogger(__name__)
 HISTORY_CHARS = 6000  # recent chat the director reads verbatim (~1.5k tokens); older is in the brief
@@ -43,8 +44,9 @@ How to read the message:
   @dev to fix what she finds": Tess, then Dev).
 - when: when {user} wants the thing itself to happen. "now", unless the message names a time ("at 6 pm", "at
   1:27", "tomorrow morning": give it as YYYY-MM-DDTHH:MM, their local time) or a condition ("once the design is
-  done": "condition"). When it's for later, pick only one member to confirm it and set a follow-up: the one addressed
-  (tagged or named), or if the whole group was, the one best placed. Nobody does the thing itself yet.
+  done": "condition"). Nobody does the thing itself yet. If {user} addressed a specific member (tagged or named),
+  that member alone confirms it and sets the follow-up (the one speaker). Otherwise list no speakers: you set it
+  yourself; give `what` (the thing to do then, self-contained) and for a condition `until` (short and checkable).
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
 - A scheduled follow-up firing always appears as "Scheduled follow-up: ..."; a message from {user} is always a new
   request, even when it talks about circling back.
@@ -56,11 +58,17 @@ How to read the message:
 - If it's unclear who is meant, pick the member best placed to ask {user} one short clarifying question, and say so
   in their part.
 
+- react: members who acknowledge {user}'s message with an emoji reaction, like in a group chat. When you set a
+  follow-up yourself, everyone it concerns reacts 👍. When no reply is needed (ok, thanks), the member it was for
+  reacts (👍 or ❤️). Otherwise usually none. Only 👍 ❤️ 😂 🔥 🙏 👀.
+
 Write about {user} by name, never as he or she.
 
 Reply with JSON only:
 {{"read": "<one sentence: what is asked, who is addressed, who is talked about>",
  "when": "now, YYYY-MM-DDTHH:MM, or condition",
+ "what": "<for later with no speakers: what to do then>", "until": "<for a condition: what to wait for>",
+ "react": [{{"handle": "<handle>", "emoji": "👍"}}],
  "speakers": [{{"handle": "<handle>", "part": "<their part, in the second person, one short sentence>"}}]}}"""
 
 
@@ -69,6 +77,12 @@ class Plan:
     read: str = ""
     speakers: list[str] = field(default_factory=list)  # teammate ids, in order
     parts: dict[str, str] = field(default_factory=dict)  # teammate id -> their part
+    # For later, with no one addressed: the director sets the follow-up itself (for the group).
+    later: bool = False
+    what: str = ""
+    at: datetime | None = None
+    until: str | None = None
+    reacts: list[tuple[str, str]] = field(default_factory=list)  # (teammate id, emoji) on the user's message
 
 
 def transcript(msgs: list[BaseMessage], members: list[dict], user: str) -> str:
@@ -126,8 +140,22 @@ def parse(text: str, members: list[dict], now: datetime | None = None) -> Plan |
         if tid and tid not in plan.speakers:
             plan.speakers.append(tid)
             plan.parts[tid] = str(s.get("part") or "")[:300]
-    if (later(data.get("when"), now) or str(data.get("timing", "")).lower() == "later") and plan.speakers:
-        # Something for later: one member confirms and sets the follow-up; it fires for the group when it's time.
+    for r in data.get("react") or []:
+        tid = by_handle.get(str((r or {}).get("handle", "")).lstrip("@").lower())
+        if tid and str(r.get("emoji")) in EMOJI and all(t != tid for t, _ in plan.reacts):
+            plan.reacts.append((tid, str(r["emoji"])))
+    plan.later = later(data.get("when"), now) or str(data.get("timing", "")).lower() == "later"
+    if plan.later and not plan.speakers:
+        # Nobody was addressed: the director sets it for the group (graph.router), the group reacts.
+        w = str(data.get("when") or "")
+        plan.until = str(data.get("until") or "")[:300] or None if w.lower() == "condition" else None
+        try:
+            plan.at = datetime.fromisoformat(w.upper().rstrip("Z")).replace(tzinfo=now.tzinfo if now else None)
+        except ValueError:
+            plan.at = None
+        plan.what = str(data.get("what") or plan.read)[:500]
+    elif plan.later:
+        # Something for later: the member addressed confirms and sets the follow-up; it fires for the group then.
         lead = plan.speakers[0]
         plan.speakers, plan.parts = [lead], {lead: (plan.parts.get(lead, "") + " This is for later: confirm it and set "
                                                     "a follow-up with follow_up (owner 'group' if everyone should pick it "
@@ -156,7 +184,7 @@ async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: 
     except Exception:
         log.exception("floor plan failed")
         got = None
-    if got and (got.speakers or len(latest.strip()) <= QUIET_MAX):
+    if got and (got.speakers or (got.later and (got.at or got.until)) or len(latest.strip()) <= QUIET_MAX):
         return got
     # No usable plan: the tagged members, else the first member.
     ids = [m["id"] for m in tagged(latest, members)] or [members[0]["id"]]
