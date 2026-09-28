@@ -209,7 +209,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "actually said above; never address someone as if they had spoken when they haven't.")
     else:
         lines.append(f"This is a direct message between you and {ctx.user_name}.")
-    lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results.")
+    lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results. "
+                 "Never say you did something (scheduled, sent, saved, created, set a reminder) unless one of your tool "
+                 "calls did it in this turn; if you can't, say what you can do instead.")
     if T.MULTI in tool_names:
         lines.append(f"Connected apps ({', '.join(ctx.toolkits(tm))}): find the right app tool with "
                      "COMPOSIO_SEARCH_TOOLS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL using the exact slug and "

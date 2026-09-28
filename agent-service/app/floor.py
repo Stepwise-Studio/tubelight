@@ -39,6 +39,9 @@ How to read the message:
   being roasted, praised, or asked to react to the others) goes last so they can respond.
 - Everyone given a task in the message is addressed, in the order the work happens ("ask @tess to test it and
   @dev to fix what she finds": Tess, then Dev).
+- timing: "later" when the message asks for the thing to happen at a later time or once something else happens
+  ("roast Sol at 6 pm", "deploy once the design is done"); then pick only the one member best placed to confirm it
+  and set a follow-up, and nobody does the thing itself now. Otherwise "now".
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
 - The latest message may be a scheduled follow-up the chat set earlier: pick who should pick it up (its owner, or
   whoever the work concerns), never nobody.
@@ -50,6 +53,7 @@ Write about {user} by name, never as he or she.
 
 Reply with JSON only:
 {{"read": "<one sentence: what is asked, who is addressed, who is talked about>",
+ "timing": "now or later",
  "speakers": [{{"handle": "<handle>", "part": "<their part, in the second person, one short sentence>"}}]}}"""
 
 
@@ -100,6 +104,12 @@ def parse(text: str, members: list[dict]) -> Plan | None:
         if tid and tid not in plan.speakers:
             plan.speakers.append(tid)
             plan.parts[tid] = str(s.get("part") or "")[:300]
+    if str(data.get("timing", "")).lower() == "later" and plan.speakers:
+        # Something for later: one member confirms and sets the follow-up; it fires for the group when it's time.
+        lead = plan.speakers[0]
+        plan.speakers, plan.parts = [lead], {lead: (plan.parts.get(lead, "") + " This is for later: confirm it and set "
+                                                    "a follow-up with follow_up (owner 'group' if everyone should pick it "
+                                                    "up); don't do the thing itself yet.").strip()}
     return plan
 
 

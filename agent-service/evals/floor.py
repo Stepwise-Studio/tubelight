@@ -59,6 +59,8 @@ CASES = [
     ("open question to the group", [], "what should we name the new feature? everyone pitch one", several),
     ("delegate across roles", [], "ask @tess to test it and @dev to fix what she finds", lambda g: set(g) >= {"tess", "dev"}),
     ("@all", [], "@all quick standup: what are you on today?", lambda g: len(g) == 4),
+    ("group task later, at a time", [], "hey everyone, let's roast Sol again at 6 pm", lambda g: len(g) == 1),
+    ("task once something happens", [], "@dev deploy the landing page once Sol finishes the design tweak", only("dev")),
 ]
 
 

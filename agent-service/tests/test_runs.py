@@ -154,6 +154,18 @@ async def test_plan_orders_the_round_and_speakers_may_pass(api, env):
     assert "Your part: You're the target: fire back last." in fake.calls[3][0].content
 
 
+async def test_a_request_for_later_gets_one_confirmation_not_the_action(api, env):
+    fdb, fake = env
+    dev, tess, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester"), teammate(fdb, "sol", "social")
+    p = project(fdb, [dev, tess, sol])
+    fake.script = [plan(("tess", "Confirm the roast."), ("dev", "Roast Sol."), ("sol", "Fire back."), timing="later"),
+                   ai("Set for 6 pm.")]
+    await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "everyone roast @sol at 6 pm"})
+    await settle()
+    assert [m["teammate_id"] for m in fdb.rows("messages", sender_type="teammate")] == [tess["id"]]
+    assert "set a follow-up with follow_up" in fake.calls[1][0].content
+
+
 async def test_plan_may_choose_nobody_for_a_short_ack_only(api, env):
     fdb, fake = env
     dev, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester")

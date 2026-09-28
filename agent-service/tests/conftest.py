@@ -170,9 +170,9 @@ async def api(env):
     app.dependency_overrides.clear()
 
 
-def plan(*speakers: tuple[str, str], read: str = "") -> AIMessage:
+def plan(*speakers: tuple[str, str], read: str = "", timing: str = "now") -> AIMessage:
     """The floor director's reply: ordered (handle, part) pairs."""
-    return AIMessage(json.dumps({"read": read, "speakers": [{"handle": h, "part": p} for h, p in speakers]}))
+    return AIMessage(json.dumps({"read": read, "timing": timing, "speakers": [{"handle": h, "part": p} for h, p in speakers]}))
 
 
 def ai(text: str = "", calls: list[tuple[str, dict]] | None = None) -> AIMessage:
