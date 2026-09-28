@@ -197,19 +197,33 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                          f"{ctx.user_name if r['sender_type'] == 'user' else names.get(r['teammate_id'], 'Teammate')}: "
                          f"{r['text'][:700]}" for r in sorted(best, key=lambda r: r["created_at"]))
 
-    async def follow_up(when: str, what: str) -> str:
+    def _when(s: str | None) -> datetime | None:
+        d = datetime.fromisoformat(s.strip().replace("Z", "+00:00")) if s else None
+        return (d if d.tzinfo else d.replace(tzinfo=zone)) if d else None
+
+    async def follow_up(what: str, when: str | None = None, until: str | None = None, owner: str | None = None,
+                        check_by: str | None = None, poll_hours: float | None = None) -> str:
         try:
-            at = datetime.fromisoformat(when.strip().replace("Z", "+00:00"))
+            at, by = _when(when), _when(check_by)
         except ValueError:
-            return "Give `when` as their local date and time, like 2026-09-28T19:00."
-        at = at if at.tzinfo else at.replace(tzinfo=zone)
+            return "Give times as their local date and time, like 2026-09-28T19:00."
+        if not (at or until):
+            return "Give either `when` (a time) or `until` (a condition to wait for)."
         now = datetime.now(UTC)
-        if at <= now:
-            return "That time has already passed. Pick a time in the future."
-        if at - now > timedelta(days=60):
-            return "Pick a time within the next 60 days."
-        await followups.add(ctx.owner_id, ctx.thread_id, tm["id"], at, what, f"{now.astimezone(zone):%a %b %d, %I:%M %p}")
-        return f"Follow-up set for {at.astimezone(zone):%a %b %d, %I:%M %p}. You'll be woken in this chat then."
+        if at and not now < at < now + timedelta(days=60):
+            return "Pick a time in the future, within the next 60 days."
+        who = tm["id"]
+        if ctx.project and owner:
+            handle = owner.lstrip("@").lower()
+            who = "group" if handle == "group" else next((m["id"] for m in ctx.members if m["handle"] == handle), None)
+            if not who:
+                return f"No member @{handle} here. Use a member's handle, or 'group'."
+        stamp = f"{now.astimezone(zone):%a %b %d, %I:%M %p}"
+        await followups.add(ctx.owner_id, ctx.thread_id, who, what, at=at, until=None if at else until, check_by=by,
+                            poll_hours=poll_hours, set_by=f"teammate:{tm['id']}", set_at=stamp)
+        return (f"Follow-up set for {at.astimezone(zone):%a %b %d, %I:%M %p}." if at
+                else f"Follow-up set for once {until}." + (" I'll check on it with the apps." if poll_hours else "")
+                + " It shows in the chat's follow-ups and fires here on its own.")
 
     tools += [
         StructuredTool.from_function(
@@ -218,9 +232,12 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         "morning or days ago), by keywords. The brief summarises; this finds the words."),
         StructuredTool.from_function(
             coroutine=follow_up, name="follow_up",
-            description="Come back to this chat at a set time: when the user asks you to circle back, remind them or "
-                        "check on something later, or you promise to get back to them. when: their local date and "
-                        "time as YYYY-MM-DDTHH:MM. what: what to do then, self-contained."),
+            description="Come back to this chat later: when the user asks you to circle back, remind them or check on "
+                        "something, or you promise to get back to them. Either `when` (their local time, "
+                        "YYYY-MM-DDTHH:MM) or `until` (a condition to wait for, e.g. 'the design tweak is done'; it "
+                        "fires when the chat shows it's true). what: what to do then, self-contained. In a group, "
+                        "owner: the handle who should act then, or 'group'. For a condition: check_by (a deadline to "
+                        "nudge if it still isn't done) and poll_hours (only if you can check it with an app)."),
         StructuredTool.from_function(
             coroutine=remember, name="remember",
             description="Save a durable fact to long-term memory. scope: 'self' = your own notes, "

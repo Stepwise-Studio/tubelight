@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import config, connectors, db, floor, llm, memory, push, tools as T
+from . import config, connectors, db, floor, followups, llm, memory, push, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -228,8 +228,16 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         "acknowledge it briefly and adjust.")
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
     lines.append(f"When {ctx.user_name} asks you to circle back, remind them or check on something later, or you promise "
-                 "to get back to them, call follow_up with the time: you'll be woken in this chat then. Use search_chat "
-                 "for the exact words of anything said earlier in this chat.")
+                 "to get back to them, call follow_up: with a time, or with a condition to wait for (\"once the design "
+                 "tweak is done\"); it fires in this chat on its own." + (
+                     " In this group, when the team agrees to circle back, set it with the owner who should lead then, "
+                     "or 'group'." if ctx.project else "") + " Use search_chat for the exact words of anything said "
+                 "earlier in this chat.")
+    pend = await followups.pending(ctx.owner_id, ctx.thread_id)
+    if pend:
+        owners = {m["id"]: f"@{m['handle']}" for m in ctx.members}
+        lines.append("Pending follow-ups in this chat (don't set them again):\n" + "\n".join(
+            f"- {owners.get(f['owner'], 'the group')}: {followups.describe(f, ctx.timezone)}" for f in pend))
     if ctx.brief:
         lines.append("## This chat so far\nA running brief of the whole conversation, including what may have scrolled "
                      "out of the messages you see. Pick up its open loops when they come due or come up:\n" + ctx.brief)
@@ -365,6 +373,8 @@ def make_teammate(ctx: RunCtx, tm: dict):
         if ai.tool_calls or not text:
             if text or not ai.tool_calls:  # streamed tool-call chatter or an empty reply: no DB row follows
                 await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
+        elif text.strip().upper().startswith("NOT_YET"):  # a silent follow-up check: not done yet, say nothing
+            await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
         elif ctx.project and text.strip(" .").upper() == "PASS":  # nothing to add to this round
             await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
         elif ctx.event_type == "email" and text.upper().startswith("SKIP"):

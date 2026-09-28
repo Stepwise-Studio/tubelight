@@ -29,6 +29,16 @@ export function dayLabel(iso: string, now = new Date()) {
 
 export const sameDay = (a: string, b: string) => startOfDay(new Date(a)) === startOfDay(new Date(b))
 
+/** An upcoming time: "Today, 6:00 PM", "Tomorrow, 9:00 AM", "Wed, 5:00 PM", "30 Sep, 5:00 PM". */
+export function whenLabel(iso: string, now = new Date()) {
+  const d = new Date(iso)
+  const days = Math.round((startOfDay(d) - startOfDay(now)) / DAY)
+  const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days > 1 && days < 7
+    ? d.toLocaleDateString(undefined, { weekday: 'short' })
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return `${day}, ${clock(d)}`
+}
+
 /** Full timestamp for long-press menus. */
 export const fullTime = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })

@@ -116,7 +116,7 @@ async def env(monkeypatch):
     from app import brief
     monkeypatch.setattr(brief, "schedule", lambda *a: None)  # tested on its own in test_memory
     fake = FakeLLM(script=[], calls=[])
-    monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None, size=0: fake)
+    monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None, size=0, json=False: fake)
 
     async def ctx_window(model: str) -> int:
         return 32_000

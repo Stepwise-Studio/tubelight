@@ -143,6 +143,10 @@ class _Transport(httpx.AsyncBaseTransport):
 
 
 _http: httpx.AsyncClient | None = None
+# Free tiers sometimes stall a request with no reply at all (Gemini: a minute or more, while a retry answers in a
+# second). `read` is the longest silence between bytes, so a streaming reply is never cut off, but a stalled one is
+# retried after 30 s instead of holding the chat for minutes.
+TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 
 
 def _one(model_id: str) -> ChatOpenAI:
@@ -150,9 +154,9 @@ def _one(model_id: str) -> ChatOpenAI:
     if not is_free(model_id):
         raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
     global _http
-    _http = _http or httpx.AsyncClient(transport=_Transport(), timeout=120)
+    _http = _http or httpx.AsyncClient(transport=_Transport(), timeout=TIMEOUT)
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
-                      default_headers=_headers(provider), timeout=120, max_retries=1, http_async_client=_http)
+                      default_headers=_headers(provider), timeout=TIMEOUT, max_retries=1, http_async_client=_http)
 
 
 def _text_content(messages: list) -> list:
@@ -163,7 +167,7 @@ def _text_content(messages: list) -> list:
 GROQ_REQUEST_LIMIT = 7000  # tokens: Groq's free tier allows 8k per minute per model; leave room for the reply
 
 
-def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0) -> Runnable:
+def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0, json: bool = False) -> Runnable:
     """The model (tools bound) followed by the fallback chain for 429s, 5xx, timeouts and provider errors.
     Tests monkeypatch this to return a scripted fake."""
     primary = model or config.DEFAULT_MODEL
@@ -184,7 +188,7 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
     chain: list[BaseChatModel | Runnable] = []
     for m in ids or [config.DEFAULT_MODEL]:
         llm = _one(m)
-        bound = llm.bind_tools(tools) if tools else llm
+        bound = llm.bind_tools(tools) if tools else llm.bind(response_format={"type": "json_object"}) if json else llm
         chain.append(RunnableLambda(_text_content) | bound if parse(m)[0] == "cloudflare" else bound)
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
 

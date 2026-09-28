@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
 import { Composer } from '@/components/chat/composer'
+import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
@@ -101,6 +102,7 @@ export default function Thread() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
   const [voice, setVoice] = useState(false)
+  const [showFollowups, setShowFollowups] = useState(false)
   const list = useRef<FlatList<ChatItem>>(null)
   // The composer floats over the chat (which scrolls under its fade): the list keeps its height clear.
   const [composerH, setComposerH] = useState(64)
@@ -135,6 +137,9 @@ export default function Thread() {
   const byId = new Map(t.messages.map((m) => [m.id, m]))
 
   // ---- header
+  // Follow-ups change when a run ends (a teammate or the keeper set, fired or cancelled one): reload then.
+  const running = liveRuns.some((r) => r.status === 'running')
+  const fu = useFollowups(threadId, running)
   const working = liveRuns.find((r) => r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
   const subtitle = working
@@ -147,6 +152,7 @@ export default function Thread() {
 
   const header = (
     <ScreenHeader
+      right={<FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />}
       middle={
         <Press
           radius={12}
@@ -272,6 +278,13 @@ export default function Thread() {
         </View>
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
+      <FollowupsSheet
+        open={showFollowups}
+        onClose={() => setShowFollowups(false)}
+        list={fu.list}
+        people={isDm ? (dmMate ? [dmMate] : []) : people}
+        onCancel={fu.cancel}
+      />
       {voice && (
         <VoiceMode
           teammate={dmMate}

@@ -40,6 +40,8 @@ How to read the message:
 - Everyone given a task in the message is addressed, in the order the work happens ("ask @tess to test it and
   @dev to fix what she finds": Tess, then Dev).
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
+- The latest message may be a scheduled follow-up the chat set earlier: pick who should pick it up (its owner, or
+  whoever the work concerns), never nobody.
 - If no reply is needed (ok, thanks, got it), choose nobody.
 - If it's unclear who is meant, pick the member best placed to ask {user} one short clarifying question, and say so
   in their part.
@@ -67,7 +69,8 @@ def transcript(msgs: list[BaseMessage], members: list[dict], user: str) -> str:
             continue
         if isinstance(m, HumanMessage) and m.name in ("system_note", "summary", "handoff"):
             continue
-        who = names.get(m.name or "", m.name or "Teammate") if isinstance(m, AIMessage) else user
+        who = (names.get(m.name or "", m.name or "Teammate") if isinstance(m, AIMessage)
+               else "Scheduled follow-up" if m.name == "follow_up" else user)
         lines.append(f"{who}: {(m.text if isinstance(m, AIMessage) else str(m.content))[:300]}")
     kept, size = [], 0
     for line in reversed(lines):

@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 from langchain_core.messages import ToolMessage
 
-from app import brief, followups
-from tests.conftest import OWNER, ai, settle, teammate
+from app import brief, followups, memory
+from tests.conftest import OWNER, ai, plan, project, settle, teammate
 
 
 def said(fdb, thread_id, at, text, teammate_id=None):
@@ -37,7 +37,6 @@ async def test_brief_folds_in_only_new_messages(env):
 async def test_teammates_read_the_brief(api, env):
     fdb, fake = env
     dev = teammate(fdb, "dev", "developer")
-    from app import memory
     await memory.store.aput(("thread", f"dm:{dev['id']}"), "brief", {"text": "Open loops: pricing numbers tonight."}, index=False)
     fake.script = [ai("Here they are.")]
     await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "numbers?"})
@@ -63,20 +62,163 @@ async def test_search_chat_finds_earlier_words(api, env):
     assert "keep the free tier at 3 teammates" in seen["result"] and "unrelated" not in seen["result"]
 
 
-async def test_follow_up_wakes_the_teammate_in_the_chat(api, env):
+def later(**kw) -> str:
+    """A local (UTC in tests) time from now, as the tools take it."""
+    return (datetime.now(UTC) + timedelta(**kw)).strftime("%Y-%m-%dT%H:%M")
+
+
+async def test_time_follow_up_fires_once_with_a_visible_note(api, env):
     fdb, fake = env
     dev = teammate(fdb, "dev", "developer")
-    when = (datetime.now(UTC) + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M")  # UTC here: no timezone set
-    fake.script = [ai(calls=[("follow_up", {"when": when, "what": "check whether the deploy went green"})]), ai("Will do.")]
+    fake.script = [ai(calls=[("follow_up", {"when": later(hours=3), "what": "check whether the deploy went green"})]),
+                   ai("Will do.")]
     await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "check the deploy in 3 hours"})
     await settle()
     assert "Follow-up set for" in fake.calls[1][-1].content
+    [f] = (await api.get(f"/threads/dm:{dev['id']}/followups")).json()
+    assert f["what"] == "check whether the deploy went green" and f["owner"] == dev["id"] and f["at"]
 
-    assert await followups.fire_due(datetime.now(UTC) + timedelta(hours=1)) == 0  # not yet
+    assert await followups.tick(datetime.now(UTC) + timedelta(hours=1)) == 0  # not yet
     fake.script = [ai("Deploy is green.")]
-    assert await followups.fire_due(datetime.now(UTC) + timedelta(hours=4)) == 1
+    assert await followups.tick(datetime.now(UTC) + timedelta(hours=4)) == 1
     await settle()
+    note = fdb.rows("messages", kind="event")[-1]
+    assert note["text"] == "Follow-up: check whether the deploy went green" and note["meta"] == {"followup": "time"}
     msg = fdb.rows("messages", sender_type="teammate")[-1]
     assert msg["text"] == "Deploy is green." and msg["proactive"]
-    assert "[Follow-up you set" in fake.calls[-1][-1].content and "check whether the deploy went green" in fake.calls[-1][-1].content
-    assert await followups.fire_due(datetime.now(UTC) + timedelta(days=1)) == 0  # fires once
+    assert "It's time now" in fake.calls[-1][-1].content
+    assert await followups.tick(datetime.now(UTC) + timedelta(days=1)) == 0  # fired once
+    assert (await api.get(f"/threads/dm:{dev['id']}/followups")).json() == []
+
+
+async def test_group_follow_up_goes_through_the_floor(api, env):
+    fdb, fake = env
+    dev, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "social")
+    p = project(fdb, [dev, sol])
+    thread = f"proj:{p['id']}"
+    await followups.add(OWNER, thread, "group", "circle back on the launch copy", at=datetime.now(UTC) + timedelta(minutes=1))
+    fake.script = [plan(("sol", "Bring the launch copy back up.")), ai("Circling back: here's the copy.")]
+    assert await followups.tick(datetime.now(UTC) + timedelta(minutes=2)) == 1
+    await settle()
+    assert "LATEST MESSAGE — Scheduled follow-up: [Follow-up set earlier: circle back on the launch copy]" in fake.calls[0][-1].content
+    assert fdb.rows("messages", sender_type="teammate")[-1]["teammate_id"] == sol["id"]
+
+
+async def test_owner_who_left_the_group_falls_to_the_floor(api, env):
+    fdb, fake = env
+    dev, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "social")
+    gone = teammate(fdb, "old", "former")
+    p = project(fdb, [dev, sol])
+    await followups.add(OWNER, f"proj:{p['id']}", gone["id"], "ship it", at=datetime.now(UTC))
+    fake.script = [plan(("dev", "Ship it.")), ai("Shipping.")]
+    await followups.tick(datetime.now(UTC) + timedelta(minutes=1))
+    await settle()
+    assert fdb.rows("messages", sender_type="teammate")[-1]["teammate_id"] == dev["id"]
+
+
+async def test_deadline_nudges_and_late_firing_says_so(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    await followups.add(OWNER, f"dm:{dev['id']}", dev["id"], "deploy the site", until="the design tweak is done",
+                        check_by=datetime.now(UTC) - timedelta(hours=5))
+    fake.script = [ai("Is the design tweak done yet?")]
+    assert await followups.tick() == 1
+    await settle()
+    lead = fake.calls[-1][-1].content
+    assert "Still waiting on: the design tweak is done" in lead and "due 5 h ago" in lead
+
+
+async def test_a_claimed_follow_up_is_not_fired_twice_but_a_stale_claim_is_retried(env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    key = await followups.add(OWNER, f"dm:{dev['id']}", dev["id"], "x", at=datetime.now(UTC))
+
+    async def claim(ago: timedelta) -> None:
+        item = await memory.store.aget(followups.NS, key)
+        await memory.store.aput(followups.NS, key, {**item.value, "claimed": (datetime.now(UTC) - ago).isoformat()}, index=False)
+
+    await claim(timedelta(seconds=5))  # being fired right now (e.g. by a tick still running)
+    assert await followups.tick(datetime.now(UTC) + timedelta(minutes=1)) == 0
+    await claim(timedelta(minutes=10))  # a crash after claiming: the lease ran out, so it's retried
+    fake.script = [ai("ok")]
+    assert await followups.tick(datetime.now(UTC) + timedelta(minutes=1)) == 1
+    await settle()
+    assert not await memory.store.aget(followups.NS, key)
+
+
+async def test_follow_up_for_a_deleted_chat_is_dropped(env):
+    fdb, fake = env
+    await followups.add(OWNER, "dm:gone", "x", "x", at=datetime.now(UTC))
+    assert await followups.tick(datetime.now(UTC) + timedelta(minutes=1)) == 0
+    assert await followups.pending(OWNER) == []
+
+
+async def test_polling_check_stays_silent_until_met(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    thread = f"dm:{dev['id']}"
+    key = await followups.add(OWNER, thread, dev["id"], "deploy it", until="PR #12 is merged", poll_hours=1)
+    fake.script = [ai("NOT_YET")]
+    assert await followups.tick(datetime.now(UTC) + timedelta(hours=2)) == 1
+    await settle()
+    assert "reply exactly NOT_YET" in fake.calls[-1][-1].content
+    assert not fdb.rows("messages", sender_type="teammate")  # silent
+    assert await memory.store.aget(followups.NS, key)  # still waiting
+    assert await followups.tick(datetime.now(UTC) + timedelta(hours=2, minutes=30)) == 0  # checked recently
+    fake.script = [ai("PR #12 is merged, deploying now.")]
+    assert await followups.tick(datetime.now(UTC) + timedelta(hours=4)) == 1
+    await settle()
+    assert fdb.rows("messages", sender_type="teammate")[-1]["text"] == "PR #12 is merged, deploying now."
+    assert not await memory.store.aget(followups.NS, key)  # done
+
+
+def keeper(**plan_) -> object:
+    import json
+    return ai(json.dumps({"brief": "Open loops: see follow-ups.", "add": [], "met": [], "cancel": [], **plan_}))
+
+
+async def test_keeper_adds_marks_met_across_chats_and_cancels(env):
+    fdb, fake = env
+    dev, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "designer")
+    p = project(fdb, [dev, sol], name="Launch")
+    group = f"proj:{p['id']}"
+    said(fdb, group, "2026-09-28T04:00:00+00:00", "let's deploy once Sol's design tweak is done, and circle back on copy at 6")
+
+    fake.script = [keeper(add=[
+        {"what": "deploy the site", "owner": "dev", "at": None, "until": "Sol's design tweak is done", "check_by": None},
+        {"what": "circle back on the launch copy", "owner": "group", "at": later(hours=6), "until": None},
+        {"what": "a time in the past is ignored", "owner": "dev", "at": "2020-01-01T10:00", "until": None},
+    ])]
+    assert await brief.refresh(OWNER, group, "Akhil", "UTC") == {"add": 2, "met": 0, "cancel": 0}
+    pend = {f["what"]: f for f in await followups.pending(OWNER, group)}
+    assert pend["deploy the site"]["owner"] == dev["id"] and pend["deploy the site"]["until"]
+    assert pend["circle back on the launch copy"]["owner"] == "group"
+
+    # The design news lands in Sol's DM: the keeper there sees the group's pending condition and settles it.
+    said(fdb, f"dm:{sol['id']}", "2026-09-28T05:00:00+00:00", "design tweak is done and uploaded", sol["id"])
+    cond = pend["deploy the site"]["id"]
+    fake.script = [keeper(met=[{"id": cond, "evidence": "Sol said it's uploaded"}]), ai("Deploying now.")]
+    assert (await brief.refresh(OWNER, f"dm:{sol['id']}", "Akhil", "UTC"))["met"] == 1
+    listed = next(c[-1].content for c in fake.calls if "uploaded" in c[-1].content)
+    assert f"id {cond} [group Launch] @dev: deploy the site (once Sol's design tweak is done)" in listed
+    await settle()
+    assert fdb.rows("messages", sender_type="teammate")[-1]["teammate_id"] == dev["id"]
+    assert fdb.rows("messages", sender_type="teammate")[-1]["thread_id"] == group
+    assert "Its condition is met: Sol's design tweak is done. (Sol said it's uploaded)" in fake.calls[-1][-1].content
+
+    said(fdb, group, "2026-09-28T06:00:00+00:00", "forget the copy check, it's done")
+    copy = pend["circle back on the launch copy"]["id"]
+    fake.script = [keeper(cancel=[copy])]
+    assert (await brief.refresh(OWNER, group, "Akhil", "UTC"))["cancel"] == 1
+    assert await followups.pending(OWNER, group) == []
+
+
+async def test_follow_ups_api_lists_per_chat_and_cancels_only_your_own(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    key = await followups.add(OWNER, f"dm:{dev['id']}", dev["id"], "x", at=datetime.now(UTC) + timedelta(hours=1))
+    other = await followups.add("someone-else", f"dm:{dev['id']}", dev["id"], "y", at=datetime.now(UTC) + timedelta(hours=1))
+    assert [f["id"] for f in (await api.get(f"/threads/dm:{dev['id']}/followups")).json()] == [key]
+    assert (await api.delete(f"/followups/{other}")).status_code == 404
+    assert (await api.delete(f"/followups/{key}")).status_code == 200
+    assert (await api.get(f"/threads/dm:{dev['id']}/followups")).json() == []

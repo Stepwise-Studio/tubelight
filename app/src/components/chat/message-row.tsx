@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, Clock01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -118,7 +118,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   const m = item.m
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
-    case 'event': return <SystemRow icon={FlashIcon} text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
+    case 'event': return <SystemRow icon={m.meta.followup ? Clock01Icon : FlashIcon} text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':

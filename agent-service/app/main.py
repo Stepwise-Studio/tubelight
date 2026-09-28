@@ -17,7 +17,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import config, connectors, db, events, files, live, llm, memory, runs, sandbox
+from . import config, connectors, db, events, files, followups, live, llm, memory, runs, sandbox
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -148,6 +148,21 @@ async def _mentioned_apps(owner_id: str, asked: list[str]) -> list[str]:
     slugs = [s for s in [await connectors.resolve(a) for a in asked[:10]] if s]
     ready = await connectors.ready(owner_id) if slugs else set()
     return [s for s in dict.fromkeys(slugs) if s in ready]
+
+
+@app.get("/threads/{thread_id}/followups")
+async def thread_followups(thread_id: str, user: User = Depends(current_user)):
+    """Pending follow-ups of one chat, soonest first."""
+    await owned("threads", thread_id, user, "conversation")
+    keep = ("id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at", "created")
+    return [{k: f.get(k) for k in keep} for f in await followups.pending(user["id"], thread_id)]
+
+
+@app.delete("/followups/{followup_id}")
+async def cancel_followup(followup_id: str, user: User = Depends(current_user)):
+    if not await followups.cancel(followup_id, user["id"]):
+        raise HTTPException(404, "That follow-up is already gone.")
+    return {"ok": True}
 
 
 @app.post("/threads/{thread_id}/messages")

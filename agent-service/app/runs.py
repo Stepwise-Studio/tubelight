@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import brief, db, graph, learn, llm, memory, sandbox
+from . import brief, db, followups, graph, learn, llm, memory, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -96,6 +96,7 @@ async def _finish(run_id: str, owner_id: str, thread_id: str, status: str, error
     await db.activity(owner_id, "run_end", status, run_id=run_id, thread_id=thread_id, teammate_id=teammate_id,
                       status="error" if status == "error" else "ok", output={"error": error} if error else None)
     await db.broadcast(thread_id, "status", {"run_id": run_id, "teammate_id": teammate_id, "state": "idle"})
+    await followups.after_run(run_id)
 
 
 async def _supersede(thread_id: str) -> None:
