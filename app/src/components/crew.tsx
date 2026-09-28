@@ -1,46 +1,56 @@
 import { router } from 'expo-router'
 import { useState } from 'react'
-import { FlatList, RefreshControl, View } from 'react-native'
+import { Image } from 'expo-image'
+import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { Add01Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, Message01Icon } from '@hugeicons/core-free-icons'
 import type { ReactElement } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
 import { useTabBarInset } from '@/components/tab-bar'
 import { openSheet } from '@/components/sheet-screen'
-import { freeHandle, fromTemplate, modelName, roleName, toolkitName, useModels, useTemplates, type Template } from '@/lib/catalog'
+import { freeHandle, fromTemplate, roleName, toolkitName, useConnections, useTemplates, type Template } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, radius, useTheme } from '@/theme'
-import { Button, Card, Chip, EmptyState, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
+import { Button, Card, Chip, EmptyState, Icon, IconButton, Press, Skeleton, Squircle, TeammateAvatar, Text, haptic, toast } from '@/ui'
 
 const openProfile = (id: string) => router.push({ pathname: '/teammate/[id]', params: { id } })
+const openChat = (id: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId: `dm:${id}` } })
 
-/** The Crew page of Chats: every teammate as a card, filtered by the shared search. */
+const GAP = 12
+const BAND = 72 // the colour wash at the top of a card
+const FACE = 56
+const ADD = 'add' // the trailing "New teammate" cell
+
+/** The Crew page of Chats: every teammate as a profile card in a two-column grid, filtered by the shared search. */
 export function CrewList({ header, query }: { header?: ReactElement; query: string }) {
   const { c } = useTheme()
   const ws = useWorkspace()
   const inset = useTabBarInset()
-  const { models } = useModels()
+  const { width } = useWindowDimensions()
+  const { connections } = useConnections()
+  const logos = Object.fromEntries((connections ?? []).map((k) => [k.toolkit, k.logo]))
   const [refreshing, setRefreshing] = useState(false)
   const refresh = async () => { setRefreshing(true); await ws.refresh(); setRefreshing(false) }
   const q = query.trim().toLowerCase()
   const crew = q ? ws.teammates.filter((t) => `${t.name} ${t.handle} ${t.role} ${t.bio}`.toLowerCase().includes(q)) : ws.teammates
+  const cell = (width - 32 - GAP) / 2
   const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />
 
   if (ws.loading) {
     return (
       <View style={{ flex: 1 }}>
         {header}
-        <View style={{ paddingHorizontal: 16, gap: 12 }} accessible accessibilityLabel="Loading your crew">
-          {[0, 1, 2].map((i) => (
-            <Squircle key={i} style={{ borderRadius: radius.xl, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 16, flexDirection: 'row', gap: 14 }}>
-              <Skeleton width={64} height={64} radius={32} />
-              <View style={{ flex: 1, gap: 8, paddingTop: 4 }}>
-                <Skeleton width="40%" height={14} />
-                <Skeleton width="70%" height={10} />
-                <Skeleton width="55%" height={10} />
+        <View style={{ paddingHorizontal: 16, flexDirection: 'row', flexWrap: 'wrap', gap: GAP }} accessible accessibilityLabel="Loading your crew">
+          {[0, 1, 2, 3].map((i) => (
+            <Squircle key={i} style={{ width: cell, borderRadius: radius.xl, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
+              <View style={{ height: BAND, backgroundColor: c.panel2 }} />
+              <View style={{ padding: 14, paddingTop: FACE / 2 + 10, gap: 8 }}>
+                <Skeleton width="60%" height={14} />
+                <Skeleton width="45%" height={10} />
+                <Skeleton width="90%" height={10} />
               </View>
             </Squircle>
           ))}
@@ -49,69 +59,109 @@ export function CrewList({ header, query }: { header?: ReactElement; query: stri
     )
   }
 
+  const data: (Teammate | typeof ADD)[] = q || !crew.length ? crew : [...crew, ADD]
   return (
     <FlatList
-      data={crew}
-      keyExtractor={(t) => t.id}
+      data={data}
+      numColumns={2}
+      keyExtractor={(t) => (t === ADD ? ADD : t.id)}
       ListHeaderComponent={header}
       ListEmptyComponent={ws.teammates.length === 0 ? <StarterTemplates /> : <EmptyState title="No one matches" body={`Nobody in your crew matches "${query.trim()}".`} />}
-      contentContainerStyle={{ paddingBottom: inset + 96, gap: 12 }}
+      contentContainerStyle={{ paddingBottom: inset + 96, gap: GAP }}
+      columnWrapperStyle={{ gap: GAP, paddingHorizontal: 16 }}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       refreshControl={refreshControl}
       renderItem={({ item, index }) => (
-        <Animated.View entering={index < 8 ? FadeIn.duration(motion.duration.slow).delay(motion.staggerDelay(index)) : undefined} style={{ paddingHorizontal: 16 }}>
-          <TeammateCard t={item} model={modelName(item.model, models)} working={ws.isWorking(item.id)} />
+        <Animated.View entering={index < 8 ? FadeIn.duration(motion.duration.slow).delay(motion.staggerDelay(index)) : undefined} style={{ width: cell }}>
+          {item === ADD
+            ? <NewTeammateCard />
+            : <TeammateCard t={item} logos={logos} working={ws.isWorking(item.id)} />}
         </Animated.View>
       )}
     />
   )
 }
 
-function TeammateCard({ t, model, working }: { t: Teammate; model: string; working: boolean }) {
-  const shown = t.allowed_toolkits.slice(0, 3)
-  const more = t.allowed_toolkits.length - shown.length
+/**
+ * A profile card: the teammate's colour washes the top, their face sits on its edge, then name, role and a
+ * two-line bio; the footer shows the apps they can use and a shortcut straight into their chat.
+ */
+function TeammateCard({ t, logos, working }: { t: Teammate; logos: Record<string, string | undefined>; working: boolean }) {
+  const { c, scheme } = useTheme()
+  const apps = t.allowed_toolkits
+  const shown = apps.slice(0, 3)
+  const more = apps.length - shown.length
   return (
     <Card
       radius={radius.xl}
       onPress={() => openProfile(t.id)}
-      accessibilityLabel={`${t.name}, @${t.handle}, ${t.role}${working ? ', working' : ''}. ${t.bio}`}
+      accessibilityLabel={`${t.name}, ${t.role}${working ? ', working' : ''}. ${t.bio}`}
       accessibilityHint="Opens their profile"
-      style={{ padding: 16, flexDirection: 'row', gap: 14 }}
+      outerStyle={{ flex: 1 }}
+      style={{ flex: 1, overflow: 'hidden' }}
     >
-      {/* Its own tap target: a tap on the face makes it hop instead of opening the profile. */}
-      <TeammateAvatar teammate={t} size={64} state={working ? 'working' : 'default'} />
-      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text variant="headline" numberOfLines={1} style={{ flexShrink: 1 }}>{t.name}</Text>
-          <Text variant="caption" color="ink3" numberOfLines={1} style={{ flexShrink: 2 }}>@{t.handle}</Text>
-          {working && <Chip label="Working" color="info" dot size="sm" />}
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-          <Text variant="label" color="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>{t.role}</Text>
-          <View style={{ flex: 1 }} />
-          <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flexShrink: 0, maxWidth: '50%' }}>{model}</Text>
-        </View>
-        {!!t.bio && <Text variant="caption" color="ink3" numberOfLines={1}>{t.bio}</Text>}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-          {shown.map((tk) => <ToolChip key={tk} toolkit={tk} />)}
-          {more > 0 && <Text variant="footnote" color="ink3" tabular>+{more}</Text>}
+      <View style={{
+        height: BAND,
+        // Fades all the way into the card: no edge where the colour stops.
+        experimental_backgroundImage: `linear-gradient(to bottom, ${t.color}${scheme === 'dark' ? '73' : '8C'} 0%, ${t.color}${scheme === 'dark' ? '2E' : '38'} 55%, ${t.color}00 100%)`,
+        alignItems: 'flex-end', padding: 8,
+      }}>
+        {working && <Chip label="Working" color="info" dot size="sm" />}
+      </View>
+      {/* The face overlaps the band's edge, ringed in the card colour. */}
+      <View style={{ position: 'absolute', top: BAND - FACE + 4, left: 12, borderRadius: FACE, borderWidth: 3, borderColor: c.panel }}>
+        <TeammateAvatar teammate={t} size={FACE} interactive={false} state={working ? 'working' : 'default'} />
+      </View>
+      <View style={{ flex: 1, paddingHorizontal: 14, paddingTop: 16, paddingBottom: 12 }}>
+        <Text variant="headline" numberOfLines={1}>{t.name}</Text>
+        <Text variant="footnote" color="ink2" numberOfLines={1}>{t.role}</Text>
+        {/* Two lines kept even when shorter, so cards in a row line up. */}
+        <Text variant="caption" color="ink3" numberOfLines={2} style={{ marginTop: 6, minHeight: 36 }}>{t.bio || 'No description yet.'}</Text>
+        <View style={{ flex: 1 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} accessibilityLabel={apps.length ? `Apps: ${apps.map(toolkitName).join(', ')}` : 'No apps'}>
+            {shown.map((tk, i) => <AppDot key={tk} toolkit={tk} logo={logos[tk]} style={{ marginLeft: i ? -7 : 0, zIndex: shown.length - i }} />)}
+            {more > 0 && <Text variant="footnote" color="ink3" tabular style={{ marginLeft: 6 }}>+{more}</Text>}
+            {!apps.length && <Text variant="footnote" color="ink4">No apps</Text>}
+          </View>
+          <IconButton icon={Message01Icon} variant="soft" round size={32} iconSize={16} accessibilityLabel={`Message ${t.name}`} onPress={() => { haptic.tap(); openChat(t.id) }} />
         </View>
       </View>
     </Card>
   )
 }
 
-function ToolChip({ toolkit }: { toolkit: string }) {
+/** One app, as a small round logo tile (stacked, they overlap like an avatar group). */
+function AppDot({ toolkit, logo, style }: { toolkit: string; logo?: string; style?: object }) {
   const { c } = useTheme()
   return (
-    <Squircle
-      accessibilityLabel={toolkitName(toolkit)}
-      style={{ height: 24, paddingHorizontal: 7, borderRadius: radius.sm, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+    <View style={[{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff', borderWidth: 2, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, style]}>
+      {logo ? <Image source={{ uri: logo }} style={{ width: 14, height: 14 }} contentFit="contain" /> : <BrandMark toolkit={toolkit} size={12} color="#18181b" />}
+    </View>
+  )
+}
+
+/** The grid's last cell: a dotted card that starts a new teammate. */
+function NewTeammateCard() {
+  const { c } = useTheme()
+  return (
+    <Press
+      radius={radius.xl}
+      onPress={() => openSheet('teammate')}
+      accessibilityRole="button"
+      accessibilityLabel="New teammate"
+      outerStyle={{ flex: 1 }}
+      style={{ flex: 1, minHeight: 200, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16 }}
     >
-      <BrandMark toolkit={toolkit} size={12} color={c.ink2} />
-      <Text variant="footnote" color="ink2">{toolkitName(toolkit)}</Text>
-    </Squircle>
+      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon icon={Add01Icon} size={20} color={c.ink2} />
+      </View>
+      <View style={{ alignItems: 'center', gap: 2 }}>
+        <Text variant="label">New teammate</Text>
+        <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>From a template or your own</Text>
+      </View>
+    </Press>
   )
 }
 
