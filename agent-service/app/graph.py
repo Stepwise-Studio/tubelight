@@ -320,6 +320,10 @@ async def compact(ctx: RunCtx, tm: dict, msgs: list[BaseMessage]) -> tuple[list,
 
 
 # ------------------------------------------------------------------ nodes
+class StreamCut(Exception):
+    """A reply stream ended early without an error; the node retries the call."""
+
+
 async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], stream_id: str) -> AIMessage:
     acc, sent, last = None, "", 0.0
     async for chunk in model.astream(messages):
@@ -332,6 +336,9 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
             sent, last = text, time.monotonic()
     if acc is None:
         return AIMessage("")
+    if acc.text and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
+        # The stream stopped mid-reply with no error (free tiers do this): never save the fragment as the answer.
+        raise StreamCut(f"reply stream ended without finishing after {len(acc.text)} chars")
     if acc.text and acc.text != sent:
         await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": acc.text})
     return AIMessage(content=acc.content, tool_calls=acc.tool_calls, id=acc.id or str(uuid.uuid4()),
@@ -362,6 +369,11 @@ def make_teammate(ctx: RunCtx, tm: dict):
             try:
                 ai = await _stream(ctx, tm, model, convo, stream_id)
                 break
+            except StreamCut as e:
+                if attempt == 2:
+                    raise
+                log.warning("retrying a cut-off reply: %s", e)
+                continue
             except openai.APIError as e:
                 # Groq rejects a call to a tool that isn't bound, or with arguments off-schema; a nudge and a
                 # second draw almost always fixes it.
@@ -412,6 +424,11 @@ def make_router(ctx: RunCtx):
         if len(ctx.members) == 1:
             return {"active": ctx.members[0]["id"], "queue": []}
         p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]), ctx.brief)
+        # A fired follow-up's owner always speaks first; the director decides who follows.
+        ask = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
+        lead = (ask.additional_kwargs.get("lead") if ask else None)
+        if lead and any(m["id"] == lead for m in ctx.members):
+            p.speakers = [lead, *(s for s in p.speakers if s != lead)]
         log.info("floor: %s -> %s", p.read, [ctx.member(i)["handle"] for i in p.speakers])
         return {"active": p.speakers[0] if p.speakers else None, "queue": p.speakers[1:],
                 "plan": {"read": p.read, "parts": p.parts}}

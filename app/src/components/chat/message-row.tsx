@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, Clock01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
-import { motion, useTheme } from '@/theme'
+import { fonts, motion, useTheme } from '@/theme'
 import {
   Collapse, Icon, Markdown, Notice, Press, Squircle, TeammateAvatar, Text, ThinkingIndicator, haptic, showMenu, useFlip,
 } from '@/ui'
@@ -118,7 +118,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   const m = item.m
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
-    case 'event': return <SystemRow icon={m.meta.followup ? Clock01Icon : FlashIcon} text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
+    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} />
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':
@@ -489,14 +489,21 @@ function HandoffMessage({ m, first, last, paused }: { m: ChatMessage; first: boo
   return <TeammateMessage m={{ ...m, text }} teammate={from} first={first} last={last} paused={paused} />
 }
 
-/** A centred capsule for things that happen in the chat (like WhatsApp's "X changed the group name"). */
-function SystemRow({ icon, text }: { icon: typeof FlashIcon; text: string }) {
+/**
+ * A centred capsule for things that happen in the chat (like WhatsApp's "X changed the group name"): what happened in
+ * medium weight, then the detail after the colon ("Calendy set a follow-up for 6 PM: review the copy").
+ */
+function SystemRow({ text }: { text: string }) {
   const { c } = useTheme()
+  const cut = text.indexOf(': ')
+  const [head, rest] = cut > 0 ? [text.slice(0, cut), text.slice(cut + 2)] : [text, '']
   return (
-    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 24 }} accessible accessibilityLabel={text}>
-      <Squircle style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 14, backgroundColor: c.panel2 }}>
-        <Icon icon={icon} size={13} color="ink3" />
-        <Text variant="footnote" color="ink2" style={{ flexShrink: 1, textAlign: 'center' }}>{text}</Text>
+    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 32 }} accessible accessibilityLabel={text}>
+      <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: c.panel2 }}>
+        <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>
+          <Text variant="footnote" color="ink2" style={{ fontFamily: fonts.medium }}>{head}</Text>
+          {rest ? `: ${rest}` : ''}
+        </Text>
       </Squircle>
     </View>
   )

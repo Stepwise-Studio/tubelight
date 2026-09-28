@@ -43,8 +43,10 @@ How to read the message:
   ("roast Sol at 6 pm", "deploy once the design is done"); then pick only the one member best placed to confirm it
   and set a follow-up, and nobody does the thing itself now. Otherwise "now".
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
-- The latest message may be a scheduled follow-up the chat set earlier: pick who should pick it up (its owner, or
-  whoever the work concerns), never nobody.
+- The latest message may be a scheduled follow-up the chat set earlier: the group picking a topic back up, now
+  (timing "now"). Its owner leads, first. Then add every member who took part in that topic or would naturally
+  react: for a debate, verdict, announcement or group circle-back that's everyone; for one person's task (sending
+  numbers, a deploy) just the owner, plus anyone whose work it depends on. Never nobody.
 - If no reply is needed (ok, thanks, got it), choose nobody.
 - If it's unclear who is meant, pick the member best placed to ask {user} one short clarifying question, and say so
   in their part.

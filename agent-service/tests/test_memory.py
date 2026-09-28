@@ -105,12 +105,24 @@ async def test_group_follow_up_goes_through_the_floor(api, env):
     assert fdb.rows("messages", sender_type="teammate")[-1]["teammate_id"] == sol["id"]
 
 
+async def test_a_teammates_group_follow_up_goes_through_the_floor_with_them_leading(api, env):
+    fdb, fake = env
+    dev, sol, tess = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "social"), teammate(fdb, "tess", "tester")
+    p = project(fdb, [dev, sol, tess])
+    await followups.add(OWNER, f"proj:{p['id']}", sol["id"], "announce the verdict", at=datetime.now(UTC), by="Sol")
+    # The director puts Sol third; as the owner, Sol still goes first.
+    fake.script = [plan(("dev", "React."), ("tess", "React."), ("sol", "Announce it.")), ai("Verdict: tabs."), ai("Noted."), ai("Fair.")]
+    await followups.tick(datetime.now(UTC) + timedelta(minutes=1))
+    await settle()
+    assert "@sol set it and leads; the members it concerns follow" in fake.calls[0][-1].content  # the director knows who leads
+    assert [m["teammate_id"] for m in fdb.rows("messages", sender_type="teammate")] == [sol["id"], dev["id"], tess["id"]]
+
+
 async def test_owner_who_left_the_group_falls_to_the_floor(api, env):
     fdb, fake = env
     dev, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "sol", "social")
-    gone = teammate(fdb, "old", "former")
     p = project(fdb, [dev, sol])
-    await followups.add(OWNER, f"proj:{p['id']}", gone["id"], "ship it", at=datetime.now(UTC))
+    await followups.add(OWNER, f"proj:{p['id']}", "someone-deleted", "ship it", at=datetime.now(UTC))
     fake.script = [plan(("dev", "Ship it.")), ai("Shipping.")]
     await followups.tick(datetime.now(UTC) + timedelta(minutes=1))
     await settle()
@@ -198,7 +210,7 @@ async def test_keeper_adds_marks_met_across_chats_and_cancels(env):
     # The design news lands in Sol's DM: the keeper there sees the group's pending condition and settles it.
     said(fdb, f"dm:{sol['id']}", "2026-09-28T05:00:00+00:00", "design tweak is done and uploaded", sol["id"])
     cond = pend["deploy the site"]["id"]
-    fake.script = [keeper(met=[{"id": cond, "evidence": "Sol said it's uploaded"}]), ai("Deploying now.")]
+    fake.script = [keeper(met=[{"id": cond, "evidence": "Sol said it's uploaded"}]), plan(("dev", "Deploy it.")), ai("Deploying now.")]
     assert (await brief.refresh(OWNER, f"dm:{sol['id']}", "Akhil", "UTC"))["met"] == 1
     listed = next(c[-1].content for c in fake.calls if "uploaded" in c[-1].content)
     assert f"id {cond} [group Launch] @dev: deploy the site (once Sol's design tweak is done)" in listed

@@ -137,12 +137,22 @@ async def fire(key: str, reason: str, evidence: str = "") -> bool:
                     "it's past the time to check. Ask where it stands and decide what to do.",
     }[reason]
     await note(f, "fired")  # everyone sees why someone is speaking up
-    # A DM's teammate; in a group the owner, or the floor director when it's the group's (or the owner has left).
-    teammate = thread["teammate_id"] if thread["kind"] == "dm" else None if f["owner"] == "group" else f["owner"]
-    await runs.start(f["owner_id"], f["thread_id"], f"{lead}{late} Pick it up and message them here.",
-                     trigger="schedule", teammate_id=teammate, sender="follow_up", event_type="follow_up")
+    # A DM's teammate picks it up. In a group it goes through the floor director like any message: the owner leads,
+    # and whoever else it concerns joins (a verdict for everyone, a circle-back several members worked on).
+    teammate, lead_by = (thread["teammate_id"], "") if thread["kind"] == "dm" else (None, await _lead(f))
+    await runs.start(f["owner_id"], f["thread_id"], f"{lead}{lead_by}{late} Pick it up and message them here.",
+                     trigger="schedule", teammate_id=teammate, sender="follow_up", event_type="follow_up",
+                     lead=None if f["owner"] == "group" else f["owner"])
     await memory.store.adelete(NS, key)
     return True
+
+
+async def _lead(f: dict[str, Any]) -> str:
+    """Who leads a group follow-up, for the floor director: its owner, if still a member."""
+    if f["owner"] == "group":
+        return " It's for the whole group."
+    row = await db.one("teammates", {"id": f"eq.{f['owner']}", "select": "handle"})
+    return f" @{row['handle']} set it and leads; the members it concerns follow." if row else ""
 
 
 async def poll(key: str, now: datetime | None = None) -> None:

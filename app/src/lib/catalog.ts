@@ -152,9 +152,19 @@ export function useConnections() {
 export async function connectApp(toolkit: string, name: string) {
   const callback = Linking.createURL('connections')
   const { redirect_url } = await api<{ redirect_url: string }>(`/connections/${toolkit}`, { method: 'POST', json: { callback_url: callback } })
-  await WebBrowser.openAuthSessionAsync(redirect_url, callback)
-  haptic.success()
-  toast({ title: `${name}: finish signing in?`, body: 'If you completed it, it shows as connected in a moment.' })
+  const res = await WebBrowser.openAuthSessionAsync(redirect_url, callback)
+  if (res.type !== 'success') return  // closed without finishing: nothing to announce
+  // Composio marks the account active a moment after the redirect: confirm before saying so.
+  for (let i = 0; i < 8; i++) {
+    const list = await api<Connection[]>('/connections').catch(() => null)
+    if (list?.some((k) => k.toolkit === toolkit && k.connected)) {
+      connectionsCache = list
+      haptic.success()
+      toast({ title: `${name} connected`, tone: 'success' })
+      return
+    }
+    await new Promise((r) => setTimeout(r, 1500))
+  }
 }
 
 let toolkitsCache: Toolkit[] | null = null

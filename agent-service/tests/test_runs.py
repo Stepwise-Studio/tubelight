@@ -327,3 +327,14 @@ async def test_mentioned_app_is_lent_for_the_request_through_approval(api, env, 
     await settle()
     assert sent and fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "done"
     assert fdb.rows("teammates", id=ivy["id"])[0].get("allowed_toolkits") in (None, [])  # lent, not granted
+
+
+async def test_a_reply_cut_off_mid_stream_is_retried_not_saved(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    cut = ai("Follow-up set for 1:1")
+    cut.response_metadata = {"finish_reason": None}
+    fake.script = [cut, ai("Follow-up set for 1:12 PM.")]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "remind me at 1:12"})
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Follow-up set for 1:12 PM."]

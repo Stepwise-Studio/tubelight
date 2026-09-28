@@ -86,7 +86,8 @@ class FakeLLM(BaseChatModel):
         self.calls.append(list(messages))
         nxt = self.script.pop(0)
         msg = nxt(messages) if callable(nxt) else nxt
-        return ChatResult(generations=[ChatGeneration(message=msg.model_copy())])
+        meta = {"finish_reason": "stop", **msg.response_metadata}  # like a real provider; a test can drop it
+        return ChatResult(generations=[ChatGeneration(message=msg.model_copy(update={"response_metadata": meta}))])
 
     def bind_tools(self, tools, **kw):
         return self

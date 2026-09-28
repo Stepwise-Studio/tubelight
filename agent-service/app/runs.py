@@ -50,6 +50,7 @@ async def sweep_orphans() -> None:
 
 
 async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str] | None = None, apps: list[str] | None = None,
+                lead: str | None = None,
                 trigger: str = "message", teammate_id: str | None = None, event_type: str | None = None,
                 sender: str | None = None, message_id: str | None = None) -> str:
     """Insert a runs row and start the graph in the background. Returns run_id."""
@@ -61,8 +62,8 @@ async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str]
     queue = [teammate_id] if teammate_id else []
     # With the message's id, a retry replaces the failed attempt's copy in the history instead of adding a second one.
     kw: dict[str, Any] = {"id": f"user:{message_id}"} if message_id else {}
-    if apps:
-        kw["additional_kwargs"] = {"apps": list(apps)}
+    if apps or lead:  # apps lent for this request; lead: who speaks first (a fired follow-up's owner)
+        kw["additional_kwargs"] = {**({"apps": list(apps)} if apps else {}), **({"lead": lead} if lead else {})}
     state = {"messages": [HumanMessage(text, name=sender, **kw) if sender else HumanMessage(text, **kw)],
              "queue": queue, "active": None, "handoffs": 0, "plan": {}, "pending": [], "decisions": {}}
     _spawn(run["id"], _execute(run["id"], owner_id, thread_id, trigger, state, event_type))
