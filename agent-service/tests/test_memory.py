@@ -286,7 +286,7 @@ async def test_director_sets_a_group_follow_up_when_nobody_was_named_and_the_gro
     assert fdb.rows("messages", kind="event")[-1]["text"].startswith("Follow-up set for ")
     [mine] = fdb.rows("messages", id=r.json()["message"]["id"])
     assert mine["meta"]["reactions"] == [{"by": dev["id"], "emoji": "👍"}, {"by": sol["id"], "emoji": "👍"},
-                                         {"by": ivy["id"], "emoji": "😂"}]  # one per member
+                                         {"by": ivy["id"], "emoji": "😂"}]  # everyone, one each, the director's pick kept
 
 
 async def test_user_reactions_toggle_and_stay_one_per_person(api, env):

@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -329,7 +329,11 @@ function ReactorRow({ by, emoji, onRemove }: { by: string; emoji: string; onRemo
     <ListRow
       title={by === 'user' ? 'You' : t?.name ?? 'Former teammate'}
       subtitle={onRemove ? 'Tap to remove' : t?.role}
-      leading={t ? <TeammateAvatar teammate={t} size={32} interactive={false} /> : <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c.panel2 }} />}
+      leading={t ? <TeammateAvatar teammate={t} size={32} interactive={false} /> : (
+        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={UserIcon} size={16} color="ink2" />
+        </View>
+      )}
       accessory={<Text style={{ fontSize: 22, lineHeight: 28 }}>{emoji}</Text>}
       onPress={onRemove}
       style={{ minHeight: 52 }}

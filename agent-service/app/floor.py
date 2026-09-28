@@ -161,7 +161,10 @@ def parse(text: str, members: list[dict], now: datetime | None = None, latest: s
             plan.at = datetime.fromisoformat(w.upper().rstrip("Z")).replace(tzinfo=now.tzinfo if now else None)
         except ValueError:
             plan.at = None
-        plan.what = str(data.get("what") or plan.read)[:500]
+        plan.what = str(data.get("what") or latest or plan.read)[:500]  # the task itself, never the director's notes
+        # It's the group's follow-up, so everyone acknowledges it: 👍 unless the director picked another emoji.
+        chosen = dict(plan.reacts)
+        plan.reacts = [(m["id"], chosen.get(m["id"], "👍")) for m in members]
     elif plan.later:
         # Something for later: the member addressed confirms and sets the follow-up; it fires for the group then.
         lead = plan.speakers[0]

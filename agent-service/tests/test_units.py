@@ -290,3 +290,16 @@ def test_later_request_confirmed_by_a_teammate_only_when_named():
     assert p.speakers == [] and p.what == "roast Ivy" and p.at.hour == 18  # nobody named: the director sets it
     assert parse(reply, members, now, "@dev remind us to roast ivy at 6").speakers == ["d"]
     assert parse(reply, members, now, "Dev, remind us at 6").speakers == ["d"]
+
+
+def test_director_set_follow_up_uses_the_message_when_the_model_gives_no_task_and_everyone_reacts():
+    import json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.floor import parse
+    members = [{"id": "d", "handle": "dev", "name": "Dev"}, {"id": "s", "handle": "sol", "name": "Sol"}]
+    now = datetime(2026, 9, 28, 13, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    p = parse(json.dumps({"read": "director notes", "when": "2026-09-28T14:23", "speakers": [],
+                          "react": [{"handle": "sol", "emoji": "😂"}]}), members, now, "lets roast ivy at 2:23")
+    assert p.what == "lets roast ivy at 2:23" and p.reacts == [("d", "👍"), ("s", "😂")]
