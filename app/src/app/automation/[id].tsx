@@ -171,7 +171,7 @@ function Existing({ id }: { id: string }) {
             </View>
           </View>
           <Surface style={{ overflow: 'hidden' }}>
-            <SwitchRow title={a.enabled ? 'On' : 'Paused'} subtitle={a.enabled ? `${whenText(a)} · ${timing(a)}` : 'It won’t run until you turn it back on.'}
+            <SwitchRow title={a.enabled ? 'On' : 'Paused'} subtitle={a.enabled ? timing(a) : 'It won’t run until you turn it back on.'}
               value={a.enabled} onChange={toggle} />
           </Surface>
         </View>

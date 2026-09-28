@@ -149,14 +149,14 @@ _http: httpx.AsyncClient | None = None
 TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 
 
-def _one(model_id: str) -> ChatOpenAI:
+def _one(model_id: str, retries: int = 1) -> ChatOpenAI:
     provider, model = parse(model_id)
     if not is_free(model_id):
         raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
     global _http
     _http = _http or httpx.AsyncClient(transport=_Transport(), timeout=TIMEOUT)
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
-                      default_headers=_headers(provider), timeout=TIMEOUT, max_retries=1, http_async_client=_http)
+                      default_headers=_headers(provider), timeout=TIMEOUT, max_retries=retries, http_async_client=_http)
 
 
 def _text_content(messages: list) -> list:
@@ -186,8 +186,11 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
         # Too big for Groq's free tier: go straight to providers with bigger budgets; Groq only as a last resort.
         ids = [m for m in ids if parse(m)[0] != "groq"] + [m for m in ids if parse(m)[0] == "groq"]
     chain: list[BaseChatModel | Runnable] = []
-    for m in ids or [config.DEFAULT_MODEL]:
-        llm = _one(m)
+    ids = ids or [config.DEFAULT_MODEL]
+    for i, m in enumerate(ids):
+        # A stalled or rate-limited model isn't retried when a fallback can answer: the retry only doubles the wait
+        # (a 30 s read timeout twice). The last one in the chain gets one retry.
+        llm = _one(m, retries=1 if i == len(ids) - 1 else 0)
         bound = llm.bind_tools(tools) if tools else llm.bind(response_format={"type": "json_object"}) if json else llm
         chain.append(RunnableLambda(_text_content) | bound if parse(m)[0] == "cloudflare" else bound)
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
