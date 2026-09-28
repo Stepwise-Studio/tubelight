@@ -18,7 +18,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
-from . import config
+from . import config, usage
 
 log = logging.getLogger(__name__)
 
@@ -129,11 +129,16 @@ class _Transport(httpx.AsyncBaseTransport):
                 headers = {k: v for k, v in request.headers.items() if k.lower() != "content-length"}
                 request = httpx.Request("POST", request.url, headers=headers, content=content, extensions=request.extensions)
         res = await self._inner.handle_async_request(request)
+        provider = usage.provider_of(request.url) if model else None
+        if provider and res.status_code != 429:
+            usage.record(provider, model, res.status_code, res.headers)
         if res.status_code == 429 and model:
             raw = await res.aread()
             wait = _cooldown(raw.decode(errors="ignore"))
             _cool[model] = time.monotonic() + wait
             log.warning("%s rate limited: skipping it for %ds", model, wait)
+            if provider:
+                usage.record(provider, model, 429, res.headers, per_day_limit=wait >= 3600)
             headers = [(k, v) for k, v in res.headers.items() if k.lower() not in ("content-encoding", "content-length")]
             return httpx.Response(429, headers=headers, content=raw, request=request)
         return res

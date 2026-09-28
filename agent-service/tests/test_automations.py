@@ -36,8 +36,8 @@ async def test_schedules_run_in_the_users_time_zone_quietly_when_idle_and_rememb
     ivy = teammate(fdb, "ivy", "email")
     await automations.create(OWNER, ivy, None, name="Morning brief", instructions="Summarise yesterday's mail.",
                              cron="0 8 * * *", tz="Asia/Kolkata", when="every day at 8 AM")
-    # 8 AM in Kolkata is 02:30 UTC, not 08:00 UTC.
-    await events.tick(datetime(2026, 9, 29, 8, 0, tzinfo=UTC))
+    # 8 AM in Kolkata is 02:30 UTC: nothing is due at midnight UTC (05:30 there).
+    await events.tick(datetime(2026, 9, 29, 0, 0, tzinfo=UTC))
     assert not fdb.rows("events", type="schedule")
     fake.script = [ai("QUIET")]
     await events.tick(datetime(2026, 9, 29, 2, 31, tzinfo=UTC))
@@ -156,3 +156,45 @@ async def test_set_up_from_the_app_in_a_project_the_teammate_is_in(api, env):
     a = (await api.post("/automations", json=body)).json()
     assert a["thread_id"] == "proj:p1" and a["next_run"] and a["tz"] == "Asia/Kolkata"
     assert fdb.rows("messages", kind="event")[-1]["text"] == "You set up an automation: Weekly wrap · Fridays at 5:00 PM"
+
+
+async def test_a_slot_missed_while_offline_runs_once_late_but_not_when_it_is_stale(env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "email")
+    await automations.create(OWNER, ivy, None, name="Morning brief", instructions="Brief.", cron="0 8 * * *",
+                             tz="Asia/Kolkata", when="every day at 8 AM")
+    fake.script = [ai("Here's the brief.")]
+    await events.tick(datetime(2026, 10, 1, 5, 0, tzinfo=UTC))  # 10:30 AM there: 2.5 h late, still worth it
+    await settle()
+    assert "This run is late (it was due 08:00 AM" in fake.calls[-1][-1].content
+    await events.tick(datetime(2026, 10, 1, 5, 1, tzinfo=UTC))  # once only
+    await events.tick(datetime(2026, 10, 2, 12, 0, tzinfo=UTC))  # 5:30 PM there: too stale to replay
+    assert len(fdb.rows("events", type="schedule")) == 1
+
+
+async def test_three_failed_runs_in_a_row_pause_it_with_a_capsule(api, env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "email")
+    rule = await automations.create(OWNER, ivy, None, name="Brief", instructions="Brief.", cron="0 8 * * *", tz="UTC")
+
+    def boom(_):
+        raise RuntimeError("provider down")
+    for _ in range(3):
+        fake.script = [boom]
+        await api.post(f"/automations/{rule['id']}/run")
+        await settle()
+    [r] = fdb.rows("event_rules")
+    assert r["enabled"] is False
+    assert fdb.rows("messages", kind="event")[-1]["text"] == "Paused after 3 failed runs: Brief"
+
+
+async def test_runs_use_only_the_apps_they_were_given(env):
+    from app import graph
+    from langchain_core.messages import HumanMessage
+
+    ctx = graph.RunCtx(run_id="r", owner_id=OWNER, thread_id="dm:x", members=[])
+    tm = {"allowed_toolkits": ["GMAIL", "LINEAR", "SLACK"]}
+    ctx.scope([HumanMessage("[Automation: x]", name="automation", additional_kwargs={"only_apps": ["GMAIL"]})])
+    assert ctx.toolkits(tm) == ["GMAIL"]
+    ctx.scope([HumanMessage("hi")])  # the user writing next: back to everything
+    assert ctx.toolkits(tm) == ["GMAIL", "LINEAR", "SLACK"]

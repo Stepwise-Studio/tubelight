@@ -242,7 +242,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
     async def automate(action: str, name: str = "", instructions: str = "", schedule: str = "", app_event: str = "",
                        event_settings: dict | None = None, keywords: list[str] | None = None, when: str = "",
-                       automation_id: str = "") -> str:
+                       automation_id: str = "", apps: list[str] | None = None) -> str:
         mine = await automations.in_thread(ctx.owner_id, ctx.thread_id)
         if action == "list":
             return "\n".join(f"- [{r['id'][:8]}] {r['name']} · {automations.describe(r)}" + ("" if r["enabled"] else " (paused)")
@@ -251,7 +251,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             try:
                 rule = await automations.create(ctx.owner_id, tm, (ctx.project or {}).get("id"), name=name or "Automation",
                                                 instructions=instructions, cron=schedule or None, tz=ctx.timezone,
-                                                trigger=app_event or None, config=event_settings, contains=keywords, when=when)
+                                                trigger=app_event or None, config=event_settings, contains=keywords, when=when,
+                                                toolkits=apps or None)
             except ValueError as e:
                 return str(e)
             return (f"Set up {rule['name']} · {automations.describe(rule)}. The chat already shows a capsule for it: "
@@ -262,7 +263,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         try:
             if action == "update":
                 await automations.update(rule, tm["name"], name=name, instructions=instructions, cron=schedule,
-                                         when=when, contains=keywords)
+                                         when=when, contains=keywords, **({"toolkits": apps} if apps else {}))
             elif action in ("pause", "resume"):
                 await automations.set_enabled(rule, action == "resume", tm["name"])
             elif action == "delete":
@@ -284,7 +285,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         "report), when (plain words, e.g. 'every 3 hours'), and either schedule (a 5-field cron in "
                         "their local time: '0 */3 * * *', '0 8 * * 1-5') or app_event (a slug from app_events) with "
                         "event_settings (e.g. Gmail {\"query\": \"from:abc@x.com\"}) and optional keywords (all must "
-                        "appear in the event). Others need automation_id from list."),
+                        "appear in the event), and optional apps (only the apps each run needs, e.g. [\"GMAIL\"]; leave it out for all "
+                        "yours). Others need automation_id from list."),
         StructuredTool.from_function(
             coroutine=app_events, name="app_events",
             description="The events an app can push to you (for automate's app_event), with their settings. app: "

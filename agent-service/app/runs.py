@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import brief, db, followups, graph, learn, llm, memory, sandbox
+from . import automations, brief, db, followups, graph, learn, llm, memory, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -52,7 +52,7 @@ async def sweep_orphans() -> None:
 async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str] | None = None, apps: list[str] | None = None,
                 lead: str | None = None,
                 trigger: str = "message", teammate_id: str | None = None, event_type: str | None = None,
-                sender: str | None = None, message_id: str | None = None) -> str:
+                sender: str | None = None, message_id: str | None = None, only_apps: list[str] | None = None) -> str:
     """Insert a runs row and start the graph in the background. Returns run_id."""
     run = await db.insert("runs", {"owner_id": owner_id, "thread_id": thread_id, "trigger": trigger,
                                    "teammate_id": teammate_id, "status": "running"})
@@ -62,8 +62,11 @@ async def start(owner_id: str, thread_id: str, text: str, *, mentions: list[str]
     queue = [teammate_id] if teammate_id else []
     # With the message's id, a retry replaces the failed attempt's copy in the history instead of adding a second one.
     kw: dict[str, Any] = {"id": f"user:{message_id}"} if message_id else {}
-    if apps or lead:  # apps lent for this request; lead: who speaks first (a fired follow-up's owner)
-        kw["additional_kwargs"] = {**({"apps": list(apps)} if apps else {}), **({"lead": lead} if lead else {})}
+    # apps: lent for this request; lead: who speaks first (a fired follow-up's owner); only_apps: an automation's
+    # runs may use just the apps it was given (graph.RunCtx.scope)
+    if apps or lead or only_apps is not None:
+        kw["additional_kwargs"] = {**({"apps": list(apps)} if apps else {}), **({"lead": lead} if lead else {}),
+                                   **({"only_apps": list(only_apps)} if only_apps is not None else {})}
     state = {"messages": [HumanMessage(text, name=sender, **kw) if sender else HumanMessage(text, **kw)],
              "queue": queue, "active": None, "handoffs": 0, "plan": {}, "pending": [], "decisions": {}}
     _spawn(run["id"], _execute(run["id"], owner_id, thread_id, trigger, state, event_type))
@@ -156,6 +159,8 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
             await db.activity(owner_id, "error", type(e).__name__, run_id=run_id, thread_id=thread_id,
                               output={"error": str(e)[:1000]}, status="error")
             await _finish(run_id, owner_id, thread_id, "error", text, teammate_id=active)
+            if (event_type or "").startswith("automation:"):
+                await automations.after_failure(run_id)  # three in a row: it pauses itself and says so
         except Exception:
             log.exception("could not record failure of run %s", run_id)
     finally:

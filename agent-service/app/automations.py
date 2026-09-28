@@ -57,6 +57,7 @@ async def note(rule: dict[str, Any], event: str, by: str) -> None:
         "created": f"{by} set up an automation: {rule['name']} · {describe(rule)}",
         "updated": f"{by} updated an automation: {rule['name']} · {describe(rule)}",
         "paused": f"{by} paused an automation: {rule['name']}",
+        "failing": f"Paused after {FAILS_TO_PAUSE} failed runs: {rule['name']}",
         "resumed": f"{by} resumed an automation: {rule['name']} · {describe(rule)}",
         "deleted": f"{by} deleted an automation: {rule['name']}",
     }[event]
@@ -72,8 +73,11 @@ async def app_events(toolkit: str, limit: int = 15) -> list[dict[str, Any]]:
         out = []
         for t in getattr(r, "items", r) or []:
             cfg = t.config or {}
+            props = cfg.get("properties") or {}
             out.append({"slug": t.slug, "name": t.name, "required": cfg.get("required") or [],
-                        "settings": {k: (v.get("description") or "")[:120] for k, v in (cfg.get("properties") or {}).items()}})
+                        "settings": {k: (v.get("description") or "")[:120] for k, v in props.items()},
+                        "types": {k: v.get("type") or "string" for k, v in props.items()},
+                        "defaults": {k: v["default"] for k, v in props.items() if v.get("default") is not None}})
         return out
     return await asyncio.to_thread(fetch)
 
@@ -106,17 +110,38 @@ async def stop_trigger(trigger_id: str | None) -> None:
 
 
 # ------------------------------------------------------------------ lifecycle
+FAILS_TO_PAUSE = 3  # consecutive failed runs before an automation pauses itself (and says so)
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _apps(toolkits: list[str] | None) -> list[str] | None:
+    """None = every app the teammate may use; a list = only these (upper-case Composio toolkit slugs)."""
+    return None if toolkits is None else list(dict.fromkeys(str(t).upper() for t in toolkits if str(t).strip()))[:20]
+
+
+def _keywords(words: list[str] | None) -> list[str]:
+    return [str(w).strip()[:60] for w in words or [] if str(w).strip()][:5]
+
+
 async def create(owner_id: str, teammate: dict[str, Any], project_id: str | None, *, name: str, instructions: str,
                  cron: str | None = None, tz: str = "UTC", trigger: str | None = None,
                  config: dict[str, Any] | None = None, contains: list[str] | None = None, when: str = "",
-                 by: str | None = None) -> dict[str, Any]:
+                 by: str | None = None, toolkits: list[str] | None = None) -> dict[str, Any]:
     """Set up a schedule (cron) or app-event (trigger) automation. Raises ValueError with a readable reason.
-    by: who the capsule credits (the teammate, or "You" from the app)."""
+    by: who the capsule credits (the teammate, or "You" from the app). toolkits: the apps its runs may use."""
     if bool(cron) == bool(trigger):
         raise ValueError("Give either a schedule or an app event, not both.")
+    if not instructions.strip():
+        raise ValueError("Say what to do on each run.")
     if cron and (why := check_cron(cron)):
         raise ValueError(why)
-    match: dict[str, Any] = {"when": when[:120]}
+    # active_from: slots before it never run (no catch-up for time before it existed or while it was paused)
+    match: dict[str, Any] = {"when": when[:120], "active_from": _now()}
+    if (apps := _apps(toolkits)) is not None:
+        match["toolkits"] = apps
     if cron:
         match |= {"cron": cron, "tz": tz}
     else:
@@ -124,42 +149,88 @@ async def create(owner_id: str, teammate: dict[str, Any], project_id: str | None
             match |= {"trigger": trigger, "config": config or {}, "trigger_id": await start_trigger(owner_id, trigger, config or {})}
         except Exception as e:
             raise ValueError(f"Couldn't start {trigger}: {str(e)[:200]}. Check the app is connected and the settings.") from e
-        if contains:
-            match["contains"] = [str(w)[:60] for w in contains][:5]
+        if contains := _keywords(contains):
+            match["contains"] = contains
     rule = await db.insert("event_rules", {
-        "owner_id": owner_id, "name": name[:80], "event_type": "schedule" if cron else "app", "match": match,
-        "project_id": project_id, "teammate_id": teammate["id"], "instructions": instructions[:2000], "enabled": True,
-        "max_per_hour": 20,
+        "owner_id": owner_id, "name": name.strip()[:80] or "Automation", "event_type": "schedule" if cron else "app",
+        "match": match, "project_id": project_id, "teammate_id": teammate["id"], "instructions": instructions.strip()[:2000],
+        "enabled": True, "max_per_hour": 20,
     })
     await note(rule, "created", by or teammate["name"])
     return rule
 
 
 async def update(rule: dict[str, Any], by: str, **changes: Any) -> dict[str, Any]:
-    """Change name / instructions / schedule. (An app event is changed by deleting and creating.)"""
-    patch: dict[str, Any] = {k: v for k, v in (("name", changes.get("name")), ("instructions", changes.get("instructions"))) if v}
+    """Change name, instructions, schedule (cron, tz), the app event (trigger + settings: the Composio trigger is
+    swapped), keywords, or which apps it may use. Unchanged keys are left alone. One capsule for the lot."""
+    patch: dict[str, Any] = {k: v.strip()[:80 if k == "name" else 2000] for k, v in
+                             (("name", changes.get("name")), ("instructions", changes.get("instructions"))) if v and v.strip()}
     match = dict(rule.get("match") or {})
-    if changes.get("cron"):
+    if changes.get("cron") or changes.get("tz"):
         if rule["event_type"] != "schedule":
-            raise ValueError("This automation runs on an app event; delete it and set up a scheduled one instead.")
-        if why := check_cron(changes["cron"]):
-            raise ValueError(why)
-        match["cron"] = changes["cron"]
+            raise ValueError("This automation runs on an app event, not a schedule.")
+        if changes.get("cron"):
+            if why := check_cron(changes["cron"]):
+                raise ValueError(why)
+            match["cron"] = changes["cron"]
+        if changes.get("tz"):
+            match["tz"] = changes["tz"]
+        match["active_from"] = _now()  # a new schedule doesn't replay the old one's slots
+    if changes.get("trigger") or changes.get("config") is not None:
+        if rule["event_type"] != "app":
+            raise ValueError("This automation runs on a schedule, not an app event.")
+        trigger, config = changes.get("trigger") or match.get("trigger"), changes.get("config") if changes.get("config") is not None else match.get("config") or {}
+        if trigger != match.get("trigger") or config != (match.get("config") or {}):
+            try:  # start the new one first: a failed swap leaves the old trigger running
+                new_id = await start_trigger(rule["owner_id"], trigger, config)
+            except Exception as e:
+                raise ValueError(f"Couldn't start {trigger}: {str(e)[:200]}. Check the app is connected and the settings.") from e
+            await stop_trigger(match.get("trigger_id"))
+            match |= {"trigger": trigger, "config": config, "trigger_id": new_id}
+            if not rule["enabled"]:
+                await set_trigger(new_id, False)
     if changes.get("when"):
         match["when"] = changes["when"][:120]
     if changes.get("contains") is not None and rule["event_type"] == "app":
-        match["contains"] = [str(w)[:60] for w in changes["contains"]][:5]
+        match["contains"] = _keywords(changes["contains"])
+    if "toolkits" in changes:
+        if (apps := _apps(changes["toolkits"])) is None:
+            match.pop("toolkits", None)
+        else:
+            match["toolkits"] = apps
     patch["match"] = match
     [row] = await db.update("event_rules", {"id": f"eq.{rule['id']}"}, patch)
     await note(row, "updated", by)
     return row
 
 
-async def set_enabled(rule: dict[str, Any], on: bool, by: str) -> dict[str, Any]:
-    [row] = await db.update("event_rules", {"id": f"eq.{rule['id']}"}, {"enabled": on})
-    await set_trigger((rule.get("match") or {}).get("trigger_id"), on)
-    await note(row, "resumed" if on else "paused", by)
+async def set_enabled(rule: dict[str, Any], on: bool, by: str, why: str = "") -> dict[str, Any]:
+    match = {**(rule.get("match") or {}), **({"active_from": _now()} if on else {})}  # resuming doesn't replay the pause
+    [row] = await db.update("event_rules", {"id": f"eq.{rule['id']}"}, {"enabled": on, "match": match})
+    await set_trigger(match.get("trigger_id"), on)
+    await note(row, "resumed" if on else "failing" if why else "paused", by)
     return row
+
+
+async def after_failure(run_id: str) -> None:
+    """A run of an automation failed: after FAILS_TO_PAUSE failures in a row it pauses itself, posts a capsule and
+    pings the user, instead of failing silently every few hours."""
+    from . import push
+
+    ev = await db.one("events", {"run_id": f"eq.{run_id}", "select": "rule_id"})
+    rule = ev and ev.get("rule_id") and await db.one("event_rules", {"id": f"eq.{ev['rule_id']}"})
+    if not rule or not rule["enabled"] or rule["event_type"] not in ("schedule", "app"):
+        return
+    last = await db.select("events", {"rule_id": f"eq.{rule['id']}", "status": "eq.routed", "order": "created_at.desc",
+                                      "limit": str(FAILS_TO_PAUSE), "select": "run_id"})
+    ids = [e["run_id"] for e in last if e.get("run_id")]
+    if len(ids) < FAILS_TO_PAUSE:
+        return
+    runs = await db.select("runs", {"id": f"in.({','.join(ids)})", "select": "status"})
+    if len(runs) == FAILS_TO_PAUSE and all(r["status"] == "error" for r in runs):
+        await set_enabled(rule, False, "Tubelight", why="failing")
+        await push.notify(rule["owner_id"], f"{rule['name']} paused",
+                          f"It failed {FAILS_TO_PAUSE} times in a row. Open it to see why, then turn it back on.", thread_of(rule))
 
 
 async def delete(rule: dict[str, Any], by: str) -> None:
@@ -175,3 +246,75 @@ async def in_thread(owner_id: str, thread_id: str) -> list[dict[str, Any]]:
     rows = await db.select("event_rules", {"owner_id": f"eq.{owner_id}", "event_type": "in.(schedule,app)",
                                            "order": "created_at", **scope})
     return rows
+
+
+# ------------------------------------------------------------------ drafting from plain words (the app's form)
+DRAFT = """You turn someone's request into an automation their AI teammate {name} ({role}) will carry out on its own.
+Now: {now}, their time zone. Apps {name} can use: {apps}.
+Return JSON only, with these keys:
+"name": 2-4 words saying what it does, not when ("Inbox brief", "New issue triage").
+"instructions": what {name} does on each run, self-contained, addressed to {name}: what to check, what counts, how
+  to report. 1-4 sentences. Keep the person's specifics (senders, projects, thresholds). Anything that sends, posts or
+  changes things is only prepared and asked about first.
+"kind": "schedule" for anything time-based ("every morning", "hourly", "on Fridays at 5"); "app" for "whenever /
+  as soon as something happens in an app" (a new mail, a new issue).
+"cron": for a schedule, a 5-field cron in their local time, at most every 15 minutes; else null. A daily thing with
+  no time given gets a sensible one (a morning brief at 8:00 AM, an end-of-day wrap at 6:00 PM).
+"when": the timing in plain lowercase words ("weekdays at 9:00 AM", "every 3 hours", "when a mail from abc@x.com arrives").
+"app": for kind app, which app's event starts it (one of the apps above, as written there); else null.
+"event": for kind app, the event in plain words ("new email", "issue created"); else null.
+"apps": the apps each run needs to do the work (from the apps above; [] if none)."""
+
+PICK = """Pick the app event that starts this automation and fill in its settings.
+Request: {text}
+Events ({app}), as slug | name | required settings | settings with descriptions:
+{events}
+Return JSON only: {{"trigger": the slug, "settings": {{setting: value}} using only listed settings and only values the
+request itself gives (never invent an ID or a name), "missing": [required settings the request doesn't give],
+"keywords": [words that must appear in the event, e.g. a sender's address; [] if none]}}"""
+
+
+async def _json(system: str, user: str) -> dict[str, Any]:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from . import brief, config, llm
+    res = await llm.chat_model(config.KEEPER_MODEL, json=True).ainvoke([SystemMessage(system), HumanMessage(user)])
+    data = brief._parse(res.text)
+    return data if isinstance(data, dict) else {}
+
+
+async def draft(text: str, teammate: dict[str, Any], apps: list[str], now: datetime) -> dict[str, Any]:
+    """Fill the app's automation form from plain words ("every weekday at 9 tell me what's urgent in my inbox").
+    Everything comes back editable; `missing` lists app-event settings it couldn't fill, `note` says what to check."""
+    d = await _json(DRAFT.format(name=teammate["name"], role=teammate.get("role") or "teammate",
+                                 now=f"{now:%A, %B %d, %Y, %I:%M %p}", apps=", ".join(apps) or "none"), text)
+    out: dict[str, Any] = {"name": str(d.get("name") or "")[:80], "instructions": str(d.get("instructions") or "")[:2000],
+                           "kind": "app" if d.get("kind") == "app" else "schedule", "when": str(d.get("when") or "")[:120],
+                           "cron": None, "trigger": None, "settings": {}, "keywords": [], "missing": [], "note": "",
+                           "apps": [a.upper() for a in d.get("apps") or [] if str(a).upper() in apps]}
+    if out["kind"] == "schedule":
+        cron = str(d.get("cron") or "").strip()
+        if cron and not check_cron(cron):
+            out["cron"] = cron
+        else:
+            out["note"] = "Pick when it runs: that part wasn't clear."
+        return out
+    app = str(d.get("app") or "").upper()
+    if app not in apps:
+        return {**out, "note": f"{teammate['name']} can't use that app yet: connect it or pick another teammate."}
+    out["app"] = app
+    try:
+        events = await app_events(app)
+    except Exception:
+        events = []
+    if not events:
+        return {**out, "note": f"{app.title()} doesn't send events Tubelight can listen to. Try a schedule instead."}
+    listing = "\n".join(f"{e['slug']} | {e['name']} | {', '.join(e['required']) or '-'} | "
+                        + "; ".join(f"{k}: {v}" for k, v in e["settings"].items()) for e in events)
+    p = await _json(PICK.format(text=text, app=app, events=listing), f"The event: {d.get('event') or text}")
+    ev = next((e for e in events if e["slug"] == p.get("trigger")), None)
+    if not ev:
+        return {**out, "note": "Pick which event starts it."}
+    settings = {k: v for k, v in (p.get("settings") or {}).items() if k in ev["settings"] and v not in (None, "")}
+    return {**out, "trigger": ev["slug"], "settings": settings, "keywords": _keywords(p.get("keywords")),
+            "missing": [k for k in ev["required"] if k not in settings]}

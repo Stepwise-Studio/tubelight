@@ -60,6 +60,7 @@ class RunCtx:
     docker: bool = False
     turn_tools: dict[str, list] = field(default_factory=dict)
     apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
+    only: list[str] | None = None  # an automation run: just these apps (see scope)
     brief: str = ""  # the running summary of this chat (brief.py)
     sandboxes: dict[str, Sandbox] = field(default_factory=dict)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
@@ -84,12 +85,16 @@ class RunCtx:
         """Apps the user @mentioned in the request being answered; whoever answers it gets them, on top of their own."""
         ask = next((m for m in reversed(msgs) if isinstance(m, HumanMessage) and not m.name), None)
         apps = list((ask.additional_kwargs.get("apps") if ask else None) or [])
-        if apps != self.apps:
-            self.apps = apps
+        # The request being answered is an automation's (the latest human turn): its runs use only its apps.
+        last = next((m for m in reversed(msgs) if isinstance(m, HumanMessage)), None)
+        only = last.additional_kwargs.get("only_apps") if last is not None and last.name == "automation" else None
+        if apps != self.apps or only != self.only:
+            self.apps, self.only = apps, only
             self._tools.clear()
 
     def toolkits(self, tm: dict) -> list[str]:
-        return list(dict.fromkeys([*(tm.get("allowed_toolkits") or []), *self.apps]))
+        kits = list(dict.fromkeys([*(tm.get("allowed_toolkits") or []), *self.apps]))
+        return kits if self.only is None else [k for k in kits if k.upper() in self.only]
 
     async def tools_for(self, tm: dict) -> list[BaseTool]:
         if tm["id"] not in self._tools:

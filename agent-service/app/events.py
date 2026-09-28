@@ -9,10 +9,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
-from . import db, followups, runs
+from . import db, followups, runs, usage
 
 log = logging.getLogger(__name__)
-SLOT_GRACE_S = 120  # a schedule slot older than this (e.g. after downtime) is skipped, not replayed
+SLOT_GRACE_S = 120  # a slot this fresh is simply on time
+CATCH_UP_MAX_S = 6 * 3600  # after downtime, the latest missed slot still runs (once, saying it's late) within this
 
 EMAIL_TRIAGE = (
     "\n\nThis is an email. First rate its importance for the user from 1 (spam) to 5 (needs them today). "
@@ -69,13 +70,21 @@ async def fire(rule: dict[str, Any], event: dict[str, Any]) -> str:
     thread_id = f"proj:{rule['project_id']}" if rule.get("project_id") else f"dm:{rule['teammate_id']}"
     if rule["event_type"] in ("schedule", "app"):
         tz = (rule.get("match") or {}).get("tz") or await db.user_timezone(rule["owner_id"]) or "UTC"
-        text = (f"[Automation: {rule['name']}, {(rule.get('match') or {}).get('when') or rule['event_type']}]\n"
+        late = ""
+        if (event.get("payload") or {}).get("late"):
+            try:
+                due = datetime.fromisoformat(event["payload"]["slot"]).astimezone(ZoneInfo(tz))
+                late = f"This run is late (it was due {due:%I:%M %p}; Tubelight was offline): say so in a few words.\n"
+            except (KeyError, ValueError, ZoneInfoNotFoundError):
+                pass
+        text = (f"[Automation: {rule['name']}, {(rule.get('match') or {}).get('when') or rule['event_type']}]\n{late}"
                 f"Your standing instructions: {rule.get('instructions') or 'Tell them what matters, briefly.'}\n"
                 f"{await _since(rule, event['id'], tz)}"
                 + (f"\nThe event:\n```json\n{json.dumps(event['payload'], indent=1, default=str)[:6000]}\n```"
                    if rule["event_type"] == "app" else "") + QUIET)
         run_id = await runs.start(rule["owner_id"], thread_id, text, trigger="schedule" if rule["event_type"] == "schedule" else "event",
-                                  teammate_id=rule["teammate_id"], event_type=f"automation:{rule['name']}", sender="automation")
+                                  teammate_id=rule["teammate_id"], event_type=f"automation:{rule['name']}", sender="automation",
+                                  only_apps=(rule.get("match") or {}).get("toolkits"))
         await db.update("events", {"id": f"eq.{event['id']}"}, {"status": "routed", "rule_id": rule["id"], "run_id": run_id})
         await db.activity(rule["owner_id"], "event", event["type"], run_id=run_id, thread_id=thread_id,
                           teammate_id=rule["teammate_id"], input={"event_id": event["id"], "rule_id": rule["id"]})
@@ -155,14 +164,24 @@ async def tick(now: datetime | None = None) -> None:
             zone = ZoneInfo((rule.get("match") or {}).get("tz") or "UTC")
         except (ZoneInfoNotFoundError, ValueError):
             zone = ZoneInfo("UTC")
-        slot = croniter(cron, now.astimezone(zone)).get_prev(datetime)
-        if (now - slot).total_seconds() > SLOT_GRACE_S:
+        it = croniter(cron, now.astimezone(zone))
+        slot = it.get_prev(datetime)
+        # Missed while the server was down: the latest slot runs once, late, if it's still worth it (within half the
+        # interval, 6 h at most: a 3-hourly check catches up for 90 min, a morning brief until early afternoon).
+        # Never for time before the automation existed or while it was paused (active_from).
+        interval = (slot - it.get_prev(datetime)).total_seconds()
+        late = (now - slot).total_seconds()
+        if late > min(max(SLOT_GRACE_S, interval / 2), CATCH_UP_MAX_S):
+            continue
+        active_from = (rule.get("match") or {}).get("active_from")
+        if active_from and slot < datetime.fromisoformat(active_from):
             continue
         slot_iso = slot.isoformat()
         if await db.select("events", {"rule_id": f"eq.{rule['id']}", "payload->>slot": f"eq.{slot_iso}", "select": "id"}):
             continue
         event = await db.insert("events", {"owner_id": rule["owner_id"], "type": "schedule", "source": "schedule",
-                                           "payload": {"slot": slot_iso, "cron": cron}, "rule_id": rule["id"]})
+                                           "payload": {"slot": slot_iso, "cron": cron, **({"late": True} if late > SLOT_GRACE_S else {})},
+                                           "rule_id": rule["id"]})
         if await rate_limited(rule):
             await db.update("events", {"id": f"eq.{event['id']}"}, {"status": "rate_limited"})
         else:
@@ -175,4 +194,5 @@ async def schedule_loop() -> None:
             await tick()
         except Exception as e:
             log.warning("schedule tick failed: %s", e)
+        await usage.flush()
         await asyncio.sleep(30)  # follow-ups fire within 30 s of their time

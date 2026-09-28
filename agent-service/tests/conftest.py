@@ -125,6 +125,15 @@ async def env(monkeypatch):
 
     monkeypatch.setattr(llm, "context_window", ctx_window)
     monkeypatch.setattr(connectors, "tools_for", _no_tools)
+
+    async def nothing_connected(user_id: str) -> set[str]:
+        return set()
+
+    async def no_catalog() -> list:
+        return []
+
+    monkeypatch.setattr(connectors, "ready", nothing_connected)  # never reach the real Composio from tests
+    monkeypatch.setattr(connectors, "catalog", no_catalog)
     monkeypatch.setattr(runs, "docker_ok", False)
     monkeypatch.setattr(memory.config, "SUPABASE_DB_URL", "")
     await memory.init(embed_fn=fake_embed)

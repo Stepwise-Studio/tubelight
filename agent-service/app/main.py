@@ -20,7 +20,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox
+from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -61,6 +61,7 @@ async def lifespan(_: FastAPI):
     scheduler.cancel()
     for t in list(runs.tasks.values()):
         t.cancel()
+    await usage.flush()
     await memory.close()
 
 
@@ -536,20 +537,56 @@ async def composio_webhook(request: Request):
     return {"ok": True, "fired": fired}
 
 
-def _automation_view(r: dict[str, Any], last: str | None) -> dict[str, Any]:
+def _trigger_app(trigger: str | None) -> str | None:
+    """GMAIL_NEW_GMAIL_MESSAGE -> GMAIL: Composio trigger slugs start with their toolkit."""
+    return trigger.split("_", 1)[0] if trigger else None
+
+
+def _automation_view(r: dict[str, Any], last: str | None, problems: list[str] | None = None) -> dict[str, Any]:
     m = r.get("match") or {}
-    nxt = None
-    if r["event_type"] == "schedule" and r["enabled"] and m.get("cron"):
+    nxt: list[str] = []
+    if r["event_type"] == "schedule" and m.get("cron"):
         try:
             zone = zoneinfo.ZoneInfo(m.get("tz") or "UTC")
         except (zoneinfo.ZoneInfoNotFoundError, ValueError):
             zone = zoneinfo.ZoneInfo("UTC")
-        nxt = croniter(m["cron"], datetime.now(zone)).get_next(datetime).isoformat()
+        it = croniter(m["cron"], datetime.now(zone))
+        nxt = [it.get_next(datetime).isoformat() for _ in range(3)]
     return {"id": r["id"], "name": r["name"], "instructions": r["instructions"], "kind": r["event_type"],
             "when": m.get("when") or "", "enabled": r["enabled"], "teammate_id": r["teammate_id"],
             "thread_id": automations.thread_of(r), "created_at": r.get("created_at"),
-            "cron": m.get("cron"), "tz": m.get("tz"), "trigger": m.get("trigger"), "settings": m.get("config") or {},
-            "keywords": m.get("contains") or [], "last_run": last, "next_run": nxt}
+            "cron": m.get("cron"), "tz": m.get("tz"), "trigger": m.get("trigger"), "app": _trigger_app(m.get("trigger")),
+            "settings": m.get("config") or {}, "keywords": m.get("contains") or [],
+            # None: every app the teammate may use; a list: only these
+            "toolkits": m.get("toolkits"), "last_run": last,
+            "next_run": nxt[0] if nxt and r["enabled"] else None, "upcoming": nxt if r["enabled"] else [],
+            "problems": problems or []}
+
+
+async def _problems(rules: list[dict[str, Any]], owner_id: str) -> dict[str, list[str]]:
+    """What would stop each automation from working, in words: a disconnected app, a teammate who left the project."""
+    if not rules:
+        return {}
+    try:
+        ready = await connectors.ready(owner_id)
+    except Exception:
+        ready = None  # Composio unreachable: don't cry wolf
+    members = {(m["project_id"], m["teammate_id"]) for m in await db.select(
+        "project_members", {"owner_id": f"eq.{owner_id}", "select": "project_id,teammate_id"})}
+    out: dict[str, list[str]] = {}
+    for r in rules:
+        m, issues = r.get("match") or {}, []
+        if r.get("project_id") and (r["project_id"], r["teammate_id"]) not in members:
+            issues.append("Its teammate is no longer in this project, so it can't post there.")
+        if ready is not None:
+            app = _trigger_app(m.get("trigger"))
+            if app and app not in ready:
+                issues.append(f"{connectors.name_of(app)} isn't connected, so its events can't arrive. Reconnect it.")
+            for t in m.get("toolkits") or []:
+                if t not in ready and t != app:
+                    issues.append(f"{connectors.name_of(t)} isn't connected: runs can't use it.")
+        out[r["id"]] = issues
+    return out
 
 
 async def _last_runs(rule_ids: list[str]) -> dict[str, str]:
@@ -568,8 +605,8 @@ async def list_automations(user: User = Depends(current_user)):
     """Every automation (schedules and app events), newest first; the app groups them by chat or teammate."""
     rules = await db.select("event_rules", {"owner_id": f"eq.{user['id']}", "event_type": "in.(schedule,app)",
                                             "order": "created_at.desc"})
-    last = await _last_runs([r["id"] for r in rules])
-    return [_automation_view(r, last.get(r["id"])) for r in rules]
+    last, problems = await asyncio.gather(_last_runs([r["id"] for r in rules]), _problems(rules, user["id"]))
+    return [_automation_view(r, last.get(r["id"]), problems.get(r["id"])) for r in rules]
 
 
 def _outcome(event: dict[str, Any], run: dict[str, Any] | None, posted: str | None) -> str:
@@ -584,23 +621,35 @@ def _outcome(event: dict[str, Any], run: dict[str, Any] | None, posted: str | No
 @app.get("/automations/{rule_id}")
 async def get_automation(rule_id: str, user: User = Depends(current_user)):
     """One automation with its last 20 runs: when, and how each went (posted, quiet, approval, working, failed,
-    filtered out, over the hourly limit), with the start of what it posted."""
+    filtered out, over the hourly limit), with the start of what it posted or why it failed."""
     rule = await owned("event_rules", rule_id, user, "automation")
     evs = await db.select("events", {"rule_id": f"eq.{rule_id}", "order": "created_at.desc", "limit": "20",
-                                     "select": "id,status,created_at,run_id"})
+                                     "select": "id,status,created_at,run_id,payload"})
     run_ids = [e["run_id"] for e in evs if e.get("run_id")]
     runs_by, posted = {}, {}
     if run_ids:
         ids = f"in.({','.join(run_ids)})"
-        runs_by = {r["id"]: r for r in await db.select("runs", {"id": ids, "select": "id,status"})}
+        runs_by = {r["id"]: r for r in await db.select("runs", {"id": ids, "select": "id,status,error"})}
         for m in await db.select("messages", {"run_id": ids, "sender_type": "eq.teammate", "order": "created_at",
                                               "select": "id,run_id,text"}):
             posted.setdefault(m["run_id"], m)
-    history = [{"at": e["created_at"], "outcome": _outcome(e, runs_by.get(e.get("run_id")), posted.get(e.get("run_id"))),
-                "preview": (posted.get(e.get("run_id")) or {}).get("text", "")[:200],
-                "message_id": (posted.get(e.get("run_id")) or {}).get("id")} for e in evs]
+    history = []
+    for e in evs:
+        run, msg = runs_by.get(e.get("run_id")), posted.get(e.get("run_id"))
+        outcome = _outcome(e, run, msg)
+        history.append({"at": e["created_at"], "outcome": outcome, "late": bool((e.get("payload") or {}).get("late")),
+                        "preview": ((msg or {}).get("text") or ((run or {}).get("error") if outcome == "failed" else "") or "")[:200],
+                        "message_id": (msg or {}).get("id")})
     last = next((h["at"] for h, e in zip(history, evs) if e["status"] == "routed"), None)
-    return {**_automation_view(rule, last), "runs": history}
+    problems = await _problems([rule], user["id"])
+    return {**_automation_view(rule, last, problems.get(rule_id)), "runs": history}
+
+
+async def _project_member(tm: dict[str, Any], project_id: str | None, user: User) -> None:
+    if project_id:
+        await owned("projects", project_id, user, "project")
+        if not await db.one("project_members", {"project_id": f"eq.{project_id}", "teammate_id": f"eq.{tm['id']}"}):
+            raise HTTPException(400, f"{tm['name']} isn't in that project.")
 
 
 class NewAutomation(BaseModel):
@@ -608,25 +657,72 @@ class NewAutomation(BaseModel):
     project_id: str | None = None  # None: the teammate's direct chat
     name: str = Field(min_length=1, max_length=80)
     instructions: str = Field(min_length=1, max_length=2000)
-    cron: str  # in the user's time zone
+    cron: str | None = None  # a schedule, in the user's time zone
+    trigger: str | None = None  # or an app event (a Composio trigger slug from /apps/{toolkit}/events)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    keywords: list[str] = Field(default_factory=list)
     when: str = Field("", max_length=120)
     tz: str = "UTC"
+    toolkits: list[str] | None = None  # None: every app the teammate may use
+    run_now: bool = False
 
 
 @app.post("/automations")
 async def new_automation(body: NewAutomation, user: User = Depends(current_user)):
-    """Set up a scheduled automation from the app (app-event ones are set up in chat: the teammate finds the event)."""
+    """Set up an automation from the app: a schedule or an app event, with the apps its runs may use."""
     tm = await owned("teammates", body.teammate_id, user, "teammate")
-    if body.project_id:
-        await owned("projects", body.project_id, user, "project")
-        if not await db.one("project_members", {"project_id": f"eq.{body.project_id}", "teammate_id": f"eq.{tm['id']}"}):
-            raise HTTPException(400, f"{tm['name']} isn't in that project.")
+    await _project_member(tm, body.project_id, user)
     try:
-        rule = await automations.create(user["id"], tm, body.project_id, name=body.name.strip(), instructions=body.instructions.strip(),
-                                        cron=body.cron, tz=body.tz, when=body.when, by="You")
+        zoneinfo.ZoneInfo(body.tz)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(400, "Unknown time zone.") from None
+    try:
+        rule = await automations.create(user["id"], tm, body.project_id, name=body.name, instructions=body.instructions,
+                                        cron=body.cron or None, tz=body.tz, trigger=body.trigger or None,
+                                        config=body.settings, contains=body.keywords, when=body.when, by="You",
+                                        toolkits=body.toolkits)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    if body.run_now and rule["event_type"] == "schedule":
+        event = await db.insert("events", {"owner_id": user["id"], "type": "schedule", "source": "run_now",
+                                           "payload": {"run_now": True}, "rule_id": rule["id"]})
+        await events.fire(rule, event)
     return _automation_view(rule, None)
+
+
+class DraftRequest(BaseModel):
+    text: str = Field(min_length=3, max_length=1000)
+    teammate_id: str
+    tz: str = "UTC"
+
+
+@app.post("/automations/draft")
+async def draft_automation(body: DraftRequest, user: User = Depends(current_user)):
+    """Plain words -> a filled-in automation form (nothing is saved)."""
+    tm = await owned("teammates", body.teammate_id, user, "teammate")
+    try:
+        zone = zoneinfo.ZoneInfo(body.tz)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        zone = zoneinfo.ZoneInfo("UTC")
+    try:
+        ready = await connectors.ready(user["id"])
+    except Exception:
+        ready = set()
+    apps = [t for t in tm.get("allowed_toolkits") or [] if t in ready]
+    try:
+        return await automations.draft(body.text, tm, apps, datetime.now(zone))
+    except Exception as e:
+        log.warning("draft failed: %s", e)
+        raise HTTPException(503, "Couldn't read that right now. Fill it in below, or try again in a moment.") from e
+
+
+@app.get("/apps/{toolkit}/events")
+async def app_events(toolkit: str, user: User = Depends(current_user)):
+    """What an app can send (Composio triggers), to start an automation on."""
+    try:
+        return await automations.app_events(toolkit, limit=30)
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't load {toolkit.title()}'s events: {str(e)[:120]}") from e
 
 
 class AutomationPatch(BaseModel):
@@ -634,21 +730,47 @@ class AutomationPatch(BaseModel):
     name: str | None = Field(None, max_length=80)
     instructions: str | None = Field(None, max_length=2000)
     cron: str | None = None  # schedules only, in the user's time zone
-    when: str | None = Field(None, max_length=120)  # the schedule in plain words, shown everywhere
+    tz: str | None = None
+    when: str | None = Field(None, max_length=120)  # the schedule or event in plain words, shown everywhere
+    trigger: str | None = None  # app events: a new event and/or settings swap the Composio trigger
+    settings: dict[str, Any] | None = None
+    keywords: list[str] | None = None
+    toolkits: list[str] | None = None  # send null to allow every app the teammate may use
 
 
 @app.patch("/automations/{rule_id}")
 async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Depends(current_user)):
     rule = await owned("event_rules", rule_id, user, "automation")
+    sent = body.model_fields_set
+    if body.tz:
+        try:
+            zoneinfo.ZoneInfo(body.tz)
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(400, "Unknown time zone.") from None
+    changes: dict[str, Any] = {k: getattr(body, k) for k in ("name", "instructions", "cron", "tz", "when", "trigger") if getattr(body, k)}
+    if body.settings is not None:
+        changes["config"] = body.settings
+    if body.keywords is not None:
+        changes["contains"] = body.keywords
+    if "toolkits" in sent:
+        changes["toolkits"] = body.toolkits
     try:
-        if body.name or body.instructions or body.cron:
-            rule = await automations.update(rule, "You", name=(body.name or "").strip(), instructions=(body.instructions or "").strip(),
-                                            cron=body.cron, when=body.when or "")
+        if changes:
+            rule = await automations.update(rule, "You", **changes)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     if body.enabled is not None and body.enabled != rule["enabled"]:
         rule = await automations.set_enabled(rule, body.enabled, "You")
     return _automation_view(rule, None)
+
+
+@app.get("/usage")
+async def get_usage(user: User = Depends(current_user)):
+    """How much of each free allowance is left: models today, shared pools, app tool calls this month, storage."""
+    tms = await db.select("teammates", {"owner_id": f"eq.{user['id']}", "select": "model"})
+    models = [config.DEFAULT_MODEL, config.ROUTER_MODEL, config.KEEPER_MODEL, config.LEARN_MODEL, *llm.fallbacks(),
+              *(t["model"] for t in tms if t.get("model"))]
+    return await usage.report(list(dict.fromkeys(models)))
 
 
 @app.delete("/automations/{rule_id}")
