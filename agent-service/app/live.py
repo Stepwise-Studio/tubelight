@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from . import config, connectors, db, graph, memory
+from . import brief, config, connectors, db, graph, memory
 
 VOICES = ["Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr"]
 
@@ -75,6 +75,9 @@ async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
         lines.append("Open to-dos:\n" + "\n".join(f"- {r['text']}" for r in owed))
     if facts:
         lines.append("What you know:\n" + "\n".join(f"- {r['text']}" for r in facts))
+    summary = await brief.get(thread_id)
+    if summary:
+        lines.append("A brief of this chat so far (background only):\n" + summary)
     if recent:
         convo = "\n".join(f"{'Them' if m['sender_type'] == 'user' else 'You'}: {m['text'][:400]}" for m in reversed(recent))
         lines.append("The chat so far, as background only (most recent last). Don't pick up earlier requests on your own "

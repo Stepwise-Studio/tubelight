@@ -1,14 +1,17 @@
 """Tool classification (read / draft / act), human labels, and each teammate's toolset."""
 from __future__ import annotations
 
+import re
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import connectors, db, llm, memory, sandbox
+from . import connectors, db, followups, llm, memory, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -18,14 +21,15 @@ ACT = {"SEND", "POST", "PUSH", "MERGE", "DELETE", "REMOVE", "PAY", "ORDER", "PUB
 DRAFT = {"DRAFT"}
 READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "VIEW"}
 INTERNAL = {
-    "remember": "read", "recall": "read", "spawn_helper": "read",
+    "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
 LABELS = {
-    "remember": "Saving to memory", "recall": "Searching memory",
+    "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
+    "follow_up": "Setting a follow-up",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
     "git_push": "Pushing commits", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
@@ -173,7 +177,50 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         found = [t for ns in spaces for t in await memory.search(ns, query, limit=5)]
         return "\n".join(f"- {t}" for t in found) or "Nothing relevant in memory."
 
+    try:
+        zone = ZoneInfo(ctx.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+
+    async def search_chat(query: str) -> str:
+        words = re.findall(r"[\w'-]{3,}", query.lower())[:5]
+        if not words:
+            return "Give a few keywords to look for."
+        rows = await db.select("messages", {
+            "thread_id": f"eq.{ctx.thread_id}", "kind": "in.(text,handoff)", "order": "created_at.desc", "limit": "40",
+            "or": "(" + ",".join(f"text.ilike.*{w}*" for w in words) + ")", "select": "created_at,sender_type,teammate_id,text"})
+        if not rows:
+            return "Nothing in this chat matches."
+        names = {m["id"]: m["name"] for m in ctx.members}
+        best = sorted(rows, key=lambda r: -sum(w in r["text"].lower() for w in words))[:8]  # most words matched first
+        return "\n".join(f"[{datetime.fromisoformat(r['created_at']).astimezone(zone):%a %b %d, %I:%M %p}] "
+                         f"{ctx.user_name if r['sender_type'] == 'user' else names.get(r['teammate_id'], 'Teammate')}: "
+                         f"{r['text'][:700]}" for r in sorted(best, key=lambda r: r["created_at"]))
+
+    async def follow_up(when: str, what: str) -> str:
+        try:
+            at = datetime.fromisoformat(when.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return "Give `when` as their local date and time, like 2026-09-28T19:00."
+        at = at if at.tzinfo else at.replace(tzinfo=zone)
+        now = datetime.now(UTC)
+        if at <= now:
+            return "That time has already passed. Pick a time in the future."
+        if at - now > timedelta(days=60):
+            return "Pick a time within the next 60 days."
+        await followups.add(ctx.owner_id, ctx.thread_id, tm["id"], at, what, f"{now.astimezone(zone):%a %b %d, %I:%M %p}")
+        return f"Follow-up set for {at.astimezone(zone):%a %b %d, %I:%M %p}. You'll be woken in this chat then."
+
     tools += [
+        StructuredTool.from_function(
+            coroutine=search_chat, name="search_chat",
+            description="Search this chat's full history for earlier messages (exact wording, what was said this "
+                        "morning or days ago), by keywords. The brief summarises; this finds the words."),
+        StructuredTool.from_function(
+            coroutine=follow_up, name="follow_up",
+            description="Come back to this chat at a set time: when the user asks you to circle back, remind them or "
+                        "check on something later, or you promise to get back to them. when: their local date and "
+                        "time as YYYY-MM-DDTHH:MM. what: what to do then, self-contained."),
         StructuredTool.from_function(
             coroutine=remember, name="remember",
             description="Save a durable fact to long-term memory. scope: 'self' = your own notes, "

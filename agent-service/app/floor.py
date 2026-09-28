@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from . import config, llm
 
 log = logging.getLogger(__name__)
-HISTORY = 14  # lines of chat the director reads
+HISTORY_CHARS = 6000  # recent chat the director reads verbatim (~1.5k tokens); older is in the brief
 QUIET_MAX = 40  # "nobody replies" is only trusted for short messages (ok, thanks, got it)
 
 PROMPT = """You direct the floor of a group chat between {user} and their AI teammates. For {user}'s latest message,
@@ -32,7 +32,8 @@ How to read the message:
 - Tell apart who is addressed (should reply or act) from who is only talked about. An @tag or a name can be either:
   in "everyone roast @dev" the whole group is addressed and Dev is the subject; in "@dev can you check what @tess
   wrote" only Dev is addressed. @all or @everyone addresses everyone.
-- Resolve pronouns and references (him, her, you, they, "that idea") from the conversation: who said or did what.
+- Resolve pronouns and references (him, her, you, they, "that idea", "what we discussed this morning") from the
+  conversation and the brief: who said or did what.
 - A request for one person or one skill: the single best member. A question, game, debate or request for the whole
   group: each member with something to add, ordered so the conversation flows. Someone who is the subject (the one
   being roasted, praised, or asked to react to the others) goes last so they can respond.
@@ -68,7 +69,13 @@ def transcript(msgs: list[BaseMessage], members: list[dict], user: str) -> str:
             continue
         who = names.get(m.name or "", m.name or "Teammate") if isinstance(m, AIMessage) else user
         lines.append(f"{who}: {(m.text if isinstance(m, AIMessage) else str(m.content))[:300]}")
-    lines = lines[-HISTORY:]
+    kept, size = [], 0
+    for line in reversed(lines):
+        if kept and size + len(line) > HISTORY_CHARS:
+            break
+        kept.append(line)
+        size += len(line)
+    lines = kept[::-1]
     if lines:
         lines[-1] = "LATEST MESSAGE — " + lines[-1]
     return "\n".join(lines)
@@ -101,12 +108,13 @@ def tagged(text: str, members: list[dict]) -> list[dict]:
     return [m for m in members if m["handle"] in handles]
 
 
-async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: str) -> Plan:
+async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: str, brief: str = "") -> Plan:
     roster = "\n".join(f"- @{m['handle']}: {m['name']}, {m['role']}. {(m.get('bio') or '')[:160]}" for m in members)
     try:
         res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
             SystemMessage(PROMPT.format(user=user, roster=roster)),
-            HumanMessage(transcript(msgs, members, user)),
+            HumanMessage((f"Brief of the whole chat so far:\n{brief}\n\nRecent messages:\n" if brief else "")
+                         + transcript(msgs, members, user)),
         ])
         got = parse(res.text, members)
     except Exception:

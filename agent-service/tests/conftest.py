@@ -28,6 +28,8 @@ class FakeDB:
     def _ok(row: dict, key: str, cond: str) -> bool:
         if key in ("select", "order", "limit"):
             return True
+        if key == "or":  # (text.ilike.*a*,text.ilike.*b*)
+            return any(FakeDB._ok(row, *c.split(".", 1)) for c in cond.strip("()").split(","))
         op, _, val = cond.partition(".")
         if "->>" in key:
             col, sub = key.split("->>")
@@ -35,7 +37,8 @@ class FakeDB:
         else:
             v = row.get(key)
         s = str(v).lower() if isinstance(v, bool) else str(v)
-        return {"eq": lambda: s == val, "in": lambda: s in val.strip("()").split(","), "gte": lambda: s >= val}[op]()
+        return {"eq": lambda: s == val, "in": lambda: s in val.strip("()").split(","), "gte": lambda: s >= val,
+                "gt": lambda: s > val, "ilike": lambda: val.strip("*").lower() in s.lower()}[op]()
 
     def rows(self, table: str, **eq: Any) -> list[dict]:
         return [r for r in self.tables.get(table, []) if all(r.get(k) == v for k, v in eq.items())]
@@ -43,7 +46,8 @@ class FakeDB:
     async def select(self, table: str, params: dict[str, str]) -> list[dict]:
         out = [r for r in self.tables.get(table, []) if all(self._ok(r, k, c) for k, c in params.items())]
         if "order" in params:
-            out.sort(key=lambda r: str(r.get(params["order"], "")))
+            col, _, way = params["order"].partition(".")
+            out.sort(key=lambda r: str(r.get(col, "")), reverse=way == "desc")
         return [dict(r) for r in out[: int(params.get("limit", 10**6))]]
 
     async def one(self, table: str, params: dict[str, str]):
@@ -109,6 +113,8 @@ async def env(monkeypatch):
     monkeypatch.setattr(db, "user_timezone", no_tz)
     from app import learn
     monkeypatch.setattr(learn, "schedule", lambda *a: None)  # tested on its own in test_learn
+    from app import brief
+    monkeypatch.setattr(brief, "schedule", lambda *a: None)  # tested on its own in test_memory
     fake = FakeLLM(script=[], calls=[])
     monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None, size=0: fake)
 

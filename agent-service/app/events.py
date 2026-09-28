@@ -7,7 +7,7 @@ from typing import Any
 
 from croniter import croniter
 
-from . import db, runs
+from . import db, followups, runs
 
 log = logging.getLogger(__name__)
 SLOT_GRACE_S = 120  # a schedule slot older than this (e.g. after downtime) is skipped, not replayed
@@ -92,6 +92,7 @@ async def test_rule(rule: dict[str, Any]) -> str:
 async def tick(now: datetime | None = None) -> None:
     """Fire schedule rules whose latest cron slot (UTC) has not fired yet."""
     now = now or datetime.now(UTC)
+    await followups.fire_due(now)
     for rule in await db.select("event_rules", {"event_type": "eq.schedule", "enabled": "eq.true"}):
         cron = (rule.get("match") or {}).get("cron")
         if not cron or not croniter.is_valid(cron):

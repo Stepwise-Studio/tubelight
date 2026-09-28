@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import db, graph, learn, llm, memory, sandbox
+from . import brief, db, graph, learn, llm, memory, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -37,6 +37,7 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         run_id=run_id, owner_id=owner_id, thread_id=thread_id, members=members, project=project,
         user_name=(profile or {}).get("display_name") or "the user", trigger=trigger, event_type=event_type,
         timezone=await db.user_timezone(owner_id) or "UTC",
+        brief=await brief.get(thread_id),
         docker=docker_ok,
     )
 
@@ -132,6 +133,7 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
                 await db.update("runs", {"id": f"eq.{run_id}"}, {"status": "waiting_approval"})
             else:
                 await _finish(run_id, owner_id, thread_id, "done", teammate_id=active)
+                brief.schedule(owner_id, thread_id, ctx.user_name, ctx.timezone)
                 tm = next((m for m in ctx.members if m["id"] == active), None) or (
                     ctx.members[0] if len(ctx.members) == 1 else None)
                 if tm:

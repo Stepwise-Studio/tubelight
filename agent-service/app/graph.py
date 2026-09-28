@@ -60,6 +60,7 @@ class RunCtx:
     docker: bool = False
     turn_tools: dict[str, list] = field(default_factory=dict)
     apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
+    brief: str = ""  # the running summary of this chat (brief.py)
     sandboxes: dict[str, Sandbox] = field(default_factory=dict)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
@@ -226,6 +227,12 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         "approval card and may edit or reject it. Do not ask for permission in chat first. If an action is rejected, "
         "acknowledge it briefly and adjust.")
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
+    lines.append(f"When {ctx.user_name} asks you to circle back, remind them or check on something later, or you promise "
+                 "to get back to them, call follow_up with the time: you'll be woken in this chat then. Use search_chat "
+                 "for the exact words of anything said earlier in this chat.")
+    if ctx.brief:
+        lines.append("## This chat so far\nA running brief of the whole conversation, including what may have scrolled "
+                     "out of the messages you see. Pick up its open loops when they come due or come up:\n" + ctx.brief)
     if ctx.apps:
         lines.append(f"{ctx.user_name} @mentioned {', '.join(connectors.name_of(a) for a in ctx.apps)} in this request: "
                      "use those apps for it.")
@@ -388,7 +395,7 @@ def make_router(ctx: RunCtx):
             return {"active": queue[0], "queue": queue[1:]}
         if len(ctx.members) == 1:
             return {"active": ctx.members[0]["id"], "queue": []}
-        p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]))
+        p = await floor.plan(state["messages"], ctx.members, ctx.user_name, _last_human(state["messages"]), ctx.brief)
         log.info("floor: %s -> %s", p.read, [ctx.member(i)["handle"] for i in p.speakers])
         return {"active": p.speakers[0] if p.speakers else None, "queue": p.speakers[1:],
                 "plan": {"read": p.read, "parts": p.parts}}
