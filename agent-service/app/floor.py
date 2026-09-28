@@ -124,7 +124,12 @@ def later(when: Any, now: datetime | None) -> bool:
     return at.replace(tzinfo=now.tzinfo) > now + timedelta(seconds=30)
 
 
-def parse(text: str, members: list[dict], now: datetime | None = None) -> Plan | None:
+def named(text: str, member: dict) -> bool:
+    """Whether a message names a member (@handle, or their name as a word)."""
+    return bool(re.search(rf"(?<![\w@])@{re.escape(member['handle'])}\b|\b{re.escape(member['name'])}\b", text, re.I))
+
+
+def parse(text: str, members: list[dict], now: datetime | None = None, latest: str = "") -> Plan | None:
     """The director's JSON as a Plan; None when it isn't usable."""
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
@@ -145,6 +150,9 @@ def parse(text: str, members: list[dict], now: datetime | None = None) -> Plan |
         if tid and str(r.get("emoji")) in EMOJI and all(t != tid for t, _ in plan.reacts):
             plan.reacts.append((tid, str(r["emoji"])))
     plan.later = later(data.get("when"), now) or str(data.get("timing", "")).lower() == "later"
+    by_id = {m["id"]: m for m in members}
+    if plan.later and plan.speakers and latest and not named(latest, by_id[plan.speakers[0]]):
+        plan.speakers, plan.parts = [], {}  # a teammate confirms only when the message names them; else the director
     if plan.later and not plan.speakers:
         # Nobody was addressed: the director sets it for the group (graph.router), the group reacts.
         w = str(data.get("when") or "")
@@ -180,7 +188,7 @@ async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: 
             HumanMessage((f"Brief of the whole chat so far:\n{brief}\n\nRecent messages:\n" if brief else "")
                          + transcript(msgs, members, user)),
         ])
-        got = parse(res.text, members, now)
+        got = parse(res.text, members, now, latest)
     except Exception:
         log.exception("floor plan failed")
         got = None

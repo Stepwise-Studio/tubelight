@@ -275,3 +275,18 @@ def test_floor_decides_later_by_comparing_times_not_by_model_arithmetic():
     assert later("2026-09-28T13:27", now)  # a minute away is still later
     assert not later("2026-09-28T13:26", now) and not later("2026-09-28T13:10", now)  # now, or already past
     assert later("condition", now) and not later("now", now) and not later(None, now) and not later("soonish", now)
+
+
+def test_later_request_confirmed_by_a_teammate_only_when_named():
+    import json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.floor import parse
+    members = [{"id": "d", "handle": "dev", "name": "Dev"}, {"id": "s", "handle": "sol", "name": "Sol"}]
+    now = datetime(2026, 9, 28, 13, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    reply = json.dumps({"when": "2026-09-28T18:00", "what": "roast Ivy", "speakers": [{"handle": "dev", "part": "set it"}]})
+    p = parse(reply, members, now, "everyone, roast ivy at 6")
+    assert p.speakers == [] and p.what == "roast Ivy" and p.at.hour == 18  # nobody named: the director sets it
+    assert parse(reply, members, now, "@dev remind us to roast ivy at 6").speakers == ["d"]
+    assert parse(reply, members, now, "Dev, remind us at 6").speakers == ["d"]
