@@ -608,8 +608,8 @@ def turn_note(ctx: RunCtx, tm: dict, state: State) -> str:
                                  and tag.search(m.text)))
     if callers:
         lines.append(", ".join(names.get(h, h) for h in callers) + " @mentioned you: answer what they said to you.")
-    if spoke or later:
-        lines.append("If you truly have nothing to add to this round, reply with just PASS.")
+    if spoke:
+        lines.append("You were picked to speak: add your own take with a new angle, even if others covered a lot.")
     lines.append("Give your own answer now, in your own voice.")
     return "\n".join(lines)
 

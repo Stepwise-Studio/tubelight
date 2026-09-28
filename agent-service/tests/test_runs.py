@@ -150,7 +150,7 @@ async def test_plan_orders_the_round_and_speakers_may_pass(api, env):
     await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "I want everyone to roast @dev", "mentions": [dev["id"]]})
     await settle()
     said = fdb.rows("messages", kind="text", sender_type="teammate")
-    assert [(m["teammate_id"], m["text"]) for m in said] == [(tess["id"], "one"), (dev["id"], "three")]  # Ivy passed
+    assert [(m["teammate_id"], m["text"]) for m in said] == [(tess["id"], "one"), (dev["id"], "three")]  # a bare PASS is dropped
     assert "Your part: You're the target: fire back last." in fake.calls[3][0].content
 
 
