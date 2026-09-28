@@ -1,4 +1,3 @@
-import { BlurView } from 'expo-blur'
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Text as RNText, ScrollView, StyleSheet, TextInput, View } from 'react-native'
@@ -18,6 +17,8 @@ import type { ChatMessage, SendOptions } from '@/lib/use-thread'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import { Icon, IconButton, ListRow, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast } from '@/ui'
 
+import { EdgeBlur } from '@/components/bottom-edge'
+
 import { Dictation } from './dictation'
 
 import { useSenderName } from './message-row'
@@ -26,9 +27,6 @@ const MENTION = /(^|\s)@([a-z0-9_-]*)$/i
 const MAX_FILES = 6
 // Half the one-line height (36 button + 2×4 padding + 2×1 border): a capsule at rest, soft corners as it grows.
 const PILL = 23
-// [height from the screen's bottom edge, intensity]: thin steps, each a little stronger nearer the edge (a progressive
-// blur); everything above the tallest one stays fully clear.
-const BLUR_STEPS = [[30, 3], [22, 7], [14, 12], [7, 20]] as const
 
 export interface ComposerProps {
   placeholder: string
@@ -216,16 +214,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           bottom edge, more the nearer the edge. The chrome tints match the canvas (near-black in dark, near-white in
           light), so the blur steps add no grey band. */}
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, { top: -36 }]}>
-        {BLUR_STEPS.map(([height, intensity]) => (
-          <BlurView
-            key={height}
-            blurTarget={blurTarget}
-            blurMethod="dimezisBlurViewSdk31Plus"
-            intensity={intensity}
-            tint={scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height }}
-          />
-        ))}
+        <EdgeBlur blurTarget={blurTarget} />
         <View style={[StyleSheet.absoluteFill, {
           experimental_backgroundImage: `linear-gradient(to bottom, ${c.canvas}00 0%, ${c.canvas}00 20%, ${c.canvas}40 45%, ${c.canvas}8C 70%, ${c.canvas}CC 100%)`,
         }]} />

@@ -1,4 +1,5 @@
 import { useFonts } from 'expo-font'
+import { EdgeScreen } from '@/components/bottom-edge'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
@@ -16,6 +17,8 @@ import { ThemeProvider, useTheme } from '@/theme'
 import { ConfirmHost, MenuHost, PortalHost, ToastHost } from '@/ui'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
+
+const OWN_EDGE = new Set(['(tabs)', 'chat/[threadId]', 'sign-in'])
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -53,7 +56,11 @@ function Root() {
     <NavThemeProvider value={navTheme}>
       <WorkspaceProvider key={session?.user.id ?? 'signed-out'} userId={session?.user.id ?? null}>
         <View style={{ flex: 1, backgroundColor: c.canvas }}>
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.canvas } }}>
+          <Stack
+            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.canvas } }}
+            // Every page's content fades and blurs under the bottom edge; tabs and chats do it under their own bars.
+            screenLayout={({ children, route }) => (OWN_EDGE.has(route.name) ? children : <EdgeScreen>{children}</EdgeScreen>)}
+          >
             <Stack.Protected guard={!signedIn}>
               <Stack.Screen name="sign-in" options={{ animation: 'fade' }} />
             </Stack.Protected>
