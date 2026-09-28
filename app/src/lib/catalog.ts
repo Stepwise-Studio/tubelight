@@ -91,8 +91,10 @@ export const PROVIDERS: Record<string, string> = { gemini: 'Gemini', groq: 'Groq
 /** "groq:openai/gpt-oss-120b" → "GPT OSS 120B". Uses the service's name when we have it. */
 export function modelName(id: string, models?: Model[] | null) {
   const known = models?.find((m) => m.id === id)
-  if (known) return known.name.replace(/^[^:]+:\s*/, '').replace(/^[^/\s]+\//, '').replace(/\s*\(free\)\s*$/i, '').replace(/\s+/g, ' ').trim()
-  const slug = id.split('/').pop()!.split(':').filter((p) => p !== 'free').pop() ?? id
+  const name = known?.name.replace(/^[^:]+:\s*/, '').replace(/^[^/\s]+\//, '').replace(/\s*\(free\)\s*$/i, '').replace(/\s+/g, ' ').trim()
+  // Some providers list a model with its slug as its name ("gemini-3.8-flash"): spell those out too.
+  if (name && /\s/.test(name)) return name
+  const slug = name || (id.split('/').pop()!.split(':').filter((p) => p !== 'free').pop() ?? id)
   return slug.split('-').map((w) =>
     /^\d/.test(w) || w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }

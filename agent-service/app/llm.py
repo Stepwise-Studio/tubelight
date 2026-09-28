@@ -160,8 +160,16 @@ def _one(model_id: str, retries: int = 1) -> ChatOpenAI:
         raise PaidModelError(f"{model_id} is not a free model, so Tubelight won't call it.")
     global _http
     _http = _http or httpx.AsyncClient(transport=_Transport(), timeout=TIMEOUT)
+    extra: dict[str, Any] = {}
+    if provider == "cloudflare":
+        # Workers AI caps replies at a few hundred tokens unless told otherwise, and gpt-oss spends them all thinking:
+        # the reply came back empty ("length"). Low effort also spends far fewer of the daily free neurons.
+        extra["max_tokens"] = 4096
+        if "gpt-oss" in model:
+            extra["reasoning_effort"] = "low"
     return ChatOpenAI(model=model, base_url=base_url(provider), api_key=key(provider) or "missing",
-                      default_headers=_headers(provider), timeout=TIMEOUT, max_retries=retries, http_async_client=_http)
+                      default_headers=_headers(provider), timeout=TIMEOUT, max_retries=retries, http_async_client=_http,
+                      **extra)
 
 
 def _text_content(messages: list) -> list:

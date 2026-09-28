@@ -112,6 +112,9 @@ def view_for(tm: dict, msgs: list[BaseMessage], members: list[dict]) -> list[Bas
     answered = {m.tool_call_id for m in msgs if isinstance(m, ToolMessage)}
     out: list[BaseMessage] = []
     for m in msgs:
+        if isinstance(m, AIMessage) and looping(m.text):
+            # A garbled reply that slipped into the history derails every later call: show a placeholder instead.
+            m = m.model_copy(update={"content": "[An earlier reply came out garbled and was dropped.]"})
         if isinstance(m, AIMessage):
             if m.name == tm["handle"]:
                 out.append(m)
@@ -338,7 +341,17 @@ async def compact(ctx: RunCtx, tm: dict, msgs: list[BaseMessage]) -> tuple[list,
 
 # ------------------------------------------------------------------ nodes
 class StreamCut(Exception):
-    """A reply stream ended early without an error; the node retries the call."""
+    """A reply stream ended early without an error, or got stuck in a loop; the node retries the call."""
+
+
+# A model stuck repeating a short chunk ("**\u200b**\u200b..." from a free tier): the same 2-8 characters (not
+# just one character, so rules like "-----" pass) twenty times in a row.
+_LOOP = re.compile(r"(.{2,8}?)\1{19,}", re.S)
+
+
+def looping(text: str) -> bool:
+    m = _LOOP.search(text[-600:])
+    return bool(m) and len(set(m.group(1))) > 1
 
 
 async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], stream_id: str) -> AIMessage:
@@ -346,13 +359,16 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
     async for chunk in model.astream(messages):
         acc = chunk if acc is None else acc + chunk
         text = acc.text
+        if looping(text):  # stop now: never stream or save the garbage
+            raise StreamCut(f"reply got stuck repeating itself after {len(text)} chars")
         if text and not sent:
             await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "writing"))
         if text != sent and time.monotonic() - last >= DELTA_EVERY:
             await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": text})
             sent, last = text, time.monotonic()
-    if acc is None:
-        return AIMessage("")
+    if acc is None or (not acc.text.strip() and not acc.tool_calls):
+        # Nothing at all (a free tier's hiccup): retry rather than stay silent; an automation would read as "quiet".
+        raise StreamCut("the reply came back empty")
     if acc.text and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
         # The stream stopped mid-reply with no error (free tiers do this): never save the fragment as the answer.
         raise StreamCut(f"reply stream ended without finishing after {len(acc.text)} chars")

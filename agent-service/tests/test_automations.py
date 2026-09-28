@@ -211,3 +211,12 @@ async def test_it_moves_to_another_chat_only_where_the_teammate_is_a_member(api,
     assert r["thread_id"] == "proj:p1" and r["toolkits"] == ["GMAIL"]
     r = (await api.patch(f"/automations/{rule['id']}", json={"toolkits": None})).json()
     assert r["toolkits"] is None
+
+
+def test_setting_choices_read_names_from_a_tool_result():
+    from app.automations import _options
+    teams = {"items": [], "teams": [{"id": "t1", "name": "Stepwise Studio", "members": [{"id": "u1", "name": "J"}]}]}
+    assert _options(teams, "LINEAR") == [{"value": "t1", "label": "Stepwise Studio"}]
+    repos = {"repositories": [{"id": 9, "name": "app", "full_name": "acme/app"}]}
+    assert _options(repos, "GITHUB") == [{"value": "app", "label": "acme/app", "sets": {"owner": "acme", "repo": "app"}}]
+    assert _options({"calendars": [{"id": "primary", "summary": "Me"}]}, "GOOGLECALENDAR")[0]["label"] == "Me"

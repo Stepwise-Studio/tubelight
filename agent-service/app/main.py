@@ -1,4 +1,5 @@
 import asyncio
+import time
 import faulthandler
 import logging
 import re
@@ -563,14 +564,27 @@ def _automation_view(r: dict[str, Any], last: str | None, problems: list[str] | 
             "problems": problems or []}
 
 
+_ready: dict[str, tuple[float, set[str] | None]] = {}
+
+
+async def _ready_cached(owner_id: str) -> set[str] | None:
+    """Connected apps, cached for a minute: the automation lists shouldn't wait on Composio every time."""
+    hit = _ready.get(owner_id)
+    if hit and time.monotonic() - hit[0] < 60:
+        return hit[1]
+    try:
+        ready: set[str] | None = await connectors.ready(owner_id)
+    except Exception:
+        ready = None  # Composio unreachable: don't cry wolf
+    _ready[owner_id] = (time.monotonic(), ready)
+    return ready
+
+
 async def _problems(rules: list[dict[str, Any]], owner_id: str) -> dict[str, list[str]]:
     """What would stop each automation from working, in words: a disconnected app, a teammate who left the project."""
     if not rules:
         return {}
-    try:
-        ready = await connectors.ready(owner_id)
-    except Exception:
-        ready = None  # Composio unreachable: don't cry wolf
+    ready = await _ready_cached(owner_id)
     members = {(m["project_id"], m["teammate_id"]) for m in await db.select(
         "project_members", {"owner_id": f"eq.{owner_id}", "select": "project_id,teammate_id"})}
     out: dict[str, list[str]] = {}
@@ -723,6 +737,18 @@ async def app_events(toolkit: str, user: User = Depends(current_user)):
         return await automations.app_events(toolkit, limit=30)
     except Exception as e:
         raise HTTPException(502, f"Couldn't load {toolkit.title()}'s events: {str(e)[:120]}") from e
+
+
+@app.get("/apps/{toolkit}/choices/{field}")
+async def setting_choices(toolkit: str, field: str, user: User = Depends(current_user)):
+    """Names to pick from for an ID-like event setting (Linear teams, Gmail labels, GitHub repos); 404 if none."""
+    try:
+        opts = await automations.choices(user["id"], toolkit, field)
+    except Exception as e:
+        raise HTTPException(502, f"Couldn't look those up: {str(e)[:160]}") from e
+    if opts is None:
+        raise HTTPException(404, "No list for this setting.")
+    return opts
 
 
 class AutomationPatch(BaseModel):

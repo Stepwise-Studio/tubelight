@@ -33,7 +33,7 @@ export function TimePicker({ hour, minute, onChange, step = 5, label }: {
   const [open, setOpen] = useState(false)
   const pm = hour >= 12
   const h12 = hour % 12 === 0 ? 12 : hour % 12
-  const hours = Array.from({ length: 12 }, (_, i) => i + 1)
+  const hours = [12, ...Array.from({ length: 11 }, (_, i) => i + 1)] // clock order: 12 (midnight/noon) first
   const minutes = [...new Set([...Array.from({ length: Math.ceil(60 / step) }, (_, i) => i * step), minute])].sort((a, b) => a - b)
   const setHour12 = (n: number) => onChange((n % 12) + (pm ? 12 : 0), minute)
   const border = open ? (scheme === 'dark' ? '#d4d4d8' : '#3f3f46') : 'rgba(138,138,141,0.23)'
@@ -141,7 +141,7 @@ function Drum({ items, value, onPick, format, label }: {
       >
         {items.map((n, i) => (
           <Row key={n} i={i} y={y} text={format ? format(n) : String(n)}
-            onPress={() => ref.current?.scrollTo({ y: i * ITEM_H, animated: true })} />
+            onPress={() => { ref.current?.scrollTo({ y: i * ITEM_H, animated: true }); if (n !== value) onPick(n) }} />
         ))}
       </Animated.ScrollView>
     </View>

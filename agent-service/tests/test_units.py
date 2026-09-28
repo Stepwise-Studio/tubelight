@@ -303,3 +303,11 @@ def test_director_set_follow_up_uses_the_message_when_the_model_gives_no_task_an
     p = parse(json.dumps({"read": "director notes", "when": "2026-09-28T14:23", "speakers": [],
                           "react": [{"handle": "sol", "emoji": "😂"}]}), members, now, "lets roast ivy at 2:23")
     assert p.what == "lets roast ivy at 2:23" and p.reacts == [("d", "👍"), ("s", "😂")]
+
+
+def test_a_reply_stuck_in_a_loop_is_caught_but_normal_markdown_is_not():
+    from app.graph import looping
+    assert looping("Did " + "**\u200b" * 30)
+    assert looping("ha " + "lol " * 25)
+    assert not looping("Here's the table:\n| a | b |\n|---|---|\n| 1 | 2 |\n" + "-" * 60)
+    assert not looping("Some normal reply. " * 3)

@@ -324,3 +324,54 @@ async def draft(text: str, teammate: dict[str, Any], apps: list[str], now: datet
     settings = {k: v for k, v in (p.get("settings") or {}).items() if k in ev["settings"] and v not in (None, "")}
     return {**out, "trigger": ev["slug"], "settings": settings, "keywords": _keywords(p.get("keywords")),
             "missing": [k for k in ev["required"] if k not in settings]}
+
+
+# ------------------------------------------------------------------ settings people can't be expected to type
+# ID-like event settings, offered as a list of names from the user's own account (read-only lookups). A pick can fill
+# more than one setting (a GitHub repo sets owner and repo).
+CHOICES: dict[tuple[str, str], str] = {
+    ("LINEAR", "team_id"): "LINEAR_LIST_LINEAR_TEAMS", ("LINEAR", "project_id"): "LINEAR_LIST_LINEAR_PROJECTS",
+    ("GMAIL", "labelIds"): "GMAIL_LIST_LABELS",
+    ("GOOGLECALENDAR", "calendarId"): "GOOGLECALENDAR_LIST_CALENDARS", ("GOOGLECALENDAR", "calendar_id"): "GOOGLECALENDAR_LIST_CALENDARS",
+    ("GITHUB", "repo"): "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+    ("GITHUB", "owner"): "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+    ("SLACK", "channel_id"): "SLACK_LIST_ALL_CHANNELS",
+}
+
+
+def _options(data: Any, toolkit: str) -> list[dict[str, Any]]:
+    """The first list of records with an id in a tool's result, as {value, label, sets}."""
+    def lists(x: Any):
+        if isinstance(x, list) and x and all(isinstance(i, dict) for i in x):
+            yield x
+        elif isinstance(x, dict):
+            for v in x.values():
+                yield from lists(v)
+    for items in lists(data):
+        if not any("id" in i or "full_name" in i for i in items):
+            continue
+        out = []
+        for i in items[:200]:
+            if toolkit == "GITHUB" and i.get("full_name"):
+                owner, _, repo = i["full_name"].partition("/")
+                out.append({"value": repo, "label": i["full_name"], "sets": {"owner": owner, "repo": repo}})
+                continue
+            label = i.get("name") or i.get("summary") or i.get("title") or i.get("id")
+            if i.get("id"):
+                out.append({"value": str(i["id"]), "label": str(label)})
+        return out
+    return []
+
+
+async def choices(owner_id: str, toolkit: str, field: str) -> list[dict[str, Any]] | None:
+    """Options for one event setting, or None when there's no lookup for it (the app shows a text field)."""
+    slug = CHOICES.get((toolkit.upper(), field))
+    if not slug:
+        return None
+    def run() -> Any:
+        r = connectors._client().tools.execute(slug, user_id=owner_id, arguments={}, dangerously_skip_version_check=True)
+        return r if isinstance(r, dict) else r.model_dump()
+    res = await asyncio.to_thread(run)
+    if not res.get("successful"):
+        raise ValueError(str(res.get("error") or "the lookup failed")[:200])
+    return _options(res.get("data"), toolkit.upper())

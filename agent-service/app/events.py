@@ -46,8 +46,9 @@ def _describe(event: dict[str, Any]) -> str:
     return f"{event['type'].replace('_', ' ').capitalize()} event from {event['source']}" + (f": {headline}" if headline else "")
 
 
-QUIET = ("\n\nIf there's nothing worth telling them this time (nothing new, or nothing that matters), reply with "
-         "exactly QUIET and nothing else: they won't see anything.")
+QUIET = ("\n\nIf the instructions ask you to post something every time (a fact, a brief, a reminder, a summary), "
+         "always post it. Only when they ask you to check or watch for something and there's nothing new that matters "
+         "this time, reply with exactly QUIET and nothing else: they won't see anything.")
 
 
 async def _since(rule: dict[str, Any], event_id: str, tz: str) -> str:
@@ -61,7 +62,8 @@ async def _since(rule: dict[str, Any], event_id: str, tz: str) -> str:
     except (ZoneInfoNotFoundError, ValueError):
         zone = ZoneInfo("UTC")
     at = datetime.fromisoformat(prev[0]["created_at"]).astimezone(zone)
-    return f"It last ran {at:%a %b %d, %I:%M %p}: only cover what's new since then, never repeat what you told them before."
+    return (f"It last ran {at:%a %b %d, %I:%M %p}: when you report on changes, cover only what's new since then; "
+            "never repeat what you told them before.")
 
 
 async def fire(rule: dict[str, Any], event: dict[str, Any]) -> str:

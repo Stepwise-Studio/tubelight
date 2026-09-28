@@ -61,7 +61,7 @@ export function whenOf(d: AutomationDraft, events: AppEvent[] | null): string {
   if (d.kind === 'schedule') return describeSchedule(d.schedule)
   const ev = events?.find((e) => e.slug === d.trigger)
   const kw = words(d.keywords)
-  return `when ${ev ? ev.name.toLowerCase() : 'its event'} happens in ${toolkitName(d.app ?? '')}${kw.length ? ` mentioning ${kw.join(', ')}` : ''}`
+  return `when ${ev ? eventTitle(ev.name).toLowerCase() : 'its event'} happens in ${toolkitName(d.app ?? '')}${kw.length ? ` mentioning ${kw.join(', ')}` : ''}`
 }
 
 /** Settings as the app expects them: numbers and true/false where its schema says so. */
@@ -122,6 +122,7 @@ export function patchBody(base: AutomationDraft, d: AutomationDraft, events: App
   return p
 }
 
+const eventTitle = (name: string) => name.replace(/\s*trigger$/i, '')
 const label = (k: string) => capitalize(k.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase())
 
 /** An app's events, loaded when the app is picked (and kept per app). */
@@ -237,7 +238,7 @@ export function AutomationForm({ draft, onChange, errors, events, eventsError, i
           value={draft.kind}
           onChange={(k) => { if (isNew) set({ kind: k }) }}
           accessibilityLabel="Starts"
-          options={[{ value: 'schedule', label: 'On a schedule' }, { value: 'app', label: 'When something happens' }]}
+          options={[{ value: 'schedule', label: 'On a schedule' }, { value: 'app', label: 'On an app event' }]}
         />
         {!isNew && <Text variant="footnote" color="ink3">To switch between a schedule and an app event, set up a new automation.</Text>}
         {draft.kind === 'schedule'
@@ -327,7 +328,7 @@ function AppEventFields({ draft, onChange, apps, connected, events, eventsError 
     value: t, title: toolkitName(t), subtitle: connected.has(t) ? undefined : 'Not connected', leading: <BrandTile toolkit={t} size={32} />,
   }))
   const eventOptions: PickerOption[] = (events ?? []).map((e) => ({
-    value: e.slug, title: e.name, subtitle: e.required.length ? `Needs ${e.required.map(label).join(', ')}` : undefined,
+    value: e.slug, title: eventTitle(e.name), subtitle: e.required.length ? `Needs ${e.required.map((k) => label(k.replace(/_?ids?$/i, '') || k).toLowerCase()).join(', ')}` : undefined,
   }))
   const pickEvent = (slug: string) => {
     const e = events?.find((x) => x.slug === slug)
@@ -337,6 +338,11 @@ function AppEventFields({ draft, onChange, apps, connected, events, eventsError 
   }
   const optional = ev ? Object.keys(ev.settings).filter((k) => !ev.required.includes(k)) : []
   const field = (k: string, required: boolean) => (
+    <SettingField key={`${draft.app}:${k}`} app={draft.app!} name={k} required={required} hint={ev?.settings[k]}
+      value={draft.settings[k] ?? ''} onPick={(sets) => onChange({ ...draft, settings: { ...draft.settings, ...sets } })}
+      fallback={textField(k, required)} />
+  )
+  const textField = (k: string, required: boolean) => (
     <TextField
       key={k}
       label={`${label(k)}${required ? '' : ' (optional)'}`}
@@ -395,7 +401,8 @@ export function DescribeBox({ draft, onFilled }: { draft: AutomationDraft; onFil
         settings: Record<string, unknown>; keywords: string[]; missing: string[]; apps: string[]; note: string
       }>('/automations/draft', { method: 'POST', json: { text: text.trim(), teammate_id: draft.teammateId, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })
       const tmApps = ws.teammate(draft.teammateId)?.allowed_toolkits ?? []
-      const toolkits = d.apps.length && d.apps.length < tmApps.length ? d.apps : null
+      // Least access: just the apps it needs (none for a pizza fact); all of them only when it needs all.
+      const toolkits = tmApps.every((t) => d.apps.includes(t)) ? null : d.apps.filter((t) => tmApps.includes(t))
       onFilled({
         ...draft, name: d.name || draft.name, instructions: d.instructions || draft.instructions, kind: d.kind, toolkits,
         schedule: d.cron ? parseCron(d.cron) : draft.schedule, app: d.app ?? null, trigger: d.trigger,
@@ -417,5 +424,47 @@ export function DescribeBox({ draft, onFilled }: { draft: AutomationDraft; onFil
       <Button label="Fill in the form" icon={SparklesIcon} variant="soft" loading={busy} disabled={text.trim().length < 3 || !draft.teammateId} onPress={fill} />
       <Text variant="footnote" color="ink3">Or fill it in yourself below. You can change anything before it’s set up.</Text>
     </Surface>
+  )
+}
+
+/** An ID-like setting (a Linear team, a Gmail label, a GitHub repo): pick it by name from the account itself. Falls
+ * back to typing it when there's no list for it or the lookup fails. */
+const choiceCache: Record<string, { value: string; label: string; sets?: Record<string, string> }[] | 'none'> = {}
+function SettingField({ app, name, required, hint, value, onPick, fallback }: {
+  app: string; name: string; required: boolean; hint?: string; value: string
+  onPick: (sets: Record<string, string>) => void; fallback: React.ReactNode
+}) {
+  const key = `${app}:${name}`
+  const [opts, setOpts] = useState(choiceCache[key] ?? null)
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => {
+    if (choiceCache[key]) return
+    let live = true
+    api<{ value: string; label: string; sets?: Record<string, string> }[]>(`/apps/${app}/choices/${name}`).then(
+      (l) => { choiceCache[key] = l; if (live) setOpts(l) },
+      (e: Error) => {
+        if (!live) return
+        if (/no list|not found/i.test(e.message)) { choiceCache[key] = 'none'; setOpts('none') } else setFailed(e.message)
+      },
+    )
+    return () => { live = false }
+  }, [app, name, key])
+  if (opts === 'none' || failed) {
+    return <View style={{ gap: 4 }}>{fallback}{failed && <Text variant="footnote" color="ink3">Couldn’t list them ({failed}); type it instead.</Text>}</View>
+  }
+  const title = `${label(name.replace(/_?ids?$/i, '') || name)}${required ? '' : ' (optional)'}`
+  return (
+    <View style={{ gap: 6 }}>
+      <Text variant="label" color="ink3" style={{ paddingLeft: 2 }}>{title}</Text>
+      <PickerField
+        label={title}
+        value={value || null}
+        placeholder={opts === null ? 'Looking them up…' : opts.length ? `Pick a ${label(name.replace(/_?ids?$/i, '')).toLowerCase()}` : 'None found in your account'}
+        disabled={!opts?.length}
+        options={(opts ?? []).map((o) => ({ value: o.value, title: o.label }))}
+        onChange={(v) => { const o = (opts || []).find((x) => x.value === v); onPick(o?.sets ?? { [name]: v }) }}
+        intro={hint}
+      />
+    </View>
   )
 }
