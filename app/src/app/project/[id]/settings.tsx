@@ -232,7 +232,7 @@ const blankRule = (teammateId: string | null): RuleDraft => ({
 
 function toDraft(r: EventRule): RuleDraft {
   const known = TYPES.some((t) => t.value === r.event_type && t.value !== 'custom')
-  const { cron, ...rest } = r.match as Record<string, string>
+  const { cron, tz: _tz, when: _when, ...rest } = r.match as Record<string, string>
   return {
     id: r.id, name: r.name, type: known ? r.event_type : 'custom', custom: known ? '' : r.event_type,
     match: Object.entries(rest).map(([k, v]) => ({ k, v: String(v) })), cron: cron ?? '0 9 * * *',
@@ -241,9 +241,10 @@ function toDraft(r: EventRule): RuleDraft {
 }
 
 function ruleSummary(r: EventRule, name: (id: string) => string | undefined) {
-  const filters = Object.entries(r.match).filter(([k]) => k !== 'cron')
+  const filters = Object.entries(r.match).filter(([k]) => !['cron', 'tz', 'when'].includes(k))
   const where = filters.length ? ` where ${filters[0][0]} is ${String(filters[0][1])}${filters.length > 1 ? ` and ${filters.length - 1} more` : ''}` : ''
-  const what = r.event_type === 'schedule' ? describeCron(String((r.match as Record<string, unknown>).cron ?? '')) : typeOf(r.event_type).label + where
+  const m = r.match as Record<string, string | undefined>
+  const what = r.event_type === 'schedule' ? m.when || describeCron(m.cron ?? '', !!m.tz) : typeOf(r.event_type).label + where
   return `${what} · ${name(r.teammate_id) ?? 'Removed teammate'} · up to ${r.max_per_hour} an hour`
 }
 
@@ -256,7 +257,8 @@ function Rules({ p, members }: { p: Project; members: Teammate[] }) {
   const [session, setSession] = useState(0) // remounts the sheet per edit, so old errors don't linger
 
   const load = useCallback(() => Promise.all([
-    supabase.from('event_rules').select('*').eq('project_id', p.id).order('created_at'),
+    // App-event automations run on a Composio trigger: they're managed in the chat's Scheduled sheet.
+    supabase.from('event_rules').select('*').eq('project_id', p.id).neq('event_type', 'app').order('created_at'),
     supabase.from('profiles').select('webhook_token').single(),
   ]).then(([r, prof]) => {
     setRules((r.data ?? []) as EventRule[])
@@ -268,8 +270,10 @@ function Rules({ p, members }: { p: Project; members: Teammate[] }) {
 
   const setEnabled = async (r: EventRule, enabled: boolean) => {
     setRules((l) => l?.map((x) => (x.id === r.id ? { ...x, enabled } : x)) ?? l)
-    const { error } = await supabase.from('event_rules').update({ enabled }).eq('id', r.id)
-    if (error) { toast({ title: 'Unable to update the rule', tone: 'error', body: 'Check your connection and try again.' }); load() }
+    // Through the service, so the chat gets its paused/resumed capsule like the Scheduled sheet's toggle.
+    try { await api(`/automations/${r.id}`, { method: 'PATCH', json: { enabled } }) } catch {
+      toast({ title: 'Unable to update the rule', tone: 'error', body: 'Check your connection and try again.' }); load()
+    }
   }
 
   const url = token ? `${AGENT_URL}/events/${token}` : null
@@ -364,7 +368,8 @@ function RuleSheet({ open, draft, project, members, onChange, onClose, onSaved }
     setErrors(e)
     if (Object.keys(e).length) return
     setBusy('save')
-    const match = schedule ? { cron: d.cron.trim() } : Object.fromEntries(d.match.filter((m) => m.k.trim()).map((m) => [m.k.trim(), m.v]))
+    // Schedules run in the user's own time zone, like the ones set up from chat.
+    const match = schedule ? { cron: d.cron.trim(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, when: describeCron(d.cron, true) } : Object.fromEntries(d.match.filter((m) => m.k.trim()).map((m) => [m.k.trim(), m.v]))
     const row = {
       name: d.name.trim(), event_type: eventType, match, project_id: project.id, teammate_id: d.teammate_id!,
       instructions: d.instructions.trim(), max_per_hour: d.max_per_hour, enabled: d.enabled,
@@ -424,13 +429,13 @@ function RuleSheet({ open, draft, project, members, onChange, onClose, onSaved }
                 {CRON_PRESETS.map((pr) => <Chip key={pr.cron} label={pr.label} selected={d.cron.trim() === pr.cron} onPress={() => set('cron', pr.cron)} />)}
               </View>
               <TextField
-                label="Cron (UTC)"
+                label="Cron (your time)"
                 value={d.cron}
                 onChangeText={(v) => set('cron', v)}
                 autoCapitalize="none"
                 autoCorrect={false}
                 error={errors.cron}
-                hint={describeCron(d.cron)}
+                hint={describeCron(d.cron, true)}
                 inputStyle={{ fontFamily: typeScale.mono.fontFamily }}
               />
             </View>

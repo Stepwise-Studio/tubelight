@@ -254,7 +254,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                                                 trigger=app_event or None, config=event_settings, contains=keywords, when=when)
             except ValueError as e:
                 return str(e)
-            return f"Set up [{rule['id'][:8]}] {rule['name']} · {automations.describe(rule)}. It shows in the chat; it runs on its own."
+            return (f"Set up {rule['name']} · {automations.describe(rule)}. The chat already shows a capsule for it: "
+                    "confirm in a few words, no ids, and don't repeat its details.")
         rule = next((r for r in mine if automation_id and r["id"].startswith(automation_id.strip("[]"))), None)
         if not rule:
             return "Which one? Give its id from action 'list'."
@@ -277,7 +278,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             coroutine=automate, name="automate",
             description="Standing instructions you carry out on your own: on a schedule (every 3 hours, weekdays at 8 "
                         "AM) or whenever something happens in an app (a new mail from abc, a new Linear issue). "
-                        "action: create | update | pause | resume | delete | list. For create: name (short), "
+                        "action: create | update | pause | resume | delete | list. For create: name (2-4 words, what it does, not "
+                        "when: 'Pizza fact', 'Mail brief'), "
                         "instructions (what to do each run, self-contained: what to check, what counts, how to "
                         "report), when (plain words, e.g. 'every 3 hours'), and either schedule (a 5-field cron in "
                         "their local time: '0 */3 * * *', '0 8 * * 1-5') or app_event (a slug from app_events) with "

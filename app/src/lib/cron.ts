@@ -1,4 +1,4 @@
-// Human previews for 5-field cron expressions (evaluated in UTC by agent-service).
+// Human previews for 5-field cron expressions. agent-service runs them in the rule's `match.tz` (UTC when it has none).
 // ponytail: covers the shapes people actually write (daily, weekdays, weekly, monthly, every n
 // minutes/hours); anything else reads "Custom schedule". Swap for a real parser if that shows up a lot.
 
@@ -17,8 +17,11 @@ export function cronError(expr: string): string | null {
   return null
 }
 
-/** "Every day at 09:00 UTC", "Weekdays at 09:00 UTC", "Every 15 minutes". */
-export function describeCron(expr: string): string {
+/** "Every day at 09:00", "Weekdays at 09:00", "Every 15 minutes". `local`: the cron is in the user's own time zone;
+ * otherwise it runs in UTC and says so. */
+export function describeCron(expr: string, local = false): string {
+  const utc = local ? '' : ' UTC'
+
   if (cronError(expr)) return 'Not a valid schedule yet'
   const [mi, h, dom, mon, dow] = expr.trim().split(/\s+/)
   const m = int(mi, 0, 59)
@@ -30,10 +33,10 @@ export function describeCron(expr: string): string {
     if (mi === '*' && h === '*') return 'Every minute'
     if (everyMin && h === '*') return `Every ${everyMin[1]} minutes`
     if (m !== null && h === '*') return m === 0 ? 'Every hour, on the hour' : `Every hour at :${pad(m)}`
-    if (m !== null && everyHr) return `Every ${everyHr[1]} hours at :${pad(m)} UTC`
+    if (m !== null && everyHr) return `Every ${everyHr[1]} hours at :${pad(m)}${utc}`
   }
-  if (m === null || hr === null || mon !== '*') return 'Custom schedule (UTC)'
-  const at = `${pad(hr)}:${pad(m)} UTC`
+  if (m === null || hr === null || mon !== '*') return `Custom schedule${local ? '' : ' (UTC)'}`
+  const at = `${pad(hr)}:${pad(m)}${utc}`
   if (dom === '*' && dow === '*') return `Every day at ${at}`
   if (dom === '*' && (dow === '1-5')) return `Weekdays at ${at}`
   if (dom === '*' && (dow === '0,6' || dow === '6,0')) return `Weekends at ${at}`
@@ -43,7 +46,7 @@ export function describeCron(expr: string): string {
   }
   const day = int(dom, 1, 31)
   if (day !== null && dow === '*') return `Monthly on day ${day} at ${at}`
-  return 'Custom schedule (UTC)'
+  return `Custom schedule${local ? '' : ' (UTC)'}`
 }
 
 export const CRON_PRESETS = [

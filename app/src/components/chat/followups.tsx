@@ -223,7 +223,7 @@ function AutomationRow({ a, owner, onToggle, onRun, onDelete }: {
           <Text variant="label" color={a.enabled ? 'ink' : 'ink3'} numberOfLines={open ? undefined : 1}>{a.name}</Text>
           <Text variant="footnote" color="ink3" numberOfLines={open ? undefined : 2}>{a.when} · {owner} · {timing}</Text>
         </Press>
-        <Toggle size="sm" value={a.enabled} onChange={onToggle} label={`${a.name} on`} />
+        <Toggle size="sm" value={a.enabled} onChange={onToggle} accessibilityLabel={`${a.name} on`} />
       </View>
       {open && (
         <View style={{ paddingLeft: 48, paddingTop: 8, gap: 10 }}>

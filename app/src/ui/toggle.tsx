@@ -27,6 +27,8 @@ export interface ToggleProps {
   onChange: (v: boolean) => void
   /** Describe the ON state ("Send read receipts"). */
   label?: string
+  /** For a bare switch (no visible label): what screen readers announce. */
+  accessibilityLabel?: string
   description?: string
   disabled?: boolean
   size?: ToggleSize
@@ -36,7 +38,7 @@ export interface ToggleProps {
  * Switch (port of Stepwise UI's Toggle). The knob springs across and squashes a little mid-travel after a real
  * flip, so it has some weight. On = tube. With `label`, the whole row is the hit target.
  */
-export function Toggle({ value, onChange, label, description, disabled, size = 'default' }: ToggleProps) {
+export function Toggle({ value, onChange, label, accessibilityLabel, description, disabled, size = 'default' }: ToggleProps) {
   const { c, scheme } = useTheme()
   const { w, h, gap } = SIZES[size]
   const knob = h - gap * 2
@@ -64,7 +66,7 @@ export function Toggle({ value, onChange, label, description, disabled, size = '
   return (
     <Pressable
       accessibilityRole="switch"
-      accessibilityLabel={label}
+      accessibilityLabel={label ?? accessibilityLabel}
       accessibilityState={{ checked: value, disabled }}
       disabled={disabled}
       onPress={() => { haptic.tap(); onChange(!value) }}
