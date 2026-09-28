@@ -47,8 +47,9 @@ below (they include the user's other chats, so news here can settle a condition 
 - met: pending follow-ups with a condition ("once ...") that the new messages show is now true, with a few words of
   evidence. Only conditions: a timed follow-up that's no longer needed goes in cancel.
 - cancel: pending follow-ups the new messages show are no longer needed (already done, dropped, replaced).
-A progress update ("still working on it") changes nothing when a pending follow-up already covers it. Casual chat
-changes nothing. Write about {user} by name, never as he or she.
+A progress update ("still working on it") changes nothing when a pending follow-up already covers it. Recurring or
+standing requests (every morning, every 3 hours, whenever X happens) are automations the teammates set up, not
+follow-ups: never add those. Casual chat changes nothing. Write about {user} by name, never as he or she.
 
 Reply with JSON only:
 {{"brief": "...",

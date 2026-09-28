@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import config, connectors, db, floor, followups, llm, memory, push, reactions, tools as T
+from . import automations, config, connectors, db, floor, followups, llm, memory, push, reactions, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -237,6 +237,18 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      " In this group, when the team agrees to circle back, set it with the owner who should lead then, "
                      "or 'group'." if ctx.project else "") + " Use search_chat for the exact words of anything said "
                  "earlier in this chat.")
+    lines.append(f"When {ctx.user_name} wants something done regularly (every hour, every morning, a daily digest) or "
+                 "whenever something happens in an app (a mail from someone, a new Linear issue), set it up with "
+                 "automate: never just promise. Time-based (every 3 hours, every day at 8, weekdays at 9) is a schedule: "
+                 "call automate right away with a cron. Only for 'whenever X happens in an app' call app_events first, "
+                 "for the event and its settings. A one-off reminder is a follow_up, not an automation. Say in one "
+                 "line what you set up.")
+    autos = await automations.in_thread(ctx.owner_id, ctx.thread_id)
+    if autos:
+        names = {m["id"]: m["name"] for m in ctx.members}
+        lines.append("Automations in this chat (update these rather than adding duplicates):\n" + "\n".join(
+            f"- [{r['id'][:8]}] {r['name']} ({names.get(r['teammate_id'], 'a teammate')}) · {automations.describe(r)}"
+            + ("" if r["enabled"] else " · paused") for r in autos))
     pend = await followups.pending(ctx.owner_id, ctx.thread_id)
     if pend:
         owners = {m["id"]: f"@{m['handle']}" for m in ctx.members}
@@ -390,6 +402,8 @@ def make_teammate(ctx: RunCtx, tm: dict):
         if ai.tool_calls or not text:
             if text or not ai.tool_calls:  # streamed tool-call chatter or an empty reply: no DB row follows
                 await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
+        elif ctx.proactive and text.strip(" .").upper() == "QUIET":  # an automation run with nothing worth saying
+            await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
         elif text.strip().upper().startswith("NOT_YET"):  # a silent follow-up check: not done yet, say nothing
             await db.broadcast(ctx.thread_id, "done", {**done, "discarded": True})
         elif ctx.project and text.strip(" .").upper() == "PASS":  # nothing to add to this round

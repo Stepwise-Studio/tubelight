@@ -7,18 +7,20 @@ import sys
 import uuid
 import zoneinfo
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 import yaml
-from fastapi import Depends, FastAPI, HTTPException
+from croniter import croniter
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox
+from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -508,6 +510,83 @@ async def receive_event(webhook_token: str, body: EventIn):
         raise HTTPException(404, "Unknown webhook token.")
     event_id, routed = await events.receive(profile["id"], body.type, body.source, body.payload)
     return {"ok": True, "event_id": event_id, "routed": routed}
+
+
+@app.post("/composio/webhook")
+async def composio_webhook(request: Request):
+    """App events from Composio triggers (signed): each runs the automations set on that trigger."""
+    secret = config.env("COMPOSIO_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(503, "Webhook secret not configured.")
+    body = (await request.body()).decode()
+    h = request.headers
+    try:
+        ev = connectors._client().triggers.verify_webhook(
+            id=h.get("webhook-id", ""), payload=body, secret=secret, signature=h.get("webhook-signature", ""),
+            timestamp=h.get("webhook-timestamp", ""))["payload"]
+    except Exception:
+        log.warning("rejected a Composio webhook")
+        raise HTTPException(401, "Bad signature.")
+    trigger_id = ev.get("id") or (ev.get("metadata") or {}).get("id")
+    owner = ev.get("user_id") or ((ev.get("metadata") or {}).get("connected_account") or {}).get("user_id")
+    if not trigger_id or not owner or not await db.one("profiles", {"id": f"eq.{owner}", "select": "id"}):
+        return {"ok": True, "fired": 0}
+    fired = await events.receive_app(owner, trigger_id, ev.get("trigger_slug") or "", ev.get("toolkit_slug") or "",
+                                     ev.get("payload") or {})
+    return {"ok": True, "fired": fired}
+
+
+def _automation_view(r: dict[str, Any], last: str | None) -> dict[str, Any]:
+    m = r.get("match") or {}
+    nxt = None
+    if r["event_type"] == "schedule" and r["enabled"] and m.get("cron"):
+        try:
+            zone = zoneinfo.ZoneInfo(m.get("tz") or "UTC")
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            zone = zoneinfo.ZoneInfo("UTC")
+        nxt = croniter(m["cron"], datetime.now(zone)).get_next(datetime).isoformat()
+    return {"id": r["id"], "name": r["name"], "instructions": r["instructions"], "kind": r["event_type"],
+            "when": automations.describe(r), "enabled": r["enabled"], "teammate_id": r["teammate_id"],
+            "last_run": last, "next_run": nxt}
+
+
+@app.get("/threads/{thread_id}/automations")
+async def thread_automations(thread_id: str, user: User = Depends(current_user)):
+    await owned("threads", thread_id, user, "conversation")
+    out = []
+    for r in await automations.in_thread(user["id"], thread_id):
+        last = await db.select("events", {"rule_id": f"eq.{r['id']}", "status": "eq.routed", "order": "created_at.desc",
+                                          "limit": "1", "select": "created_at"})
+        out.append(_automation_view(r, last[0]["created_at"] if last else None))
+    return out
+
+
+class AutomationPatch(BaseModel):
+    enabled: bool
+
+
+@app.patch("/automations/{rule_id}")
+async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Depends(current_user)):
+    rule = await owned("event_rules", rule_id, user, "automation")
+    row = await automations.set_enabled(rule, body.enabled, "You")
+    return _automation_view(row, None)
+
+
+@app.delete("/automations/{rule_id}")
+async def delete_automation(rule_id: str, user: User = Depends(current_user)):
+    await automations.delete(await owned("event_rules", rule_id, user, "automation"), "You")
+    return {"ok": True}
+
+
+@app.post("/automations/{rule_id}/run")
+async def run_automation(rule_id: str, user: User = Depends(current_user)):
+    """Run a scheduled automation now (app-event ones run when their event happens)."""
+    rule = await owned("event_rules", rule_id, user, "automation")
+    if rule["event_type"] != "schedule":
+        raise HTTPException(400, "This one runs when its app event happens.")
+    event = await db.insert("events", {"owner_id": user["id"], "type": "schedule", "source": "run_now",
+                                       "payload": {"run_now": True}, "rule_id": rule["id"]})
+    return {"ok": True, "run_id": await events.fire(rule, event)}
 
 
 @app.post("/event-rules/{rule_id}/test")

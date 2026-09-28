@@ -42,6 +42,8 @@ How to read the message:
   being roasted, praised, or asked to react to the others) goes last so they can respond.
 - Everyone given a task in the message is addressed, in the order the work happens ("ask @tess to test it and
   @dev to fix what she finds": Tess, then Dev).
+- A standing request (every 3 hours, every morning at 8, whenever a mail from X arrives, whenever an issue is
+  created) is "now": the member it fits sets up an automation right away.
 - when: when {user} wants the thing itself to happen. "now", unless the message names a time ("at 6 pm", "at
   1:27", "tomorrow morning": give it as YYYY-MM-DDTHH:MM, their local time) or a condition ("once the design is
   done": "condition"). Nobody does the thing itself yet. If {user} addressed a specific member (tagged or named),

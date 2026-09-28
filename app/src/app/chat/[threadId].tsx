@@ -4,7 +4,7 @@ import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
 import { Composer } from '@/components/chat/composer'
-import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
+import { FollowupsButton, FollowupsSheet, useAutomations, useFollowups } from '@/components/chat/followups'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
@@ -141,6 +141,7 @@ export default function Thread() {
   // Follow-ups change when a run ends (a teammate or the keeper set, fired or cancelled one): reload then.
   const running = liveRuns.some((r) => r.status === 'running')
   const fu = useFollowups(threadId, running)
+  const autos = useAutomations(threadId, running)
   const working = liveRuns.find((r) => r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
   const subtitle = working
@@ -153,7 +154,7 @@ export default function Thread() {
 
   const header = (
     <ScreenHeader
-      right={<FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />}
+      right={<FollowupsButton count={fu.list.length + autos.list.filter((a) => a.enabled).length} onPress={() => { fu.load(); autos.load(); setShowFollowups(true) }} />}
       middle={
         <Press
           radius={12}
@@ -284,6 +285,7 @@ export default function Thread() {
         onClose={() => setShowFollowups(false)}
         list={fu.list}
         done={fu.done}
+        automations={autos}
         people={isDm ? (dmMate ? [dmMate] : []) : people}
         onCancel={fu.cancel}
       />

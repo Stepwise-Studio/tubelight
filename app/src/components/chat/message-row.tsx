@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Pressable, View, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -120,7 +120,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   const m = item.m
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
-    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={FOLLOWUP_TONE[String(m.meta.followup)]} />
+    case 'event': return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]} />
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':
@@ -497,10 +497,12 @@ function FileChip({ a }: { a: Attachment }) {
 }
 
 function EventLabel({ type }: { type?: string }) {
+  // An automation's reply says which automation ("Automation · Mail brief"); other events say what came in.
+  const auto = type?.startsWith('automation:') ? type.slice('automation:'.length) : null
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-      <Icon icon={FlashIcon} size={13} color="ink3" />
-      <Text variant="footnote" color="ink3" numberOfLines={1}>Started by an event{type ? `: ${type}` : ''}</Text>
+      <Icon icon={auto ? RepeatIcon : FlashIcon} size={13} color="ink3" />
+      <Text variant="footnote" color="ink3" numberOfLines={1}>{auto ? `Automation · ${auto}` : `Started by an event${type ? `: ${type}` : ''}`}</Text>
     </View>
   )
 }
@@ -563,6 +565,8 @@ const FOLLOWUP_TONE: Record<string, Tone> = {
   created: 'tube', set: 'tube', noted: 'tube', fired: 'warning', time: 'warning', met: 'warning', deadline: 'warning',
   done: 'success', cancelled: 'danger', dropped: 'danger',
 }
+/** Automation capsules: set up / changed / back on (accent), paused (amber), deleted (red). */
+const AUTOMATION_TONE: Record<string, Tone> = { created: 'tube', updated: 'tube', resumed: 'tube', paused: 'warning', deleted: 'danger' }
 
 function SystemRow({ text, tone = 'neutral' }: { text: string; tone?: Tone }) {
   const { c } = useTheme()

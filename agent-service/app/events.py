@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from croniter import croniter
 
 from . import db, followups, runs
@@ -43,9 +45,41 @@ def _describe(event: dict[str, Any]) -> str:
     return f"{event['type'].replace('_', ' ').capitalize()} event from {event['source']}" + (f": {headline}" if headline else "")
 
 
+QUIET = ("\n\nIf there's nothing worth telling them this time (nothing new, or nothing that matters), reply with "
+         "exactly QUIET and nothing else: they won't see anything.")
+
+
+async def _since(rule: dict[str, Any], event_id: str, tz: str) -> str:
+    """When this automation last ran, so a digest covers only what's new."""
+    prev = await db.select("events", {"rule_id": f"eq.{rule['id']}", "status": "eq.routed", "id": f"neq.{event_id}",
+                                      "order": "created_at.desc", "limit": "1", "select": "created_at"})
+    if not prev:
+        return "This is its first run: cover what's recent (the last day at most)."
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    at = datetime.fromisoformat(prev[0]["created_at"]).astimezone(zone)
+    return f"It last ran {at:%a %b %d, %I:%M %p}: only cover what's new since then, never repeat what you told them before."
+
+
 async def fire(rule: dict[str, Any], event: dict[str, Any]) -> str:
-    """Post the event into the rule's thread and start the teammate's run. Returns run_id."""
+    """Start the teammate's run in the rule's thread. Returns run_id. Automations (schedule and app rules) post
+    nothing up front: their reply carries the automation's name, and a QUIET reply posts nothing at all."""
     thread_id = f"proj:{rule['project_id']}" if rule.get("project_id") else f"dm:{rule['teammate_id']}"
+    if rule["event_type"] in ("schedule", "app"):
+        tz = (rule.get("match") or {}).get("tz") or await db.user_timezone(rule["owner_id"]) or "UTC"
+        text = (f"[Automation: {rule['name']}, {(rule.get('match') or {}).get('when') or rule['event_type']}]\n"
+                f"Your standing instructions: {rule.get('instructions') or 'Tell them what matters, briefly.'}\n"
+                f"{await _since(rule, event['id'], tz)}"
+                + (f"\nThe event:\n```json\n{json.dumps(event['payload'], indent=1, default=str)[:6000]}\n```"
+                   if rule["event_type"] == "app" else "") + QUIET)
+        run_id = await runs.start(rule["owner_id"], thread_id, text, trigger="schedule" if rule["event_type"] == "schedule" else "event",
+                                  teammate_id=rule["teammate_id"], event_type=f"automation:{rule['name']}", sender="automation")
+        await db.update("events", {"id": f"eq.{event['id']}"}, {"status": "routed", "rule_id": rule["id"], "run_id": run_id})
+        await db.activity(rule["owner_id"], "event", event["type"], run_id=run_id, thread_id=thread_id,
+                          teammate_id=rule["teammate_id"], input={"event_id": event["id"], "rule_id": rule["id"]})
+        return run_id
     await db.insert("messages", {
         "thread_id": thread_id, "owner_id": rule["owner_id"], "sender_type": "system", "kind": "event",
         "text": _describe(event)[:300], "proactive": True,
@@ -62,6 +96,26 @@ async def fire(rule: dict[str, Any], event: dict[str, Any]) -> str:
     await db.activity(rule["owner_id"], "event", event["type"], run_id=run_id, thread_id=thread_id,
                       teammate_id=rule["teammate_id"], input={"event_id": event["id"], "rule_id": rule["id"]})
     return run_id
+
+
+async def receive_app(owner_id: str, trigger_id: str, trigger: str, toolkit: str, payload: dict[str, Any]) -> int:
+    """A Composio app event: run every enabled automation on that trigger whose keyword filter matches."""
+    from . import automations
+
+    rules = await db.select("event_rules", {"owner_id": f"eq.{owner_id}", "event_type": "eq.app", "enabled": "eq.true",
+                                            "match->>trigger_id": f"eq.{trigger_id}"})
+    fired = 0
+    for rule in rules:
+        event = await db.insert("events", {"owner_id": owner_id, "type": trigger.lower(), "source": toolkit.lower(),
+                                           "payload": payload, "rule_id": rule["id"]})
+        if not automations.keywords_match(rule, payload):
+            await db.update("events", {"id": f"eq.{event['id']}"}, {"status": "ignored"})
+        elif await rate_limited(rule):
+            await db.update("events", {"id": f"eq.{event['id']}"}, {"status": "rate_limited"})
+        else:
+            await fire(rule, event)
+            fired += 1
+    return fired
 
 
 async def receive(owner_id: str, type: str, source: str, payload: dict[str, Any]) -> tuple[str, bool]:
@@ -97,7 +151,11 @@ async def tick(now: datetime | None = None) -> None:
         cron = (rule.get("match") or {}).get("cron")
         if not cron or not croniter.is_valid(cron):
             continue
-        slot = croniter(cron, now).get_prev(datetime)
+        try:  # automations keep their cron in the user's own time zone ("8 AM" means their 8 AM)
+            zone = ZoneInfo((rule.get("match") or {}).get("tz") or "UTC")
+        except (ZoneInfoNotFoundError, ValueError):
+            zone = ZoneInfo("UTC")
+        slot = croniter(cron, now.astimezone(zone)).get_prev(datetime)
         if (now - slot).total_seconds() > SLOT_GRACE_S:
             continue
         slot_iso = slot.isoformat()

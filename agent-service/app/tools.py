@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import connectors, db, followups, llm, memory, sandbox
+from . import automations, connectors, db, followups, llm, memory, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -22,6 +22,7 @@ DRAFT = {"DRAFT"}
 READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "VIEW"}
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
+    "automate": "read", "app_events": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
 }
@@ -29,7 +30,7 @@ INTERNAL = {
 PROMPTS = {"ask_user", "connect_app"}
 LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
-    "follow_up": "Setting a follow-up",
+    "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
     "git_push": "Pushing commits", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
@@ -226,7 +227,66 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 else f"Follow-up set for once {until}." + (" I'll check on it with the apps." if poll_hours else "")
                 + " It shows in the chat's follow-ups and fires here on its own.")
 
+    async def app_events(app: str) -> str:
+        toolkit = await connectors.resolve(app)
+        if not toolkit:
+            return f"There's no app called {app}."
+        try:
+            found = await automations.app_events(toolkit)
+        except Exception as e:
+            return f"Couldn't list {app}'s events: {str(e)[:200]}"
+        if not found:
+            return f"{connectors.name_of(toolkit)} can't push events; use a schedule instead."
+        return "\n".join(f"- {e['slug']}: {e['name']}. Settings: " + (", ".join(
+            f"{k}{' (required)' if k in e['required'] else ''}: {d}" for k, d in e["settings"].items()) or "none") for e in found)
+
+    async def automate(action: str, name: str = "", instructions: str = "", schedule: str = "", app_event: str = "",
+                       event_settings: dict | None = None, keywords: list[str] | None = None, when: str = "",
+                       automation_id: str = "") -> str:
+        mine = await automations.in_thread(ctx.owner_id, ctx.thread_id)
+        if action == "list":
+            return "\n".join(f"- [{r['id'][:8]}] {r['name']} · {automations.describe(r)}" + ("" if r["enabled"] else " (paused)")
+                             for r in mine) or "No automations in this chat yet."
+        if action == "create":
+            try:
+                rule = await automations.create(ctx.owner_id, tm, (ctx.project or {}).get("id"), name=name or "Automation",
+                                                instructions=instructions, cron=schedule or None, tz=ctx.timezone,
+                                                trigger=app_event or None, config=event_settings, contains=keywords, when=when)
+            except ValueError as e:
+                return str(e)
+            return f"Set up [{rule['id'][:8]}] {rule['name']} · {automations.describe(rule)}. It shows in the chat; it runs on its own."
+        rule = next((r for r in mine if automation_id and r["id"].startswith(automation_id.strip("[]"))), None)
+        if not rule:
+            return "Which one? Give its id from action 'list'."
+        try:
+            if action == "update":
+                await automations.update(rule, tm["name"], name=name, instructions=instructions, cron=schedule,
+                                         when=when, contains=keywords)
+            elif action in ("pause", "resume"):
+                await automations.set_enabled(rule, action == "resume", tm["name"])
+            elif action == "delete":
+                await automations.delete(rule, tm["name"])
+            else:
+                return "action is one of: create, update, pause, resume, delete, list."
+        except ValueError as e:
+            return str(e)
+        return f"Done: {action}d {rule['name']}." if action != "resume" else f"Resumed {rule['name']}."
+
     tools += [
+        StructuredTool.from_function(
+            coroutine=automate, name="automate",
+            description="Standing instructions you carry out on your own: on a schedule (every 3 hours, weekdays at 8 "
+                        "AM) or whenever something happens in an app (a new mail from abc, a new Linear issue). "
+                        "action: create | update | pause | resume | delete | list. For create: name (short), "
+                        "instructions (what to do each run, self-contained: what to check, what counts, how to "
+                        "report), when (plain words, e.g. 'every 3 hours'), and either schedule (a 5-field cron in "
+                        "their local time: '0 */3 * * *', '0 8 * * 1-5') or app_event (a slug from app_events) with "
+                        "event_settings (e.g. Gmail {\"query\": \"from:abc@x.com\"}) and optional keywords (all must "
+                        "appear in the event). Others need automation_id from list."),
+        StructuredTool.from_function(
+            coroutine=app_events, name="app_events",
+            description="The events an app can push to you (for automate's app_event), with their settings. app: "
+                        "the app's name, e.g. 'Gmail' or 'Linear'."),
         StructuredTool.from_function(
             coroutine=search_chat, name="search_chat",
             description="Search this chat's full history for earlier messages (exact wording, what was said this "

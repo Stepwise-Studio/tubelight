@@ -38,7 +38,8 @@ class FakeDB:
             v = row.get(key)
         s = str(v).lower() if isinstance(v, bool) else str(v)
         return {"eq": lambda: s == val, "in": lambda: s in val.strip("()").split(","), "gte": lambda: s >= val,
-                "gt": lambda: s > val, "ilike": lambda: val.strip("*").lower() in s.lower()}[op]()
+                "gt": lambda: s > val, "ilike": lambda: val.strip("*").lower() in s.lower(), "neq": lambda: s != val,
+                "is": lambda: v is None if val == "null" else s == val}[op]()
 
     def rows(self, table: str, **eq: Any) -> list[dict]:
         return [r for r in self.tables.get(table, []) if all(r.get(k) == v for k, v in eq.items())]
