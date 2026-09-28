@@ -13,6 +13,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
@@ -39,11 +41,13 @@ How to read the message:
   being roasted, praised, or asked to react to the others) goes last so they can respond.
 - Everyone given a task in the message is addressed, in the order the work happens ("ask @tess to test it and
   @dev to fix what she finds": Tess, then Dev).
-- timing: "later" when the message asks for the thing to happen at a later time or once something else happens
-  ("roast Sol at 6 pm", "deploy once the design is done", even a time a minute away); then pick only one member to
-  confirm it and set a follow-up: the one addressed (tagged or named), or if the whole group was, the one best placed.
-  Nobody does the thing itself now. Otherwise "now".
+- when: when {user} wants the thing itself to happen. "now", unless the message names a time ("at 6 pm", "at
+  1:27", "tomorrow morning": give it as YYYY-MM-DDTHH:MM, their local time) or a condition ("once the design is
+  done": "condition"). When it's for later, pick only one member to confirm it and set a follow-up: the one addressed
+  (tagged or named), or if the whole group was, the one best placed. Nobody does the thing itself yet.
 - If {user} is continuing an exchange with one member, that member replies unless someone else is clearly addressed.
+- A scheduled follow-up firing always appears as "Scheduled follow-up: ..."; a message from {user} is always a new
+  request, even when it talks about circling back.
 - The latest message may be a scheduled follow-up the chat set earlier: the group picking a topic back up, now
   (timing "now"). Its owner leads, first. Then add every member who took part in that topic or would naturally
   react: for a debate, verdict, announcement or group circle-back that's everyone; for one person's task (sending
@@ -56,7 +60,7 @@ Write about {user} by name, never as he or she.
 
 Reply with JSON only:
 {{"read": "<one sentence: what is asked, who is addressed, who is talked about>",
- "timing": "now or later",
+ "when": "now, YYYY-MM-DDTHH:MM, or condition",
  "speakers": [{{"handle": "<handle>", "part": "<their part, in the second person, one short sentence>"}}]}}"""
 
 
@@ -91,7 +95,22 @@ def transcript(msgs: list[BaseMessage], members: list[dict], user: str) -> str:
     return "\n".join(lines)
 
 
-def parse(text: str, members: list[dict]) -> Plan | None:
+def later(when: Any, now: datetime | None) -> bool:
+    """Whether the plan's `when` is for later: a condition, or a time past now. The model reads the time off the
+    message; the comparison is done here (models slip at clock arithmetic, and copy the chat's earlier habits)."""
+    w = str(when or "now").strip().lower()
+    if w == "condition":
+        return True
+    try:
+        at = datetime.fromisoformat(w.upper().rstrip("Z"))
+    except ValueError:
+        return False
+    if not now:
+        return True
+    return at.replace(tzinfo=now.tzinfo) > now + timedelta(seconds=30)
+
+
+def parse(text: str, members: list[dict], now: datetime | None = None) -> Plan | None:
     """The director's JSON as a Plan; None when it isn't usable."""
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
@@ -107,7 +126,7 @@ def parse(text: str, members: list[dict]) -> Plan | None:
         if tid and tid not in plan.speakers:
             plan.speakers.append(tid)
             plan.parts[tid] = str(s.get("part") or "")[:300]
-    if str(data.get("timing", "")).lower() == "later" and plan.speakers:
+    if (later(data.get("when"), now) or str(data.get("timing", "")).lower() == "later") and plan.speakers:
         # Something for later: one member confirms and sets the follow-up; it fires for the group when it's time.
         lead = plan.speakers[0]
         plan.speakers, plan.parts = [lead], {lead: (plan.parts.get(lead, "") + " This is for later: confirm it and set "
@@ -125,15 +144,15 @@ def tagged(text: str, members: list[dict]) -> list[dict]:
 
 
 async def plan(msgs: list[BaseMessage], members: list[dict], user: str, latest: str, brief: str = "",
-               now: str = "now") -> Plan:
+               now: datetime | None = None) -> Plan:
     roster = "\n".join(f"- @{m['handle']}: {m['name']}, {m['role']}. {(m.get('bio') or '')[:160]}" for m in members)
     try:
-        res = await llm.chat_model(config.ROUTER_MODEL).ainvoke([
-            SystemMessage(PROMPT.format(user=user, roster=roster, now=now)),
+        res = await llm.chat_model(config.ROUTER_MODEL, json=True).ainvoke([
+            SystemMessage(PROMPT.format(user=user, roster=roster, now=f"{now:%A, %B %d, %Y, %I:%M %p}" if now else "now")),
             HumanMessage((f"Brief of the whole chat so far:\n{brief}\n\nRecent messages:\n" if brief else "")
                          + transcript(msgs, members, user)),
         ])
-        got = parse(res.text, members)
+        got = parse(res.text, members, now)
     except Exception:
         log.exception("floor plan failed")
         got = None

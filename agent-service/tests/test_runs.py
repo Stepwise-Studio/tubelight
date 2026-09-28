@@ -158,7 +158,7 @@ async def test_a_request_for_later_gets_one_confirmation_not_the_action(api, env
     fdb, fake = env
     dev, tess, sol = teammate(fdb, "dev", "developer"), teammate(fdb, "tess", "tester"), teammate(fdb, "sol", "social")
     p = project(fdb, [dev, tess, sol])
-    fake.script = [plan(("tess", "Confirm the roast."), ("dev", "Roast Sol."), ("sol", "Fire back."), timing="later"),
+    fake.script = [plan(("tess", "Confirm the roast."), ("dev", "Roast Sol."), ("sol", "Fire back."), when="2099-01-01T18:00"),
                    ai("Set for 6 pm.")]
     await api.post(f"/threads/proj:{p['id']}/messages", json={"text": "everyone roast @sol at 6 pm"})
     await settle()

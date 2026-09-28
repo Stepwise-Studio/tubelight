@@ -264,3 +264,14 @@ def test_big_requests_skip_groq_first(monkeypatch):
 def test_status_label_for_non_verb_actions():
     from app.tools import label
     assert label("GOOGLECALENDAR_EVENTS_LIST", {}) == "Working in Googlecalendar"
+
+
+def test_floor_decides_later_by_comparing_times_not_by_model_arithmetic():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.floor import later
+    now = datetime(2026, 9, 28, 13, 26, tzinfo=ZoneInfo("Asia/Kolkata"))
+    assert later("2026-09-28T13:27", now)  # a minute away is still later
+    assert not later("2026-09-28T13:26", now) and not later("2026-09-28T13:10", now)  # now, or already past
+    assert later("condition", now) and not later("now", now) and not later(None, now) and not later("soonish", now)

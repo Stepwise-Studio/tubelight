@@ -11,7 +11,12 @@ import time
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from app import config, floor
+
+NOW = datetime(2026, 9, 28, 13, 16, tzinfo=ZoneInfo("Asia/Kolkata"))  # a Monday, 1:16 PM
 
 MEMBERS = [
     {"id": "dev", "handle": "dev", "name": "Dev", "role": "Developer", "bio": "Senior engineer. Reviews code, fixes bugs."},
@@ -66,6 +71,10 @@ CASES = [
      lambda g: bool(g) and g[0] == "sol" and len(g) >= 3),
     ("group task a minute away", [], "Everyone, circle back at 1:17 pm and each name the best snack for a late-night debug session",
      lambda g: len(g) == 1),
+    ("a minute away, after rounds answered at once",
+     [("user", "Everyone, circle back at 1:05 pm and each name the best snack"), ("dev", "Cold pizza."),
+      ("sol", "Dark chocolate."), ("tess", "Cold pizza again.")],
+     "Everyone, circle back at 1:17 pm and each name your favourite keyboard shortcut", lambda g: len(g) == 1),
     ("a task follow-up fires", [], "FOLLOWUP:[Follow-up set Mon 10:00 AM: send Akhil the benchmark numbers] It's time "
      "now. @dev set it and leads; the members it concerns follow. Pick it up and message them here.", first("dev")),
 ]
@@ -81,9 +90,10 @@ async def run(model: str) -> int:
     for name, lines, latest, check in CASES:
         t = time.monotonic()
         last = HumanMessage(latest.removeprefix("FOLLOWUP:"), name="follow_up") if latest.startswith("FOLLOWUP:") else HumanMessage(latest)
-        p = await floor.plan([*history(lines), last], MEMBERS, "Akhil", latest, now="Monday, 01:16 PM")
+        p = await floor.plan([*history(lines), last], MEMBERS, "Akhil", latest, now=NOW)
         ok = check(p.speakers)
         passed += ok
+        await asyncio.sleep(4)  # stay under the free tier's tokens per minute
         print(f"{'PASS' if ok else 'FAIL'} {time.monotonic() - t:4.1f}s  {name}: {p.speakers}  | {p.read[:110]}")
     print(f"== {model}: {passed}/{len(CASES)}\n")
     return passed
