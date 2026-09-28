@@ -31,7 +31,7 @@ export function AutomationRows({ items, show, onToggle }: {
   return (
     <Surface style={{ overflow: 'hidden' }}>
       {items.map((a, i) => {
-        const sub = [whenText(a), context(a), timing(a)].join(' · ')
+        const sub = [a.problems?.length ? 'Needs attention' : null, whenText(a), context(a), timing(a)].filter(Boolean).join(' · ')
         return (
           <View key={a.id}>
             {i > 0 && <Divider inset={60} />}

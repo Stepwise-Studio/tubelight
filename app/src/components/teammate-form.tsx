@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { Add01Icon, AtIcon, Cancel01Icon, SparklesIcon, Tick02Icon, UnfoldMoreIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, AtIcon, Cancel01Icon, SparklesIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
 import { ColorSwatches, FormSection, SwitchRow } from '@/components/form-bits'
@@ -15,8 +15,8 @@ import {
 import type { Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
 import {
-  Button, Chip, Divider, FACE_SEEDS, Icon, IconButton, ListRow, Press, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
-  haptic, toast,
+  Button, Chip, Divider, FACE_SEEDS, Icon, IconButton, PickerField, Press, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
+  haptic, toast, type PickerOption,
 } from '@/ui'
 
 export type TeammateDraft = Pick<Teammate, 'name' | 'handle' | 'role' | 'bio' | 'system_prompt' | 'model' | 'allowed_toolkits' | 'avatar_shape' | 'color'>
@@ -97,80 +97,36 @@ function LookPicker({ draft, onChange }: { draft: TeammateDraft; onChange: (d: P
 }
 
 function ModelField({ value, role, onChange }: { value: string; role: string; onChange: (id: string) => void }) {
-  const { c } = useTheme()
-  const { height } = useWindowDimensions()
   const { models, error } = useModels()
-  const [open, setOpen] = useState(false)
-  const current = models?.find((m) => m.id === value)
   const listed = new Set((models ?? []).map((m) => m.id))
-  const suggested = MODEL_HINTS.filter((h) => listed.has(h.id))
   const forRole = role.trim() ? recommendedModel(role) : null
-  const hint = MODEL_HINTS.find((h) => h.id === value)?.best
-  const groups = Object.entries(
-    (models ?? []).reduce<Record<string, typeof models & object>>((acc, m) => {
-      (acc[m.provider] ??= []).push(m)
-      return acc
-    }, {}),
-  ).sort(([a], [b]) => (a === 'groq' ? -1 : b === 'groq' ? 1 : a.localeCompare(b)))
-  const pick = (id: string) => { haptic.tap(); onChange(id); setOpen(false) }
-  const tick = (id: string) => (id === value ? <Icon icon={Tick02Icon} size={18} color={c.tube} strokeWidth={2} /> : null)
-
+  const hint = (id: string) => MODEL_HINTS.find((h) => h.id === id)?.best
+  const providers = [...new Set((models ?? []).map((m) => m.provider))]
+    .sort((a, b) => (a === 'groq' ? -1 : b === 'groq' ? 1 : a.localeCompare(b)))
+  const roleChip = (id: string) => (id === forRole ? <Chip label={`For ${role.trim().toLowerCase()}`} color="info" variant="soft" size="sm" /> : undefined)
+  const options: PickerOption[] = [
+    ...MODEL_HINTS.filter((h) => listed.has(h.id)).map((h) => ({
+      value: h.id, title: modelName(h.id, models), subtitle: h.best, group: 'Suggested', trailing: roleChip(h.id),
+    })),
+    ...providers.flatMap((p) => (models ?? []).filter((m) => m.provider === p && !MODEL_HINTS.some((h) => h.id === m.id)).map((m) => ({
+      value: m.id, title: modelName(m.id, models), subtitle: contextLabel(m.context_length), group: PROVIDERS[p] ?? p, keywords: PROVIDERS[p],
+    }))),
+  ]
+  // The current model may not be listed right now (the list failed, or it left a free tier): keep it choosable.
+  if (!options.some((o) => o.value === value)) {
+    options.unshift({ value, title: modelName(value, models), subtitle: hint(value) ?? PROVIDERS[modelProvider(value)], group: 'Current' })
+  }
   return (
     <>
-      <Surface style={{ overflow: 'hidden' }}>
-        <ListRow
-          title={modelName(value, models)}
-          subtitle={hint ?? [PROVIDERS[modelProvider(value)], current && contextLabel(current.context_length)].filter(Boolean).join(' · ')}
-          accessory={models ? <Icon icon={UnfoldMoreIcon} size={18} color="ink3" /> : null}
-          onPress={models ? () => setOpen(true) : undefined}
-          accessibilityLabel={`Model, ${modelName(value, models)}`}
-          accessibilityHint="Choose a different model"
-        />
-      </Surface>
+      <PickerField
+        label="Model"
+        value={value}
+        options={options}
+        onChange={(id) => onChange(id)}
+        disabled={!models}
+        intro="Every model here is free: Groq and OpenRouter free tiers, Gemini’s free tier, and Cloudflare’s daily allowance. If one is busy, the run falls back to another."
+      />
       {error && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 2 }}>The model list is unavailable right now, so the current model stays. {error}</Text>}
-      <Sheet open={open} onClose={() => setOpen(false)} title="Model">
-        <ScrollView style={{ maxHeight: height * 0.66 }} contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 8 }}>
-          <Text variant="caption" color="ink3" style={{ paddingHorizontal: 12, paddingBottom: 4 }}>
-            Every model here is free: Groq and OpenRouter free tiers, and Cloudflare’s daily free allowance. If one is busy, the run falls back to another.
-          </Text>
-          {suggested.length > 0 && (
-            <View>
-              <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 12, paddingTop: 16, paddingBottom: 4 }}>Suggested</Text>
-              {suggested.map((h) => (
-                <ListRow
-                  key={h.id}
-                  title={modelName(h.id, models)}
-                  subtitle={h.best}
-                  accessory={
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      {h.id === forRole && <Chip label={`For ${role.trim().toLowerCase()}`} color="info" variant="soft" size="sm" />}
-                      {tick(h.id)}
-                    </View>
-                  }
-                  accessibilityLabel={`${modelName(h.id, models)}. ${h.best}${h.id === forRole ? '. Recommended for this role' : ''}${h.id === value ? ', selected' : ''}`}
-                  onPress={() => pick(h.id)}
-                />
-              ))}
-            </View>
-          )}
-          <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 12, paddingTop: 20, paddingBottom: 0 }}>All free models</Text>
-          {groups.map(([provider, list]) => (
-            <View key={provider}>
-              <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2 }}>{PROVIDERS[provider] ?? provider}</Text>
-              {list.map((m) => (
-                <ListRow
-                  key={m.id}
-                  title={modelName(m.id, models)}
-                  subtitle={contextLabel(m.context_length)}
-                  accessory={tick(m.id)}
-                  accessibilityLabel={`${modelName(m.id, models)}, ${contextLabel(m.context_length)}${m.id === value ? ', selected' : ''}`}
-                  onPress={() => pick(m.id)}
-                />
-              ))}
-            </View>
-          ))}
-        </ScrollView>
-      </Sheet>
     </>
   )
 }

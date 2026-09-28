@@ -198,6 +198,9 @@ async def update(rule: dict[str, Any], by: str, **changes: Any) -> dict[str, Any
             match.pop("toolkits", None)
         else:
             match["toolkits"] = apps
+    for k in ("teammate_id", "project_id"):  # moved to another teammate or chat (the caller checked membership)
+        if k in changes:
+            patch[k] = changes[k]
     patch["match"] = match
     [row] = await db.update("event_rules", {"id": f"eq.{rule['id']}"}, patch)
     await note(row, "updated", by)

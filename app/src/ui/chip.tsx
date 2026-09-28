@@ -75,11 +75,14 @@ export interface ChipProps {
 export function Chip({ label, color = 'idle', variant = 'outline', size = 'default', icon, dot, selected, onPress, accessibilityLabel }: ChipProps) {
   const { scheme } = useTheme()
   const d = scheme === 'dark' ? 1 : 0
+  // A filter chip keeps its unselected size and weight when picked (only the colours change), so a row of them
+  // stays on one baseline and nothing reflows as the selection moves.
+  const filter = selected !== undefined
   if (selected) { color = 'info'; variant = 'soft' }
   const s = sizes[size]
   const c = colors[color]
   const body = dot ? colors.idle : c // dot chips: only the dot is coloured
-  const h = variant === 'soft' && !icon && !dot ? s.soft : s.h
+  const h = variant === 'soft' && !icon && !dot && !filter ? s.soft : s.h
   const ink = variant === 'solid' ? body.solidText[d] : body.text[d]
   const box = {
     height: h,
@@ -100,7 +103,7 @@ export function Chip({ label, color = 'idle', variant = 'outline', size = 'defau
       <Text
         numberOfLines={1}
         style={{
-          fontFamily: variant === 'outline' ? fonts.regular : fonts.medium, fontSize: s.font, lineHeight: s.font + 4,
+          fontFamily: variant === 'outline' || filter ? fonts.regular : fonts.medium, fontSize: s.font, lineHeight: s.font + 4,
           letterSpacing: -0.42, color: ink, includeFontPadding: false,
         }}
       >

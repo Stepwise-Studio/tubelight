@@ -65,3 +65,35 @@ export function describeSchedule(s: Schedule): string {
 export const sameSchedule = (a: Schedule, b: Schedule) => toCron(a) === toCron(b)
 
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** How the Repeat chips read a schedule: presets for the day sets people pick most, or custom days. */
+export type Repeat = 'daily' | 'weekdays' | 'weekends' | 'days' | 'hours'
+export function repeatOf(s: Schedule): Repeat | null {
+  if (s.kind === 'custom') return null
+  if (s.kind === 'hours') return 'hours'
+  const d = s.days.join(',')
+  return d === '0,1,2,3,4,5,6' ? 'daily' : d === '1,2,3,4,5' ? 'weekdays' : d === '0,6' ? 'weekends' : 'days'
+}
+export function withRepeat(s: Schedule, r: Repeat): Schedule {
+  const at = s.kind === 'time' ? { hour: s.hour, minute: s.minute } : { hour: 8, minute: 0 }
+  if (r === 'hours') return { kind: 'hours', every: s.kind === 'hours' ? s.every : 3 }
+  const days = r === 'daily' ? ALL_DAYS : r === 'weekdays' ? [1, 2, 3, 4, 5] : r === 'weekends' ? [0, 6]
+    : s.kind === 'time' && s.days.length < 7 ? s.days : [1, 3, 5]
+  return { kind: 'time', ...at, days }
+}
+
+/** The next `n` run times in this device's time zone (the form's preview; the service computes the real ones). */
+export function nextRuns(s: Schedule, n = 3, from = new Date()): Date[] {
+  if (s.kind === 'custom') return []
+  const out: Date[] = []
+  const t = new Date(from)
+  t.setSeconds(0, 0)
+  for (let i = 0; i < 60 * 24 * 8 && out.length < n; i++) {
+    t.setMinutes(t.getMinutes() + 1)
+    const ok = s.kind === 'hours'
+      ? t.getMinutes() === 0 && t.getHours() % s.every === 0
+      : t.getMinutes() === s.minute && t.getHours() === s.hour && s.days.includes(t.getDay())
+    if (ok) out.push(new Date(t))
+  }
+  return out
+}

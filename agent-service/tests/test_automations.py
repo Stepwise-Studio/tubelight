@@ -198,3 +198,16 @@ async def test_runs_use_only_the_apps_they_were_given(env):
     assert ctx.toolkits(tm) == ["GMAIL"]
     ctx.scope([HumanMessage("hi")])  # the user writing next: back to everything
     assert ctx.toolkits(tm) == ["GMAIL", "LINEAR", "SLACK"]
+
+
+async def test_it_moves_to_another_chat_only_where_the_teammate_is_a_member(api, env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "email")
+    rule = await automations.create(OWNER, ivy, None, name="Brief", instructions="Brief.", cron="0 8 * * *", tz="UTC")
+    fdb.tables.setdefault("projects", []).append({"id": "p1", "owner_id": OWNER, "name": "Launch"})
+    assert (await api.patch(f"/automations/{rule['id']}", json={"project_id": "p1"})).status_code == 400
+    fdb.tables.setdefault("project_members", []).append({"project_id": "p1", "teammate_id": ivy["id"], "owner_id": OWNER})
+    r = (await api.patch(f"/automations/{rule['id']}", json={"project_id": "p1", "toolkits": ["gmail"]})).json()
+    assert r["thread_id"] == "proj:p1" and r["toolkits"] == ["GMAIL"]
+    r = (await api.patch(f"/automations/{rule['id']}", json={"toolkits": None})).json()
+    assert r["toolkits"] is None

@@ -7,7 +7,7 @@ import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
-  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, ViewIcon, ViewOffIcon,
+  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -65,6 +65,7 @@ export default function ProfileScreen() {
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
         <AppsSection />
         <AutomationsSection />
+        <UsageSection />
         <MemorySection />
         <Appearance />
         <PushSection />
@@ -218,6 +219,28 @@ function PushSection() {
 }
 
 /** Connected apps, a grid of popular ones to connect in a tap, and the way into all of Composio's catalog. */
+/** How much of the free allowances is left, in one row: anything used up first, else the busiest. */
+function UsageSection() {
+  const [items, setItems] = useState<{ id: string; used: number; limit: number | null; out?: boolean; unit: string }[] | null>(null)
+  useFocusEffect(useCallback(() => {
+    api<{ sections: { items: { id: string; used: number; limit: number | null; out?: boolean; unit: string }[] }[] }>('/usage')
+      .then((u) => setItems(u.sections.flatMap((s) => s.items)), () => setItems([]))
+  }, []))
+  const out = (items ?? []).filter((i) => i.out || (i.limit != null && i.used >= i.limit)).length
+  const tools = items?.find((i) => i.id === 'composio')
+  const summary = items === null ? 'Loading…' : [
+    out ? `${out} used up for now` : 'Nothing used up',
+    tools && `${tools.used.toLocaleString()} tool calls this month`,
+  ].filter(Boolean).join(' · ')
+  return (
+    <FormSection title="Usage" hint="How much of each free allowance is left: models, app tool calls, storage.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow title="Open usage" subtitle={summary} icon={DashboardSpeed01Icon} chevron onPress={() => router.push('/usage')} />
+      </Surface>
+    </FormSection>
+  )
+}
+
 /** What runs on its own, in one row: how many are on and when the next one runs. */
 function AutomationsSection() {
   const [items, setItems] = useState<Automation[] | null>(null)

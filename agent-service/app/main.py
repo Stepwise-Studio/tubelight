@@ -736,12 +736,20 @@ class AutomationPatch(BaseModel):
     settings: dict[str, Any] | None = None
     keywords: list[str] | None = None
     toolkits: list[str] | None = None  # send null to allow every app the teammate may use
+    teammate_id: str | None = None  # move it to another teammate
+    project_id: str | None = None  # or another chat: a project, or null for the teammate's direct chat
 
 
 @app.patch("/automations/{rule_id}")
 async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Depends(current_user)):
     rule = await owned("event_rules", rule_id, user, "automation")
     sent = body.model_fields_set
+    moves: dict[str, Any] = {}
+    if "teammate_id" in sent or "project_id" in sent:
+        tm = await owned("teammates", body.teammate_id or rule["teammate_id"], user, "teammate")
+        project = body.project_id if "project_id" in sent else rule.get("project_id")
+        await _project_member(tm, project, user)
+        moves = {"teammate_id": tm["id"], "project_id": project}
     if body.tz:
         try:
             zoneinfo.ZoneInfo(body.tz)
@@ -754,6 +762,7 @@ async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Dep
         changes["contains"] = body.keywords
     if "toolkits" in sent:
         changes["toolkits"] = body.toolkits
+    changes |= moves
     try:
         if changes:
             rule = await automations.update(rule, "You", **changes)

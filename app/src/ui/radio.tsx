@@ -1,0 +1,134 @@
+import { type ReactNode, useState } from 'react'
+import { ScrollView, View, useWindowDimensions } from 'react-native'
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import { UnfoldMoreIcon } from '@hugeicons/core-free-icons'
+
+import { motion, radius, useTheme } from '@/theme'
+
+import { haptic } from './haptics'
+import { Icon } from './icon'
+import { Press } from './press'
+import { SearchField } from './text-field'
+import { Sheet } from './sheet'
+import { Surface } from './surface'
+import { Text } from './text'
+
+const SIZES = { sm: { sq: 16, dot: 6 }, default: { sq: 20, dot: 8 }, lg: { sq: 24, dot: 10 } } as const
+
+/** Stepwise UI's Radio (ui.stepwise.studio/r/radio): a filled circle with a dot that pops in when checked. Visual
+ * only: the row around it is the hit target (see RadioRow). */
+export function Radio({ checked, size = 'default' }: { checked: boolean; size?: keyof typeof SIZES }) {
+  const { c, scheme } = useTheme()
+  const s = SIZES[size]
+  const on = scheme === 'dark' ? '#ffffff' : '#18181b'
+  const dot = useAnimatedStyle(() => ({
+    opacity: withTiming(checked ? 1 : 0, { duration: 180, easing: motion.ease.smoothOut }),
+    transform: [{ scale: withTiming(checked ? 1 : 0, { duration: 180, easing: motion.ease.smoothOut }) }],
+  }), [checked])
+  return (
+    <View style={{
+      width: s.sq, height: s.sq, borderRadius: s.sq / 2, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: checked ? on : c.panel, borderWidth: checked ? 0 : 1, borderColor: 'rgba(138,138,141,0.23)',
+    }}>
+      <Animated.View style={[{ width: s.dot, height: s.dot, borderRadius: s.dot / 2, backgroundColor: scheme === 'dark' ? '#18181b' : '#ffffff' }, dot]} />
+    </View>
+  )
+}
+
+/** A choosable row: leading art, title, subtitle, a radio at the end. The whole row is the radio. */
+export function RadioRow({ title, subtitle, leading, trailing, checked, onPress, subtitleLines = 1 }: {
+  title: string; subtitle?: string; leading?: ReactNode; trailing?: ReactNode; checked: boolean; onPress: () => void; subtitleLines?: number
+}) {
+  return (
+    <Press
+      radius={radius.md}
+      static
+      onPress={() => { haptic.tap(); onPress() }}
+      accessibilityRole="radio"
+      accessibilityState={{ checked }}
+      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 8, paddingHorizontal: 12 }}
+    >
+      {leading}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text variant="caption" color="ink3" numberOfLines={subtitleLines}>{subtitle}</Text> : null}
+      </View>
+      {trailing}
+      <Radio checked={checked} />
+    </Press>
+  )
+}
+
+export interface PickerOption {
+  value: string
+  title: string
+  subtitle?: string
+  leading?: ReactNode
+  trailing?: ReactNode
+  /** Groups options under a small heading, in first-seen order. */
+  group?: string
+  /** Extra words the search matches (a provider name, a handle). */
+  keywords?: string
+}
+
+/** A field showing the current choice that opens a sheet of radio rows: pick one and the sheet closes. With many
+ * options (8+) it gets a search box. `intro` is a line of context at the top of the sheet. */
+export function PickerField({ label, value, options, onChange, intro, placeholder = 'Choose', disabled }: {
+  label: string; value: string | null; options: PickerOption[]; onChange: (v: string) => void
+  intro?: string; placeholder?: string; disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const { height } = useWindowDimensions()
+  const current = options.find((o) => o.value === value)
+  const query = q.trim().toLowerCase()
+  const shown = query ? options.filter((o) => `${o.title} ${o.subtitle ?? ''} ${o.keywords ?? ''}`.toLowerCase().includes(query)) : options
+  const groups: [string, PickerOption[]][] = []
+  for (const o of shown) {
+    const g = groups.find(([k]) => k === (o.group ?? ''))
+    if (g) g[1].push(o)
+    else groups.push([o.group ?? '', [o]])
+  }
+  const pick = (v: string) => { onChange(v); setOpen(false); setQ('') }
+  return (
+    <>
+      <Surface style={{ overflow: 'hidden', opacity: disabled ? 0.5 : 1 }}>
+        <Press
+          radius={radius.md}
+          static
+          disabled={disabled}
+          onPress={() => { haptic.tap(); setOpen(true) }}
+          accessibilityLabel={`${label}, ${current?.title ?? placeholder}`}
+          accessibilityHint="Opens the choices"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 8, paddingHorizontal: 12 }}
+        >
+          {current?.leading}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text variant="bodyMedium" numberOfLines={1} color={current ? 'ink' : 'ink3'}>{current?.title ?? placeholder}</Text>
+            {current?.subtitle ? <Text variant="caption" color="ink3" numberOfLines={1}>{current.subtitle}</Text> : null}
+          </View>
+          <Icon icon={UnfoldMoreIcon} size={18} color="ink3" />
+        </Press>
+      </Surface>
+      <Sheet open={open} onClose={() => { setOpen(false); setQ('') }} title={label}>
+        <View style={{ maxHeight: height * 0.7 }}>
+          {options.length >= 8 && <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}><SearchField value={q} onChangeText={setQ} /></View>}
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 12 }}>
+            {intro && <Text variant="caption" color="ink3" style={{ paddingHorizontal: 12, paddingBottom: 6 }}>{intro}</Text>}
+            {groups.map(([g, list]) => (
+              <View key={g || 'all'} accessibilityRole="radiogroup">
+                {g ? <Text variant="footnote" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 12, paddingTop: 14, paddingBottom: 2 }}>{g}</Text> : null}
+                {list.map((o) => (
+                  <RadioRow key={o.value} title={o.title} subtitle={o.subtitle} leading={o.leading} trailing={o.trailing}
+                    checked={o.value === value} onPress={() => pick(o.value)} />
+                ))}
+              </View>
+            ))}
+            {!shown.length && <Text variant="caption" color="ink3" style={{ textAlign: 'center', paddingVertical: 24 }}>Nothing called “{q.trim()}”.</Text>}
+          </ScrollView>
+        </View>
+      </Sheet>
+    </>
+  )
+}

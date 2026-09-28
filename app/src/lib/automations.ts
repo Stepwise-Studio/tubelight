@@ -14,6 +14,8 @@ export type RunOutcome = 'posted' | 'quiet' | 'approval' | 'working' | 'failed' 
 export interface AutomationRun {
   at: string
   outcome: RunOutcome
+  /** Ran after its time (the service was offline). */
+  late?: boolean
   /** The start of what it posted. */
   preview: string
   message_id: string | null
@@ -33,10 +35,17 @@ export interface Automation {
   created_at: string
   cron: string | null
   tz: string | null
-  /** App events: the Composio trigger, its settings and the extra keyword filter. */
+  /** App events: the Composio trigger, its app, its settings and the extra keyword filter. */
   trigger: string | null
+  app: string | null
   settings: Record<string, unknown>
   keywords: string[]
+  /** The apps its runs may use; null = every app the teammate may use. */
+  toolkits: string[] | null
+  /** The next three run times (schedules that are on). */
+  upcoming: string[]
+  /** What would stop it working, in words (a disconnected app, a teammate who left the project). */
+  problems: string[]
   last_run: string | null
   next_run: string | null
   /** Only from GET /automations/:id: the last 20 runs, newest first. */
@@ -122,4 +131,15 @@ export async function removeAutomation(a: Automation) {
     toast({ title: 'Unable to delete it', body: (e as Error).message, tone: 'error' })
     return false
   }
+}
+
+/** An app's events (GET /apps/:toolkit/events), to start an automation on. */
+export interface AppEvent {
+  slug: string
+  name: string
+  required: string[]
+  /** setting -> its description */
+  settings: Record<string, string>
+  types: Record<string, string>
+  defaults: Record<string, unknown>
 }
