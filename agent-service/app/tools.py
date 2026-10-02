@@ -23,6 +23,7 @@ READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
+    "web_search": "read", "read_page": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
 }
@@ -273,6 +274,42 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         except ValueError as e:
             return str(e)
         return f"Done: {action}d {rule['name']}." if action != "resume" else f"Resumed {rule['name']}."
+
+    # The web, read-only, for every teammate: Composio's own search (no sign-in, ordinary tool calls on the free plan).
+    async def web_search(query: str) -> str:
+        try:
+            d = await connectors.execute(ctx.owner_id, "COMPOSIO_SEARCH_WEB", {"query": query[:300]})
+        except Exception as e:
+            return f"Search failed: {str(e)[:200]}"
+        answer = str(d.get("answer") or "").strip()
+        sources = d.get("citations") or d.get("results") or d.get("sources") or []
+        links = "\n".join(f"- {s.get('title') or ''} {s.get('url') or s.get('link') or s.get('id') or ''}".strip()
+                          for s in sources[:8] if isinstance(s, dict))
+        return (answer[:4000] + (f"\n\nSources:\n{links}" if links else "")) or "No results."
+
+    async def read_page(url: str) -> str:
+        if not re.match(r"https?://", url):
+            return "Give a full web address starting with http:// or https://."
+        try:
+            d = await connectors.execute(ctx.owner_id, "COMPOSIO_SEARCH_FETCH_URL_CONTENT", {"urls": [url]})
+        except Exception as e:
+            return f"Couldn't open {url}: {str(e)[:200]}"
+        page = (d.get("results") or [{}])[0] or {}
+        text = str(page.get("text") or "").strip()
+        if not text:
+            return f"{url} had no readable text (it may need a login or be mostly images)."
+        title = page.get("title") or url
+        return f"{title}\n{url}\n\n" + (text if len(text) <= 9000 else text[:9000] + f"\n[... {len(text) - 9000} more chars]")
+
+    tools += [
+        StructuredTool.from_function(
+            coroutine=web_search, name="web_search",
+            description="Search the web for current information (news, docs, prices, people, anything after your "
+                        "training). Returns an answer with its sources. Cite the sources you use."),
+        StructuredTool.from_function(
+            coroutine=read_page, name="read_page",
+            description="Read one web page as text (an article, docs, a link the user sent). url: the full address."),
+    ]
 
     if ctx.project and repo.parse(ctx.project.get("repo_url")):
         pid = ctx.project["id"]

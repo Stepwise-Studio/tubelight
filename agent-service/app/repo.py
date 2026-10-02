@@ -66,13 +66,7 @@ def repo_dir(project_id: str) -> Path:
 
 # ------------------------------------------------------------------ GitHub through the user's connection
 async def _gh(owner_id: str, slug: str, args: dict[str, Any]) -> dict[str, Any]:
-    def run() -> dict[str, Any]:
-        r = connectors._client().tools.execute(slug, user_id=owner_id, arguments=args, dangerously_skip_version_check=True)
-        return r if isinstance(r, dict) else r.model_dump()
-    res = await asyncio.to_thread(run)
-    if not res.get("successful"):
-        raise RuntimeError(str(res.get("error") or f"{slug} failed")[:300])
-    return res.get("data") or {}
+    return await connectors.execute(owner_id, slug, args)
 
 
 async def repo_info(owner_id: str, owner: str, name: str) -> dict[str, Any]:

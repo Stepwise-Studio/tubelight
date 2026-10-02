@@ -368,10 +368,4 @@ async def choices(owner_id: str, toolkit: str, field: str) -> list[dict[str, Any
     slug = CHOICES.get((toolkit.upper(), field))
     if not slug:
         return None
-    def run() -> Any:
-        r = connectors._client().tools.execute(slug, user_id=owner_id, arguments={}, dangerously_skip_version_check=True)
-        return r if isinstance(r, dict) else r.model_dump()
-    res = await asyncio.to_thread(run)
-    if not res.get("successful"):
-        raise ValueError(str(res.get("error") or "the lookup failed")[:200])
-    return _options(res.get("data"), toolkit.upper())
+    return _options(await connectors.execute(owner_id, slug, {}), toolkit.upper())

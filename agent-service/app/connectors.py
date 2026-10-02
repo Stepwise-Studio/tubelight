@@ -145,6 +145,17 @@ def name_of(toolkit: str) -> str:
     return next((t["name"] for t in _catalog[1] if t["toolkit"] == toolkit), DEFAULT_TOOLKITS.get(toolkit, toolkit.title()))
 
 
+async def execute(user_id: str, slug: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Run one Composio tool directly (no model in the loop) and return its data; raises with Composio's reason."""
+    def run() -> dict[str, Any]:
+        r = _client().tools.execute(slug, user_id=user_id, arguments=args, dangerously_skip_version_check=True)
+        return r if isinstance(r, dict) else r.model_dump()
+    res = await asyncio.to_thread(run)
+    if not res.get("successful"):
+        raise RuntimeError(str(res.get("error") or f"{slug} failed")[:300])
+    return res.get("data") or {}
+
+
 async def connect(user_id: str, toolkit: str, callback_url: str) -> str:
     req = await asyncio.to_thread(lambda: _session(user_id).authorize(toolkit.lower(), callback_url=callback_url))
     return req.redirect_url

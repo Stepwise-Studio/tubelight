@@ -311,3 +311,20 @@ def test_a_reply_stuck_in_a_loop_is_caught_but_normal_markdown_is_not():
     assert looping("ha " + "lol " * 25)
     assert not looping("Here's the table:\n| a | b |\n|---|---|\n| 1 | 2 |\n" + "-" * 60)
     assert not looping("Some normal reply. " * 3)
+
+
+async def test_web_tools_return_the_answer_with_sources_and_readable_pages(monkeypatch):
+    from app import connectors, graph, tools as T
+
+    async def fake(user_id, slug, args):
+        if slug == "COMPOSIO_SEARCH_WEB":
+            return {"answer": "Argentina won.", "citations": [{"id": "https://apnews.com/x", "title": "AP"}]}
+        return {"results": [{"title": "Docs", "text": "Hello page"}]}
+    monkeypatch.setattr(connectors, "execute", fake)
+    ctx = graph.RunCtx(run_id="r", owner_id="o", thread_id="dm:x", members=[])
+    tm = {"id": "t", "name": "Ivy", "handle": "ivy", "role": "x", "allowed_toolkits": []}
+    by = {t.name: t for t in T.build(ctx, tm, [])}
+    out = await by["web_search"].coroutine(query="world cup")
+    assert out.startswith("Argentina won.") and "- AP https://apnews.com/x" in out
+    assert "Hello page" in await by["read_page"].coroutine(url="https://docs.example.com")
+    assert "full web address" in await by["read_page"].coroutine(url="docs.example.com")
