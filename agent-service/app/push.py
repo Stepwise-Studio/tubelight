@@ -1,4 +1,4 @@
-"""Push notifications (Expo push service -> Firebase -> the phone), shaped like a good chat app's:
+"""Push notifications, shaped like a good chat app's:
 
 - kinds: `reply` (a teammate's message; automation posts too), `approval` (needs a yes/no: Approve / Reject buttons
   on the notification, Approve needs the phone unlocked), `question` (ask_user: answer by typing in the
@@ -10,17 +10,25 @@
   questions, connects, alerts) | off, per chat or for everything; `sound` = which of the app's channels it rings on
   (each Android channel has its sound fixed at creation, so one channel per sound, ids `tl-<sound>`).
 - the teammate's face shows on the notification (DiceBear's PNG of the same seed and colour as in the app).
+Delivery: an Android phone registers its Firebase (FCM) token and gets data-only messages sent straight through FCM
+(FCM_SERVICE_ACCOUNT_B64, the Firebase service account): expo-notifications draws those itself, with the buttons,
+the sound channel, the per-chat tag and the face (app/patches: the face from `data.image`). Expo's push service
+can't send that shape (it adds a notification part, which Android draws without the buttons), so it's only the
+fallback for Expo tokens (no FCM key configured, or iOS later).
 Best effort throughout: a failed push never breaks a run.
 """
 import asyncio
+import base64
+import json
 import logging
 import re
+import time
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
-from . import db, memory
+from . import config, db, memory
 
 log = logging.getLogger(__name__)
 EXPO_PUSH = "https://exp.host/--/api/v2/push/send"
@@ -73,20 +81,95 @@ def plain(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[*_`#>|]+", "", text)).strip()
 
 
+_fcm_token: tuple[float, str] = (0.0, "")
+
+
+def _service_account() -> dict[str, Any] | None:
+    raw = config.env("FCM_SERVICE_ACCOUNT_B64")
+    try:
+        return json.loads(base64.b64decode(raw)) if raw else None
+    except ValueError:
+        log.warning("FCM_SERVICE_ACCOUNT_B64 isn't a base64 service account JSON")
+        return None
+
+
+async def _fcm_access_token(sa: dict[str, Any]) -> str:
+    """OAuth token for FCM from the service account (a signed JWT grant), cached until near expiry."""
+    global _fcm_token
+    if _fcm_token[1] and time.time() < _fcm_token[0]:
+        return _fcm_token[1]
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    def b64(b: bytes) -> bytes:
+        return base64.urlsafe_b64encode(b).rstrip(b"=")
+    now = int(time.time())
+    claims = {"iss": sa["client_email"], "scope": "https://www.googleapis.com/auth/firebase.messaging",
+              "aud": sa["token_uri"], "iat": now, "exp": now + 3600}
+    signing = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()) + b"." + b64(json.dumps(claims).encode())
+    key = serialization.load_pem_private_key(sa["private_key"].encode(), None)
+    assertion = signing + b"." + b64(key.sign(signing, padding.PKCS1v15(), hashes.SHA256()))  # type: ignore[union-attr]
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(sa["token_uri"], data={"grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                                                "assertion": assertion.decode()})
+    r.raise_for_status()
+    d = r.json()
+    _fcm_token = (time.time() + int(d.get("expires_in", 3600)) - 120, d["access_token"])
+    return _fcm_token[1]
+
+
+def fcm_data(message: dict[str, Any]) -> dict[str, str]:
+    """The data-only FCM payload expo-notifications draws itself: title/message/channelId/categoryId/tag at the top,
+    the app's own data as JSON under `body` (it becomes content.data in JS), and the face under `image`."""
+    out = {"title": message["title"], "message": message["body"], "channelId": message["channelId"],
+           "tag": message["tag"], "body": json.dumps(message["data"])}
+    if message.get("categoryId"):
+        out["categoryId"] = message["categoryId"]
+    if (message.get("richContent") or {}).get("image"):
+        out["image"] = message["richContent"]["image"]
+    return out
+
+
+async def _send_fcm(sa: dict[str, Any], tokens: list[str], message: dict[str, Any]) -> list[str]:
+    """Returns the tokens FCM says are gone (uninstalled, reset)."""
+    access = await _fcm_access_token(sa)
+    url = f"https://fcm.googleapis.com/v1/projects/{sa['project_id']}/messages:send"
+    gone = []
+    async with httpx.AsyncClient(timeout=15) as c:
+        for t in tokens:
+            r = await c.post(url, headers={"Authorization": f"Bearer {access}"},
+                             json={"message": {"token": t, "data": fcm_data(message),
+                                               "android": {"priority": "HIGH", "ttl": "86400s"}}})
+            if r.status_code in (400, 404) and ("UNREGISTERED" in r.text or "not-registered" in r.text):
+                gone.append(t)
+            elif r.status_code >= 300:
+                log.warning("fcm rejected: %s %s", r.status_code, r.text[:200])
+    return gone
+
+
 async def _send(owner_id: str, message: dict[str, Any]) -> None:
     try:
-        tokens = [r["token"] for r in await db.select("push_tokens", {"owner_id": f"eq.{owner_id}", "select": "token"})]
-        if not tokens:
+        rows = await db.select("push_tokens", {"owner_id": f"eq.{owner_id}", "select": "token,platform"})
+        if not rows:
+            return
+        sa = _service_account()
+        fcm = [r["token"] for r in rows if r.get("platform") == "fcm"]
+        if fcm and sa:
+            for t in await _send_fcm(sa, fcm[:20], message):
+                await db.delete("push_tokens", {"token": f"eq.{t}"})
+            return
+        expo = [r["token"] for r in rows if r.get("platform") != "fcm"]
+        if not expo:
             return
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(EXPO_PUSH, json=[{**message, "to": t} for t in tokens[:100]])
+            r = await c.post(EXPO_PUSH, json=[{**message, "to": t} for t in expo[:100]])
         r.raise_for_status()
-        for token, ticket in zip(tokens, r.json().get("data", [])):
+        for token, ticket in zip(expo, r.json().get("data", [])):
             if (ticket.get("details") or {}).get("error") == "DeviceNotRegistered":
                 await db.delete("push_tokens", {"token": f"eq.{token}"})
             elif ticket.get("status") == "error":
                 log.warning("push rejected: %s", ticket.get("message"))
-    except (db.DBError, httpx.HTTPError, ValueError) as e:
+    except (db.DBError, httpx.HTTPError, ValueError, KeyError) as e:
         log.warning("push failed: %s", e)
 
 

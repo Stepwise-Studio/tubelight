@@ -1,0 +1,22 @@
+diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/model/RemoteNotificationContent.kt b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/model/RemoteNotificationContent.kt
+index cdbc237..dd181b7 100644
+--- a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/model/RemoteNotificationContent.kt
++++ b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/model/RemoteNotificationContent.kt
+@@ -22,13 +22,15 @@ class RemoteNotificationContent(private val remoteMessage: RemoteMessage) : INot
+ 
+   private val notificationData = NotificationData(remoteMessage.data)
+ 
++  // Tubelight patch: a data-only message (sent straight through FCM so it's drawn here, with its action buttons)
++  // carries its image as data["image"]; FCM only fills notification.imageUrl for notification messages.
+   override suspend fun getImage(context: Context): Bitmap? {
+-    val uri = remoteMessage.notification?.imageUrl
++    val uri = remoteMessage.notification?.imageUrl ?: remoteMessage.data["image"]?.let { android.net.Uri.parse(it) }
+     return uri?.let { downloadImage(it) }
+   }
+ 
+   override fun containsImage(): Boolean {
+-    return remoteMessage.notification?.imageUrl != null
++    return remoteMessage.notification?.imageUrl != null || remoteMessage.data["image"] != null
+   }
+ 
+   override val title = remoteMessage.notification?.title ?: notificationData.title

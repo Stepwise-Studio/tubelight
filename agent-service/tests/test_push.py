@@ -52,3 +52,31 @@ async def test_preferences_api(api, env):
     assert r["mode"] == "needed" and r["sound"] == "bell" and r["chats"] == {"proj:a": "off"} and "chime" in r["sounds"]
     assert (await api.patch("/notifications/prefs", json={"sound": "foghorn"})).status_code == 400
     assert (await api.get("/notifications/prefs")).json()["sound"] == "bell"
+
+
+def test_android_gets_a_data_only_message_expo_draws_with_buttons_sound_and_face():
+    p = {"mode": "all", "sound": "drop", "chats": {}}
+    msg = push._message(p, "Ivy needs your approval", "Send the invoice", {"thread_id": "dm:i", "approval_id": "a1"},
+                        "approval", "a1", "https://img/face.png")
+    import json
+    d = push.fcm_data(msg)
+    assert d["title"] == "Ivy needs your approval" and d["message"] == "Send the invoice" and d["categoryId"] == "approval"
+    assert d["channelId"] == "tl-drop" and d["tag"] == "a1" and d["image"] == "https://img/face.png"
+    assert json.loads(d["body"]) == {"thread_id": "dm:i", "approval_id": "a1", "kind": "approval"}
+    assert all(isinstance(v, str) for v in d.values())  # FCM data values must be strings
+
+
+async def test_fcm_tokens_go_through_firebase_and_expo_tokens_are_the_fallback(env, monkeypatch):
+    fdb, _ = env
+    from tests.conftest import OWNER
+    fdb.tables["push_tokens"] = [{"token": "fcm-1", "platform": "fcm", "owner_id": OWNER},
+                                 {"token": "ExponentPushToken[x]", "platform": "android", "owner_id": OWNER}]
+    via = []
+
+    async def fake_fcm(sa, tokens, message):
+        via.append(("fcm", tokens))
+        return ["fcm-1"]  # this one was uninstalled
+    monkeypatch.setattr(push, "_send_fcm", fake_fcm)
+    monkeypatch.setattr(push, "_service_account", lambda: {"project_id": "p"})
+    await push._send(OWNER, {"title": "t", "body": "b", "data": {}, "channelId": "tl-chime", "tag": "x"})
+    assert via == [("fcm", ["fcm-1"])] and [r["token"] for r in fdb.tables["push_tokens"]] == ["ExponentPushToken[x]"]

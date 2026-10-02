@@ -30,6 +30,7 @@ import {
 
 const AGENT_URL = process.env.EXPO_PUBLIC_AGENT_URL ?? 'http://localhost:8787'
 const TOKEN_KEY = 'tubelight.pushToken'
+const FCM_KEY = 'tubelight.fcmToken'
 
 export default function ProfileScreen() {
   const { c } = useTheme()
@@ -47,10 +48,12 @@ export default function ProfileScreen() {
 
   const signOut = async () => {
     if (!(await confirm({ title: 'Sign out?', body: 'This phone stops getting notifications until you sign in again.', confirmLabel: 'Sign out' }))) return
-    const token = await AsyncStorage.getItem(TOKEN_KEY).catch(() => null)
-    if (token) {
-      await supabase.from('push_tokens').delete().eq('token', token)
-      await AsyncStorage.removeItem(TOKEN_KEY).catch(() => {})
+    for (const key of [TOKEN_KEY, FCM_KEY]) {
+      const token = await AsyncStorage.getItem(key).catch(() => null)
+      if (token) {
+        await supabase.from('push_tokens').delete().eq('token', token)
+        await AsyncStorage.removeItem(key).catch(() => {})
+      }
     }
     await supabase.auth.signOut()
   }
@@ -176,6 +179,14 @@ function PushSection() {
       if (!token) { setOn(false); return }
       const { data } = await supabase.from('push_tokens').select('token').eq('token', token).maybeSingle()
       setOn(!!data)
+      // Turned on before Firebase delivery existed: add this phone's Firebase token once (see change() below).
+      if (data && Platform.OS === 'android' && !(await AsyncStorage.getItem(FCM_KEY).catch(() => null))) {
+        try {
+          const fcm = (await Notifications.getDevicePushTokenAsync()).data as string
+          const { error } = await supabase.from('push_tokens').upsert({ token: fcm, platform: 'fcm' })
+          if (!error) await AsyncStorage.setItem(FCM_KEY, fcm)
+        } catch { /* stays on Expo delivery */ }
+      }
     })()
   }, [])
 
@@ -188,12 +199,21 @@ function PushSection() {
         const { error } = await supabase.from('push_tokens').upsert({ token, platform: Platform.OS })
         if (error) throw new Error('Unable to save this phone’s token. Check your connection and try again.')
         await AsyncStorage.setItem(TOKEN_KEY, token)
+        // Android also registers its Firebase token: the service sends straight through Firebase so the app can
+        // draw notifications with their buttons (Approve, Reply) and faces (agent-service push.py).
+        if (Platform.OS === 'android') {
+          const fcm = (await Notifications.getDevicePushTokenAsync()).data as string
+          await supabase.from('push_tokens').upsert({ token: fcm, platform: 'fcm' })
+          await AsyncStorage.setItem(FCM_KEY, fcm)
+        }
         haptic.success()
         setOn(true)
       } else {
-        const token = await AsyncStorage.getItem(TOKEN_KEY)
-        if (token) await supabase.from('push_tokens').delete().eq('token', token)
-        await AsyncStorage.removeItem(TOKEN_KEY)
+        for (const key of [TOKEN_KEY, FCM_KEY]) {
+          const token = await AsyncStorage.getItem(key)
+          if (token) await supabase.from('push_tokens').delete().eq('token', token)
+          await AsyncStorage.removeItem(key)
+        }
         setOn(false)
       }
     } catch (e) {
