@@ -65,7 +65,7 @@ const toneColor = (c: Palette, t: Tone) =>
 function fmt(v: number, unit?: string, compact = false) {
   const n = compact && Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v.toLocaleString('en-IN', { maximumFractionDigits: 1 })
   if (!unit) return n
-  return /^[^\w\s]$/u.test(unit) ? `${unit}${n}` : `${n}${unit}`
+  return /^[^\w\s%]$/u.test(unit) ? `${unit}${n}` : `${n}${unit}`
 }
 
 /** A nice upper bound for an axis (1, 2, 2.5 or 5 × 10ⁿ). */
