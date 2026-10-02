@@ -61,10 +61,11 @@ const hue = (c: Palette, i: number) => (i === 0 ? c.tube : HUES[(i - 1) % HUES.l
 const toneColor = (c: Palette, t: Tone) =>
   t === 'good' ? c.success : t === 'bad' ? c.danger : t === 'warn' ? c.warning : t === 'accent' ? c.tube : c.ink3
 
-function fmt(v: number, unit?: string) {
-  const n = Math.abs(v) >= 10000 ? `${+(v / 1000).toFixed(1)}k` : `${+v.toFixed(Math.abs(v) < 10 ? 1 : 0)}`
+/** A value with its unit (a symbol like ₹ goes first). `compact` (axes, bar tops) shortens thousands to "k". */
+function fmt(v: number, unit?: string, compact = false) {
+  const n = compact && Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v.toLocaleString('en-IN', { maximumFractionDigits: 1 })
   if (!unit) return n
-  return /^[^\w\s]$/u.test(unit) || unit.length === 1 && !/[a-z%]/i.test(unit) ? `${unit}${n}` : `${n}${unit}`
+  return /^[^\w\s]$/u.test(unit) ? `${unit}${n}` : `${n}${unit}`
 }
 
 /** A nice upper bound for an axis (1, 2, 2.5 or 5 × 10ⁿ). */
@@ -125,7 +126,7 @@ function BarChart({ p }: { p: Props }) {
             {[0, 0.5, 1].map((f) => (
               <G key={f}>
                 <Line x1={yw} x2={w} y1={plot - f * (plot - 14)} y2={plot - f * (plot - 14)} stroke={c.line} strokeWidth={1} />
-                <SvgText x={yw - 6} y={plot - f * (plot - 14) + 4} fontSize={10} fill={c.ink3} textAnchor="end" fontFamily={fonts.regular}>{fmt(top * f, unit)}</SvgText>
+                <SvgText x={yw - 6} y={plot - f * (plot - 14) + 4} fontSize={10} fill={c.ink3} textAnchor="end" fontFamily={fonts.regular}>{fmt(top * f, unit, true)}</SvgText>
               </G>
             ))}
             {labels.map((l, i) => {
@@ -142,7 +143,7 @@ function BarChart({ p }: { p: Props }) {
                     return <Rect key={j} x={x + (stacked ? 0 : 1)} y={y} width={Math.max(1, bw - (stacked ? 0 : 2))} height={Math.max(h, v > 0 ? 2 : 0)} rx={Math.min(4, bw / 3)} fill={hue(c, j)} />
                   })}
                   {showValues && (all[0].values[i] ?? null) !== null && (
-                    <SvgText x={cx} y={plot - ((Math.max(0, all[0].values[i]) / top) * (plot - 14)) - 5} fontSize={10} fill={c.ink2} textAnchor="middle" fontFamily={fonts.medium}>{fmt(all[0].values[i], unit)}</SvgText>
+                    <SvgText x={cx} y={plot - ((Math.max(0, all[0].values[i]) / top) * (plot - 14)) - 5} fontSize={10} fill={c.ink2} textAnchor="middle" fontFamily={fonts.medium}>{fmt(all[0].values[i], unit, true)}</SvgText>
                   )}
                   <SvgText x={cx} y={H - 6} fontSize={10.5} fill={c.ink3} textAnchor="middle" fontFamily={fonts.regular}>{l.length > 7 && labels.length > 5 ? `${l.slice(0, 6)}…` : l}</SvgText>
                 </G>
@@ -184,7 +185,7 @@ function LineChart({ p }: { p: Props }) {
             {[0, 0.5, 1].map((f) => (
               <G key={f}>
                 <Line x1={yw} x2={w} y1={plot - f * (plot - 14)} y2={plot - f * (plot - 14)} stroke={c.line} strokeWidth={1} />
-                <SvgText x={yw - 6} y={plot - f * (plot - 14) + 4} fontSize={10} fill={c.ink3} textAnchor="end" fontFamily={fonts.regular}>{fmt(lo + (top - lo) * f, unit)}</SvgText>
+                <SvgText x={yw - 6} y={plot - f * (plot - 14) + 4} fontSize={10} fill={c.ink3} textAnchor="end" fontFamily={fonts.regular}>{fmt(lo + (top - lo) * f, unit, true)}</SvgText>
               </G>
             ))}
             {all.map((s, j) => {
@@ -257,7 +258,7 @@ function Stats({ p }: { p: Props }) {
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
       {items.map((s, i) => (
-        <Squircle key={i} style={{ flexGrow: 1, flexBasis: items.length > 2 ? '45%' : 0, minWidth: 120, borderRadius: radius.md, backgroundColor: c.panel2, padding: 12, gap: 2 }}>
+        <Squircle key={i} style={{ flexGrow: 1, flexBasis: items.length === 4 ? '45%' : 0, minWidth: 92, borderRadius: radius.md, backgroundColor: c.panel2, padding: 12, gap: 2 }}>
           <Text variant="footnote" color="ink3" numberOfLines={1}>{str(s.props.label)}</Text>
           <Text variant="heading" tabular numberOfLines={1} adjustsFontSizeToFit>{str(s.props.value)}</Text>
           {!!str(s.props.change) && <Text variant="footnote" numberOfLines={2} style={{ color: toneColor(c, s.props.tone as Tone) }}>{str(s.props.change)}</Text>}
@@ -272,11 +273,12 @@ function Table({ p }: { p: Props }) {
   const cols = arr(p.columns, (x): x is string => typeof x === 'string')
   const rows = arr(p.rows, (x): x is unknown[] => Array.isArray(x))
   const cw = cols.length <= 3 ? undefined : 112
+  const numeric = cols.map((_, j) => rows.length > 0 && rows.every((r) => typeof r[j] === 'number'))  // right-aligned, header too
   const row = (cells: unknown[], head: boolean, i: number) => (
     <View key={i} style={{ flexDirection: 'row', borderTopWidth: head || i === 0 ? 0 : 1, borderColor: c.line, paddingVertical: 8 }}>
       {cols.map((_, j) => (
         <Text key={j} variant={head ? 'label' : 'caption'} color={head ? 'ink3' : j === 0 ? 'ink' : 'ink2'} tabular
-          numberOfLines={3} style={{ width: cw, flex: cw ? undefined : 1, paddingRight: 10, textAlign: j > 0 && typeof cells[j] === 'number' ? 'right' : 'left' }}>
+          numberOfLines={3} style={{ width: cw, flex: cw ? undefined : 1, paddingRight: 10, textAlign: j > 0 && numeric[j] ? 'right' : 'left' }}>
           {typeof cells[j] === 'number' ? fmt(cells[j] as number) : str(cells[j])}
         </Text>
       ))}
