@@ -78,7 +78,7 @@ class RunCtx:
 
     def sandbox(self, tm: dict) -> Sandbox:
         if tm["id"] not in self.sandboxes:
-            self.sandboxes[tm["id"]] = Sandbox(self.run_id, tm["id"], (self.project or {}).get("repo_url"))
+            self.sandboxes[tm["id"]] = Sandbox(self.run_id, tm["id"], (self.project or {}).get("repo_url"), self.owner_id)
         return self.sandboxes[tm["id"]]
 
     def scope(self, msgs: list[BaseMessage]) -> None:
@@ -225,7 +225,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "actually said above; never address someone as if they had spoken when they haven't.")
     else:
         lines.append(f"This is a direct message between you and {ctx.user_name}.")
-    lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results. "
+    lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results: "
+                 "numbers, versions, file contents or outputs you didn't get from a tool this turn are made up, so say "
+                 "you can't check instead. "
                  "Never say you did something (scheduled, sent, saved, created, set a reminder) unless one of your tool "
                  "calls did it in this turn; if you can't, say what you can do instead.")
     if T.MULTI in tool_names:
@@ -236,7 +238,11 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                  "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
                  "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
-    if tm["role"] in ("developer", "tester") and "run_shell" not in tool_names:
+    if "run_shell" in tool_names:
+        lines.append("You have a code sandbox (run_shell, read_file, write_file) with the project's repo in /workspace. "
+                     "Writing a command in your reply does not run it: to check, count, test or build anything, call "
+                     "run_shell and report only what it returned. Never show command output you didn't get from it.")
+    if T.builder(tm) and "run_shell" not in tool_names:
         lines.append("You have no code sandbox right now (Docker is not available), so you cannot run code or tests. "
                      "Say so when it matters and reason from what you can read.")
     lines.append(
@@ -272,7 +278,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
             f"- {owners.get(f['owner'], 'the group')}: {followups.describe(f, ctx.timezone)}" for f in pend))
     if ctx.brief:
         lines.append("## This chat so far\nA running brief of the whole conversation, including what may have scrolled "
-                     "out of the messages you see. Pick up its open loops when they come due or come up:\n" + ctx.brief)
+                     "out of the messages you see. Pick up its open loops when they come due or come up. It records what "
+                     "people said, not verified facts: anything you can check now with a tool (files, counts, versions, "
+                     "statuses, results), check rather than repeat:\n" + ctx.brief)
     if ctx.apps:
         lines.append(f"{ctx.user_name} @mentioned {', '.join(connectors.name_of(a) for a in ctx.apps)} in this request: "
                      "use those apps for it.")

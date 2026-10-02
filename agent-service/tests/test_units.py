@@ -328,3 +328,9 @@ async def test_web_tools_return_the_answer_with_sources_and_readable_pages(monke
     assert out.startswith("Argentina won.") and "- AP https://apnews.com/x" in out
     assert "Hello page" in await by["read_page"].coroutine(url="https://docs.example.com")
     assert "full web address" in await by["read_page"].coroutine(url="docs.example.com")
+
+
+def test_free_text_roles_decide_who_gets_a_sandbox():
+    from app.tools import builder
+    assert builder({"role": "Developer"}) and builder({"role": "QA engineer"}) and builder({"role": "Data analyst"})
+    assert not builder({"role": "Inbox chief of staff"}) and not builder({"role": "Social media lead"})

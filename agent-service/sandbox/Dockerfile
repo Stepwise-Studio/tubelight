@@ -1,20 +1,16 @@
-# Tubelight sandbox for developer/tester teammates.
-# Build: docker build -t tubelight-sandbox agent-service/sandbox
-FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
+# Tubelight sandbox for developer/tester teammates: lean (the home server has 3 GB RAM), no browser.
+# Build on the server: docker build -t tubelight-sandbox agent-service/sandbox
+FROM node:22-bookworm-slim
 
-# Playwright image already has python3 + browser deps. Add node, git and common tooling.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git curl ca-certificates ripgrep jq \
- && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
+ && apt-get install -y --no-install-recommends git ca-certificates python3 python3-pip python3-venv ripgrep jq curl \
  && npm install -g pnpm \
- && pip install --no-cache-dir --break-system-packages pytest \
- && rm -rf /var/lib/apt/lists/*
-
-# Containers run as the host uid with HOME=/tmp; make sure git trusts the mounted workdir.
-RUN git config --system safe.directory '*' \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system safe.directory '*' \
  && git config --system user.name 'Tubelight Teammate' \
- && git config --system user.email 'teammate@tubelight.local'
+ && git config --system user.email 'teammate@tubelight.local' \
+ && git config --system init.defaultBranch main
 
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 npm_config_update_notifier=false
 WORKDIR /workspace
 CMD ["sleep", "600"]

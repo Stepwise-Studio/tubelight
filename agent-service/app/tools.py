@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, connectors, db, followups, llm, memory, repo, sandbox
+from . import automations, config, connectors, db, followups, llm, memory, repo, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -20,6 +20,14 @@ ACT = {"SEND", "POST", "PUSH", "MERGE", "DELETE", "REMOVE", "PAY", "ORDER", "PUB
        "REPLY", "FORWARD", "TRASH", "TRANSFER", "PURCHASE", "SUBMIT", "SHARE"}
 DRAFT = {"DRAFT"}
 READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "VIEW"}
+# Who gets a code sandbox (and, for engineers, helpers): roles are free text ("Developer", "QA engineer").
+BUILDER = re.compile(r"develop|engineer|program|coder|\bqa\b|test|devops|\bsre\b|data|analyst|scien", re.I)
+
+
+def builder(tm: dict) -> bool:
+    return bool(BUILDER.search(tm.get("role") or ""))
+
+
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
@@ -409,7 +417,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "they connect, continue the task."),
         ]
 
-    if ctx.docker and tm["role"] in ("developer", "tester"):
+    if ctx.docker and builder(tm):
         box = lambda: ctx.sandbox(tm)  # noqa: E731
 
         async def run_shell(cmd: str, timeout_s: int = 120) -> str:
@@ -429,16 +437,17 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
         tools += [
             StructuredTool.from_function(coroutine=run_shell, name="run_shell",
-                description="Run a bash command in your sandbox (cwd /workspace, the project repo if it has one). "
-                            "Output is truncated to ~8k chars. git push is not allowed here; use git_push."),
+                description="Run a bash command in your sandbox: a throwaway Linux box (Node 22, Python 3, git) "
+                            "with the project's repo in /workspace (cwd). It can reach the web (npm, pip) but not the "
+                            "user's home network. Output is truncated to ~8k chars. git push is not allowed here."),
             StructuredTool.from_function(coroutine=read_file, name="read_file", description="Read a file under /workspace."),
             StructuredTool.from_function(coroutine=write_file, name="write_file", description="Create or overwrite a file under /workspace."),
         ]
-        if not helper:
+        if not helper and config.GITHUB_TOKEN:  # pushing needs a token with write access; without one, no push
             tools.append(StructuredTool.from_function(coroutine=git_push, name="git_push",
                 description="Push the current HEAD of /workspace to origin/<branch>. Needs the user's approval."))
 
-    if not helper and tm["role"] == "developer":
+    if not helper and builder(tm) and re.search(r"develop|engineer|program|coder", tm.get("role") or "", re.I):
         async def spawn_helper(task: str) -> str:
             return await _helper(ctx, tm, composio_tools, task)
 

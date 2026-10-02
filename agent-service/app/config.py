@@ -26,6 +26,11 @@ GITHUB_TOKEN = env("GITHUB_TOKEN")  # optional, used only by the approved git_pu
 APP_URL = env("APP_URL", "http://localhost:3000")
 CORS_ORIGINS = list({o.strip() for o in f"{env('CORS_ORIGINS', APP_URL)},http://localhost:8081".split(",") if o.strip()})
 SANDBOX_IMAGE = env("SANDBOX_IMAGE", "tubelight-sandbox")
+# On the home server (deploy/server-setup.sh): sandboxes live on an internal network and reach the web only through
+# the egress proxy, which refuses private addresses. Unset (a laptop): Docker's default bridge, no proxy.
+SANDBOX_NETWORK = env("SANDBOX_NETWORK")
+SANDBOX_PROXY = env("SANDBOX_PROXY")  # e.g. http://tl-egress-proxy:3128
+SANDBOX_UID = env("SANDBOX_UID")  # the unprivileged user sandboxes run as (the agent itself may run as root)
 WORKSPACES = Path(env("WORKSPACES_DIR", str(Path.home() / ".tubelight" / "workspaces")))
 
 MAX_HANDOFFS = 6

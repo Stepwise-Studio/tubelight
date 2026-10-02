@@ -27,11 +27,12 @@ no AI slop, Stepwise UI look, squircles, free LLMs only.
 
 ## Deploy (home server)
 - Backend runs on the user's home server `akhil@192.168.0.5` (hostname `stepwise`; its LAN IP comes from DHCP and moved from .6 to .5 once: if SSH fails, probe `192.168.0.x:22`) (Ubuntu 24.04, Core 2 Duo, 3 GB, wired Ethernet ens33 (the RTL8188F USB Wi-Fi dongle uploads at ~0.04 Mbit/s: never rely on it); SSH key auth; user in `docker` group, no sudo for us).
-  Container `tubelight-agent` (`--restart unless-stopped -p 127.0.0.1:8787:8787 --env-file ~/tubelight/.env --memory 1700m`), `EMBEDDINGS=cloudflare` (no AVX, little RAM). Postiz stack (compose project `snoofy`) is stopped with restart=no at the user's request; `files-webdav` must stay up.
+  Container `tubelight-agent`, (re)started by `~/tubelight/deploy/run-agent.sh` (`agent-service/deploy/`: port 127.0.0.1:8787, `~/tubelight/.env`, 1700m, data dir `~/tubelight/data` mounted at the same path, sandbox env, joins `tl-control` before start), `EMBEDDINGS=cloudflare` (no AVX, little RAM).
+  Sandboxes (`deploy/server-setup.sh`, idempotent, no sudo): the agent reaches Docker only through `tl-docker-proxy` (containers + exec), sandboxes (`tubelight-sandbox`, lean Node 22 + Python, built on the server from `agent-service/sandbox/`) run as uid 1000 with caps dropped, read-only root, on the internal `tl-sandbox` network whose only exit is `tl-egress-proxy` (squid, `deploy/squid.conf`) refusing private/LAN addresses. Roles get a sandbox by `tools.builder` (free-text role regex). `git_push` only with `GITHUB_TOKEN`. Postiz stack (compose project `snoofy`) is stopped with restart=no at the user's request; `files-webdav` must stay up.
 - Public URL `https://tubelight.stepwise.studio` via the existing remote-managed tunnel `snoofy-home` (systemd cloudflared on the server). App `.env` `EXPO_PUBLIC_AGENT_URL` points there. Gradle doesn't see `.env` changes: after editing it, `rm -rf android/app/build/generated/{assets,res}/react` before `assembleRelease`, then verify with `unzip -p <apk> assets/index.android.bundle | strings | grep stepwise`.
 - Code-only redeploy (fast, ~20 KB): ship `app/` + `teammates/` as a thin layer: tar a temp dir with
   `Dockerfile` = `FROM tubelight-agent` / `COPY app /srv/app` / `COPY teammates /srv/teammates`, pipe it to
-  `ssh akhil@192.168.0.5 docker build -t tubelight-agent -`, then `docker rm -f` + the `docker run` above.
+  `ssh akhil@192.168.0.5 docker build -t tubelight-agent -`, then `bash ~/tubelight/deploy/run-agent.sh`.
   The slim image has no system zoneinfo: `tzdata` (requirements) must stay installed, or every user's time silently becomes UTC (startup logs an error if it's missing).
   NumPy/fastembed can't load on this CPU (no SSE4.2): never switch it back to local embeddings.
   The laptop's local service (`tl-svc`) must stay stopped while the server runs (both would fire schedules).
