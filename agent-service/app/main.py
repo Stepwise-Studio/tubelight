@@ -955,6 +955,88 @@ async def runner_result(body: RunnerResult, who: tuple[str, str] = Depends(runne
     return {"ok": True}
 
 
+class RunnerHello(BaseModel):
+    name: str = Field("", max_length=80)
+    os: str = Field("", max_length=40)
+
+
+class RunnerLink(BaseModel):
+    request: str = Field(max_length=64)
+    approve: bool = True
+
+
+@app.post("/runner/hello")
+async def runner_hello(body: RunnerHello):
+    return computers.hello(body.name, body.os)
+
+
+@app.post("/runner/link-status")
+async def runner_link_status(body: RunnerLink):
+    return await computers.link_status(body.request)
+
+
+@app.post("/runner/link-confirm")
+async def runner_link_confirm(body: RunnerLink):
+    try:
+        return await computers.confirm(body.request, body.approve)
+    except (LookupError, PermissionError) as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/runner/unlink")
+async def runner_unlink(who: tuple[str, str] = Depends(runner_auth)):
+    await computers.remove(*who)
+    return {"ok": True}
+
+
+@app.get("/computers/requests/{rid}")
+async def get_link_request(rid: str, user: User = Depends(current_user)):
+    try:
+        return computers.request_info(rid, user["id"])
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.post("/computers/requests/{rid}")
+async def claim_link_request(rid: str, user: User = Depends(current_user)):
+    try:
+        return computers.scan(rid, user["id"], user.get("email") or "")
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.get("/desktop/tubelight-desktop.deb")
+async def desktop_deb():
+    name, data = await asyncio.to_thread(computers.desktop_deb)
+    return Response(data, media_type="application/vnd.debian.binary-package",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/desktop")
+async def desktop_page():
+    """Where the laptop downloads Tubelight for desktop (public)."""
+    return Response(DESKTOP_PAGE, media_type="text/html")
+
+
+DESKTOP_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tubelight for desktop</title><style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#18181b;--ink3:#71717a;--line:rgba(0,0,0,.08);--tube:#0284c7}
+@media(prefers-color-scheme:dark){:root{--bg:#09090b;--panel:#18181b;--ink:#f4f4f5;--ink3:#a1a1aa;--line:rgba(255,255,255,.08);--tube:#0ea5e9}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}
+main{max-width:460px;margin:24px 16px;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:32px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.4px}p{color:var(--ink3);margin:0 0 20px}
+a.btn{display:block;text-align:center;background:var(--ink);color:var(--bg);text-decoration:none;font-weight:600;padding:14px;border-radius:14px}
+ol{padding-left:20px;color:var(--ink3);margin:20px 0 0}li{margin:6px 0}code{font-size:13px}
+</style></head><body><main><h1>Tubelight for desktop</h1>
+<p>Let your teammates work on this computer: read the folders you share, and change files or run commands after you approve each step on your phone.</p>
+<a class="btn" href="/desktop/tubelight-desktop.deb">Download for Ubuntu / Debian</a>
+<ol><li>Open the download to install it (or <code>sudo apt install ./tubelight-desktop_*.deb</code>).</li>
+<li>Open <b>Tubelight</b> from your apps. It shows a QR code.</li>
+<li>On your phone: Tubelight → Profile → Computers → <b>Scan</b>. Confirm on both.</li></ol></main></body></html>"""
+
+
 @app.get("/runner/{name}")
 async def runner_file(name: str):
     """The runner script and what it builds sandboxes from (public: nothing secret in them)."""

@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {  # what the runner downloads: itself, and what it needs to build sandboxes like the server's
     "tubelight-runner.py": ROOT / "runner" / "tubelight-runner.py",
+    "qrcodegen.py": ROOT / "runner" / "qrcodegen.py",
+    "tubelight_window.py": ROOT / "runner" / "tubelight_window.py",
     "sandbox.Dockerfile": ROOT / "sandbox" / "Dockerfile",
     "squid.conf": ROOT / "deploy" / "squid.conf",
 }
@@ -79,7 +81,86 @@ async def claim(code: str, name: str, os_name: str) -> dict[str, str]:
     owner_exp = _codes.pop(code.strip().upper(), None)
     if not owner_exp or owner_exp[1] < time.time():
         raise PermissionError("That code is wrong or expired. Get a new one in the app (Profile → Computers).")
-    owner_id = owner_exp[0]
+    return await _create(owner_exp[0], name, os_name)
+
+
+# QR linking (the desktop app): the computer asks for a request and shows it as a QR; the phone scans it and claims
+# it for its account; the computer then shows that account's email and the person confirms there. Both sides agree,
+# so a photo of someone's screen links nothing: the computer would show a stranger's email.
+_requests: dict[str, dict[str, Any]] = {}
+_events: dict[str, asyncio.Event] = {}
+
+
+def _bump(rid: str) -> None:
+    _events.setdefault(rid, asyncio.Event()).set()
+
+
+def hello(name: str, os_name: str) -> dict[str, Any]:
+    now = time.time()
+    for k, r in list(_requests.items()):
+        if r["exp"] < now - 60:
+            _requests.pop(k, None)
+            _events.pop(k, None)
+    rid = secrets.token_urlsafe(18)
+    _requests[rid] = {"name": name[:60] or "Computer", "os": os_name[:40], "exp": now + CODE_TTL, "state": "waiting"}
+    return {"request": rid, "expires_in": CODE_TTL, "link": f"tubelight://link?r={rid}"}
+
+
+def _live(rid: str) -> dict[str, Any]:
+    r = _requests.get(rid)
+    if not r or (r["exp"] < time.time() and r["state"] != "linked"):
+        raise LookupError("This code expired. A new one is on the computer.")
+    return r
+
+
+def request_info(rid: str, owner_id: str | None = None) -> dict[str, Any]:
+    r = _live(rid)
+    mine = r.get("owner") in (None, owner_id)
+    return {"name": r["name"], "os": r["os"], "state": r["state"] if mine else "taken", "id": r.get("id") if mine else None}
+
+
+def scan(rid: str, owner_id: str, email: str) -> dict[str, Any]:
+    r = _live(rid)
+    if r["state"] != "waiting" and r.get("owner") != owner_id:
+        raise PermissionError("Someone else already scanned this code.")
+    if r["state"] == "waiting":
+        r.update(state="scanned", owner=owner_id, email=email or "your account")
+        _bump(rid)
+    return request_info(rid, owner_id)
+
+
+async def link_status(rid: str, wait_s: float = 20) -> dict[str, Any]:
+    """The computer waits here for its code to be scanned (long poll)."""
+    try:
+        r = _live(rid)
+    except LookupError:
+        return {"state": "expired"}
+    if r["state"] == "waiting":
+        ev = _events.setdefault(rid, asyncio.Event())
+        ev.clear()
+        try:
+            await asyncio.wait_for(ev.wait(), wait_s)
+        except TimeoutError:
+            pass
+    r = _requests.get(rid) or {"state": "expired"}
+    return {"state": r["state"], **({"email": r["email"]} if r.get("email") else {})}
+
+
+async def confirm(rid: str, approve: bool) -> dict[str, Any]:
+    r = _live(rid)
+    if r["state"] != "scanned":
+        raise PermissionError("Scan the code with your phone first.")
+    if not approve:
+        r.update(state="waiting", owner=None, email=None)  # back to the QR, for the right phone
+        _bump(rid)
+        return {"state": "waiting"}
+    made = await _create(r["owner"], r["name"], r["os"])
+    r.update(state="linked", id=made["id"])
+    _bump(rid)
+    return {"state": "linked", **made}
+
+
+async def _create(owner_id: str, name: str, os_name: str) -> dict[str, str]:
     cid, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
     row = {"id": cid, "name": name[:60] or "Computer", "os": os_name[:40], "token": _hash(token),
            "created_at": time.time()}
@@ -250,3 +331,63 @@ class Box:
         except Exception as e:
             log.warning("computer sandbox close failed: %s", e)
             return ""
+
+
+# ------------------------------------------------------------------ the desktop app (.deb, built here)
+def _ar(members: list[tuple[str, bytes]]) -> bytes:
+    out = [b"!<arch>\n"]
+    for name, data in members:
+        out.append(f"{name:<16}{int(time.time()):<12}0     0     100644  {len(data):<10}`\n".encode())
+        out.append(data + (b"\n" if len(data) % 2 else b""))
+    return b"".join(out)
+
+
+def _tgz(files: dict[str, tuple[bytes, int]]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        dirs = sorted({str(Path(p).parents[i]) for p in files for i in range(len(Path(p).parts) - 1)} - {"."})
+        for d in dirs:
+            info = tarfile.TarInfo(f"./{d}")
+            info.type, info.mode, info.mtime = tarfile.DIRTYPE, 0o755, int(time.time())
+            tar.addfile(info)
+        for path, (data, mode) in files.items():
+            info = tarfile.TarInfo(f"./{path}")
+            info.size, info.mode, info.mtime = len(data), mode, int(time.time())
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def desktop_deb() -> tuple[str, bytes]:
+    """Tubelight for desktop (Ubuntu/Debian): the runner, its window (GTK 4) and a user service, linked to this
+    server. Built on request so the address inside is always this one."""
+    runner = ROOT / "runner"
+    version = f"1.0.{int(max(p.stat().st_mtime for p in runner.iterdir() if p.is_file()))}"
+    opt = "opt/tubelight"
+    data = {
+        f"{opt}/tubelight-runner.py": ((runner / "tubelight-runner.py").read_bytes(), 0o755),
+        f"{opt}/qrcodegen.py": ((runner / "qrcodegen.py").read_bytes(), 0o644),
+        f"{opt}/tubelight_window.py": ((runner / "tubelight_window.py").read_bytes(), 0o644),
+        f"{opt}/server.txt": (config.PUBLIC_URL.encode(), 0o644),
+        "usr/share/icons/hicolor/256x256/apps/tubelight.png": ((runner / "tubelight.png").read_bytes(), 0o644),
+        "usr/share/applications/studio.stepwise.Tubelight.desktop": ((
+            "[Desktop Entry]\nType=Application\nName=Tubelight\nComment=Let your teammates work on this computer\n"
+            f"Exec=/usr/bin/python3 /{opt}/tubelight-runner.py app\nIcon=tubelight\nTerminal=false\n"
+            "Categories=Utility;Network;\nStartupWMClass=studio.stepwise.Tubelight\n").encode(), 0o644),
+        "usr/lib/systemd/user/tubelight-runner.service": ((
+            "[Unit]\nDescription=Tubelight runner\nAfter=network-online.target\n\n[Service]\n"
+            f"ExecStart=/usr/bin/python3 /{opt}/tubelight-runner.py run\nRestart=always\nRestartSec=5\n\n"
+            "[Install]\nWantedBy=default.target\n").encode(), 0o644),
+    }
+    control = {
+        "control": ((
+            f"Package: tubelight-desktop\nVersion: {version}\nArchitecture: all\nMaintainer: Tubelight <hello@stepwise.studio>\n"
+            "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, bubblewrap\nRecommends: docker.io, zenity\n"
+            "Section: utils\nPriority: optional\nDescription: Let your Tubelight teammates work on this computer\n"
+            " Link this computer to your Tubelight app with a QR code. Teammates can then read the folders you share,\n"
+            " and change files or run commands there after you approve each step on your phone.\n").encode(), 0o644),
+        "postinst": (b"#!/bin/sh\nset -e\nsystemctl --global enable tubelight-runner.service >/dev/null 2>&1 || true\n"
+                     b"gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true\n", 0o755),
+        "prerm": (b"#!/bin/sh\nsystemctl --global disable tubelight-runner.service >/dev/null 2>&1 || true\n", 0o755),
+    }
+    deb = _ar([("debian-binary", b"2.0\n"), ("control.tar.gz", _tgz(control)), ("data.tar.gz", _tgz(data))])
+    return f"tubelight-desktop_{version}_all.deb", deb

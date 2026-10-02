@@ -76,6 +76,8 @@ function Root() {
               <Stack.Screen name="automation/[id]" />
               <Stack.Screen name="usage" />
               <Stack.Screen name="computers" />
+              <Stack.Screen name="scan" options={{ animation: 'fade' }} />
+              <Stack.Screen name="link" />
             </Stack.Protected>
           </Stack>
           {signedIn && <SheetsHost />}

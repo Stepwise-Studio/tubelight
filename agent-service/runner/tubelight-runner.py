@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Tubelight runner: lets your teammates work on this computer. Python 3.10+, standard library only.
+"""Tubelight runner: lets your teammates work on this computer. Python 3.10+, standard library only (the window
+needs GTK 4 + libadwaita, which Ubuntu has; the .deb from <server>/desktop installs everything).
 
-    python3 tubelight-runner.py pair <CODE> <URL>   link this computer (code from the app: Profile → Computers)
+    python3 tubelight-runner.py app                 open the window: link with a QR code, share folders, see activity
+    python3 tubelight-runner.py pair <CODE> <URL>   link without the window (code from the app: Profile → Computers)
     python3 tubelight-runner.py allow <folder>      share a folder for Cowork (and `disallow <folder>`)
     python3 tubelight-runner.py status              what's shared and where it's linked
     python3 tubelight-runner.py install             keep it running in the background (systemd user service)
@@ -33,17 +35,35 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "1"
+VERSION = "2"
+HERE = Path(__file__).resolve().parent
+SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
 CONF_FILE = CONF / "runner.json"
-BOXES = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tubelight" / "boxes"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tubelight"
+BOXES = CACHE / "boxes"
+STATE = CACHE / "state.json"  # what the service is doing, for the window
 MAX_OUT = 8000
 IMAGE, NET, EGRESS, PROXY = "tubelight-sandbox", "tl-sandbox", "tl-egress", "tl-egress-proxy"
 TOOLCHAINS = [".local/bin", ".nvm", ".cargo/bin", ".rustup", ".bun/bin", ".deno/bin", ".pyenv", ".volta", ".local/share/pnpm"]
 
 
 def load() -> dict:
-    return json.loads(CONF_FILE.read_text()) if CONF_FILE.exists() else {}
+    c = json.loads(CONF_FILE.read_text()) if CONF_FILE.exists() else {}
+    return {"url": SERVER, **c} if SERVER and not c.get("url") else c
+
+
+_jobs: list[dict] = []
+
+
+def note(**fields) -> None:
+    """Tell the window what's happening (last contact, recent jobs)."""
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        old = json.loads(STATE.read_text()) if STATE.exists() else {}
+        STATE.write_text(json.dumps({**old, **fields, "jobs": _jobs[-20:]}))
+    except Exception:
+        pass
 
 
 def save(c: dict) -> None:
@@ -268,6 +288,9 @@ def handle(c: dict, job: dict) -> None:
     except Exception as e:
         out, ok = f"{type(e).__name__}: {e}", False
     print(f"{time.strftime('%H:%M:%S')} {job['op']} {'ok' if ok else 'failed'}", flush=True)
+    a = job.get("args") or {}
+    _jobs.append({"at": time.time(), "op": job["op"], "ok": ok, "what": str(a.get("cmd") or a.get("path") or "")[:120]})
+    note()
     for _ in range(3):
         try:
             api(c, "/runner/result", {"id": job["id"], "ok": ok, "out": out})
@@ -277,27 +300,31 @@ def handle(c: dict, job: dict) -> None:
 
 
 def run() -> None:
-    c = load()
-    if not c.get("token"):
-        sys.exit("Not paired yet. Get a code in the app (Profile → Computers), then: tubelight-runner.py pair <CODE> <URL>")
     docker = docker_ok()
     if docker:
-        threading.Thread(target=lambda: _quiet(setup, c), daemon=True).start()
-    print(f"Tubelight runner on {c['url']}. Shared: {', '.join(map(str, folders(c))) or 'nothing yet'}. "
-          f"Sandboxes: {'yes' if docker else 'no (Docker not available)'}. Ctrl+C stops all access.", flush=True)
+        threading.Thread(target=lambda: _quiet(setup, load()), daemon=True).start()
+    print(f"Tubelight runner {VERSION}. Sandboxes: {'yes' if docker else 'no (Docker not available)'}. Ctrl+C stops all access.", flush=True)
     wait = 2
     while True:
-        c = load()  # `allow` / `disallow` apply without a restart
+        c = load()  # linking, sharing and pausing (from the window or the CLI) apply without a restart
+        if not c.get("token") or c.get("paused"):
+            note(online=False, paused=bool(c.get("paused")))
+            time.sleep(3)
+            continue
         info = {"folders": [str(f) for f in folders(c)], "docker": docker, "shell": bool(shutil.which("bwrap")),
                 "version": VERSION, "os": f"{platform.system()} {platform.release()}"}
         try:
             status, job = api(c, "/runner/poll", info, timeout=60)
             if status == 401:
-                sys.exit("This computer was removed in the app. Pair it again to use it.")
+                print("This computer was removed in the app; unlinking.", flush=True)
+                save({k: v for k, v in load().items() if k not in ("token", "id")})
+                continue
+            note(online=True, seen=time.time(), error=None, paused=False)
             if status == 200 and job:
                 threading.Thread(target=handle, args=(c, job), daemon=True).start()
             wait = 2
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+            note(online=False, error=str(e)[:200])
             print(f"Can't reach the server ({e}); retrying in {wait}s", flush=True)
             time.sleep(wait)
             wait = min(wait * 2, 60)
@@ -318,9 +345,42 @@ def install() -> None:
     unit.write_text(f"[Unit]\nDescription=Tubelight runner\nAfter=network-online.target\n\n[Service]\n"
                     f"ExecStart={sys.executable} {Path(__file__).resolve()} run\nRestart=always\nRestartSec=5\n\n"
                     "[Install]\nWantedBy=default.target\n")
-    subprocess.run(["systemctl", "--user", "daemon-reload"])
-    subprocess.run(["systemctl", "--user", "enable", "--now", "tubelight-runner"])
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "enable", "--now", "tubelight-runner"], capture_output=True)
     print("Running in the background. Stop: systemctl --user stop tubelight-runner  Logs: journalctl --user -u tubelight-runner -f")
+
+
+def share(path: str, on: bool) -> list[str]:
+    c = load()
+    p = str(Path(os.path.realpath(os.path.expanduser(path))))
+    if on and (not Path(p).is_dir() or p in ("/", str(Path.home()))):
+        raise ValueError("Share a specific folder (not / or your whole home folder).")
+    fs = [f for f in c.get("folders", []) if f != p] + ([p] if on else [])
+    save({**c, "folders": fs})
+    return fs
+
+
+def ensure_service() -> None:
+    """The background part runs as a user service (installed by the .deb, or by `install`)."""
+    if not shutil.which("systemctl"):
+        return
+    if subprocess.run(["systemctl", "--user", "cat", "tubelight-runner"], capture_output=True).returncode:
+        install()
+    else:
+        subprocess.run(["systemctl", "--user", "enable", "--now", "tubelight-runner"], capture_output=True)
+
+
+GUI_SRC = HERE / "tubelight_window.py"
+
+
+def gui() -> None:
+    sys.path.insert(0, str(HERE))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tubelight_window", GUI_SRC)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    ensure_service()
+    mod.main(sys.modules[__name__])
 
 
 def main() -> None:
@@ -336,11 +396,10 @@ def main() -> None:
         print("Paired. Share a folder for Cowork:  python3 tubelight-runner.py allow ~/some/folder\n"
               "Then start it:                    python3 tubelight-runner.py install   (or: run)")
     elif cmd in ("allow", "disallow") and len(a) >= 2:
-        p = str(Path(os.path.realpath(os.path.expanduser(a[1]))))
-        if cmd == "allow" and (not Path(p).is_dir() or p in ("/", str(Path.home()))):
-            sys.exit("Share a specific folder (not / or your whole home folder).")
-        fs = [f for f in c.get("folders", []) if f != p] + ([p] if cmd == "allow" else [])
-        save({**c, "folders": fs})
+        try:
+            fs = share(a[1], cmd == "allow")
+        except ValueError as e:
+            sys.exit(str(e))
         print("Shared folders:\n" + ("\n".join(fs) or "(none)"))
     elif cmd == "status":
         print(f"Linked to: {c.get('url') or 'nothing (run pair)'}\nShared folders:\n" +
@@ -353,6 +412,8 @@ def main() -> None:
             print("\nStopped. Teammates can't reach this computer now.")
     elif cmd == "install":
         install()
+    elif cmd == "app":
+        gui()
     elif cmd == "unpair":
         save({k: v for k, v in c.items() if k not in ("token", "id")})
         print("Unpaired. Also remove it in the app (Profile → Computers).")

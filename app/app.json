@@ -81,6 +81,13 @@
           "photosPermission": "Choose photos to share with your teammates.",
           "cameraPermission": "Take photos to share with your teammates."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Tubelight uses the camera to scan the code that links your computer.",
+          "recordAudioAndroid": false
+        }
       ]
     ],
     "experiments": {

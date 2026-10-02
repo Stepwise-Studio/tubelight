@@ -2,15 +2,15 @@
 // choose where builders' code runs and whether teammates may work in your folders. What a computer shares is set on
 // the computer itself; this screen only shows it.
 import * as Clipboard from 'expo-clipboard'
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshControl, ScrollView, View } from 'react-native'
+import { RefreshControl, ScrollView, Share, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Copy01Icon, LaptopAddIcon, LaptopIcon } from '@hugeicons/core-free-icons'
+import { Copy01Icon, LaptopAddIcon, LaptopIcon, QrCode01Icon } from '@hugeicons/core-free-icons'
 
 import { FormSection } from '@/components/form-bits'
 import { ScreenHeader } from '@/components/screen-header'
-import { api } from '@/lib/api'
+import { BASE, api } from '@/lib/api'
 import { ago, copied } from '@/lib/format'
 import { useTheme } from '@/theme'
 import { Button, IconButton, ListRow, RadioRow, Sheet, Skeleton, Surface, Text, Toggle, confirm, toast } from '@/ui'
@@ -105,20 +105,24 @@ function Command({ text }: { text: string }) {
   )
 }
 
-/** One-time code → the command to run on the computer; waits for it to show up. */
+/** How to link: install Tubelight for desktop, open it, scan its code. A command (with a one-time code) is the way
+ * for computers the desktop app doesn't cover yet (Mac, other Linux). */
 function LinkSheet({ open, known, onClose }: { open: boolean; known: string[]; onClose: () => void }) {
+  const { c } = useTheme()
+  const [other, setOther] = useState(false)
   const [pair, setPair] = useState<{ code: string; command: string; until: number } | null>(null)
   const [linked, setLinked] = useState<Computer | null>(null)
   const knownRef = useRef(known)
   useEffect(() => { knownRef.current = known }, [known])
+  const desktop = `${BASE.replace(/\/$/, '')}/desktop`
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !other) return
     api<{ code: string; command: string; expires_in: number }>('/computers/pair', { method: 'POST' })
       .then((p) => setPair({ ...p, until: Date.now() + p.expires_in * 1000 }), (e: Error) => toast({ title: 'Unable to get a code', body: e.message, tone: 'error' }))
-  }, [open])
+  }, [open, other])
 
-  useEffect(() => {  // the computer appears in the list once the command has run
+  useEffect(() => {  // a computer linked with the command appears in the list
     if (!pair || linked) return
     const t = setInterval(() => {
       if (Date.now() > pair.until) { clearInterval(t); return }
@@ -130,23 +134,48 @@ function LinkSheet({ open, known, onClose }: { open: boolean; known: string[]; o
     return () => clearInterval(t)
   }, [pair, linked])
 
-  const close = () => { setPair(null); setLinked(null); onClose() }
+  const close = () => { setPair(null); setLinked(null); setOther(false); onClose() }
+  const step = (n: number, title: string, body: React.ReactNode) => (
+    <View style={{ flexDirection: 'row', gap: 12 }}>
+      <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="label" color="ink2">{n}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 8 }}>
+        <Text variant="bodyMedium">{title}</Text>
+        {body}
+      </View>
+    </View>
+  )
   return (
     <Sheet open={open} onClose={close} title={linked ? `Linked ${linked.name}` : 'Link a computer'}>
-      <View style={{ paddingHorizontal: 20, paddingBottom: 24, gap: 14 }}>
+      <View style={{ paddingHorizontal: 20, paddingBottom: 24, gap: 18 }}>
         {linked ? (
           <>
-            <Text variant="body" color="ink2">Now choose what it shares, on the computer:</Text>
+            <Text variant="body" color="ink2">Share a folder on it so teammates can work there:</Text>
             <Command text={`${RUNNER} allow ~/path/to/folder`} />
-            <Text variant="body" color="ink2">And keep it running in the background:</Text>
-            <Command text={`${RUNNER} install`} />
             <Button label="Done" onPress={close} />
+          </>
+        ) : !other ? (
+          <>
+            {step(1, 'Install Tubelight on the computer', (
+              <>
+                <Text variant="caption" color="ink3">On the computer, open this page and download it (Ubuntu or Debian):</Text>
+                <Command text={desktop} />
+                <Button label="Send the link to myself" variant="soft" size="sm" style={{ alignSelf: 'flex-start' }}
+                  onPress={() => Share.share({ message: `Tubelight for desktop: ${desktop}` })} />
+              </>
+            ))}
+            {step(2, 'Open it and scan its code', (
+              <Text variant="caption" color="ink3">Tubelight on the computer shows a QR code. Confirm on both, and it’s linked.</Text>
+            ))}
+            <Button label="Scan code" icon={QrCode01Icon} onPress={() => { close(); router.push('/scan') }} />
+            <Button label="Mac or other Linux? Link with a command" variant="ghost" size="sm" onPress={() => setOther(true)} />
           </>
         ) : (
           <>
-            <Text variant="body" color="ink2">On the computer (Linux or Mac, Python 3.10+), run this in a terminal. The code works once, for 10 minutes.</Text>
+            <Text variant="body" color="ink2">On the computer (Python 3.10+), run this in a terminal. The code works once, for 10 minutes.</Text>
             {pair ? <Command text={pair.command} /> : <Skeleton height={44} />}
-            <Text variant="footnote" color="ink3">This page notices when it’s linked. Teammates only ever see the folders you share there, and you can stop it anytime with Ctrl+C or by removing it here.</Text>
+            <Text variant="footnote" color="ink3">This page notices when it’s linked.</Text>
           </>
         )}
       </View>
@@ -172,8 +201,7 @@ function ComputerSheet({ m, onClose, onRemoved }: { m: Computer | null; onClose:
           <Text variant="label">Shared folders</Text>
           {m.folders.length ? m.folders.map((f) => <Text key={f} variant="mono" selectable>{f}</Text>)
             : <Text variant="body" color="ink2">{m.online ? 'Nothing shared yet.' : 'Shown while it’s online.'}</Text>}
-          <Text variant="footnote" color="ink3">Share or stop sharing on the computer:</Text>
-          <Command text={`${RUNNER} allow ~/path/to/folder`} />
+          <Text variant="footnote" color="ink3">Share or stop sharing folders in Tubelight on the computer (or with `{RUNNER.split(' ')[1]} allow` there).</Text>
           <Button label="Remove this computer" variant="destructive" onPress={remove} />
         </View>
       )}
