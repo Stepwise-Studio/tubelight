@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, connectors, db, followups, llm, memory, sandbox
+from . import automations, connectors, db, followups, llm, memory, repo, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -22,7 +22,7 @@ DRAFT = {"DRAFT"}
 READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "VIEW"}
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
-    "automate": "read", "app_events": "read",
+    "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
 }
@@ -274,6 +274,46 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return str(e)
         return f"Done: {action}d {rule['name']}." if action != "resume" else f"Resumed {rule['name']}."
 
+    if ctx.project and repo.parse(ctx.project.get("repo_url")):
+        pid = ctx.project["id"]
+
+        async def repo_context(query: str = "", path: str = "") -> str:
+            if path:
+                text = repo.read(pid, path)
+                if text is None:
+                    return f"No file {path} in the repo (paths are relative to its root; search first)."
+                return f"{path}:\n{text}"
+            stored = await repo.get(pid)
+            q = query.lower()
+            if any(w in q for w in ("change", "commit", "recent", "latest", "new")):
+                entries = (stored.get("log") or {}).get("entries") or []
+                if entries:
+                    return "Recent changes:\n" + "\n".join(
+                        f"{e['from']}..{e['to']} ({e['at'][:10]}): " + "; ".join(f"{c['message']} ({c['author']})" for c in e["commits"][:10])
+                        for e in entries[:5])
+            areas = (stored.get("areas") or {}).get("areas") or {}
+            hits = [f"## {a}\n{v['summary']}" for a, v in areas.items() if any(w in (a + v["summary"]).lower() for w in q.split())][:4]
+            found = repo.search(pid, query) if query else ""
+            if not hits and not found:
+                return "Nothing in the repo matches that. Try other words, or ask for a path."
+            return "\n\n".join([*hits, *(["Matching files:\n" + found] if found else [])])[:9000]
+
+        async def repo_note(note: str) -> str:
+            await repo.add_note(pid, note, tm["name"])
+            return "Added to the repo notes every teammate here reads."
+
+        tools += [
+            StructuredTool.from_function(
+                coroutine=repo_context, name="repo_context",
+                description="Look into this project's code repo (its brief is in your instructions). query: words to "
+                            "search the code, area summaries and recent changes ('recent changes' lists the latest "
+                            "commits); path: read one file (path from the repo root). Read-only."),
+            StructuredTool.from_function(
+                coroutine=repo_note, name="repo_note",
+                description="Add one short, lasting fact about the repo to its brief for every teammate (a gotcha, a "
+                            "convention, where something lives). Not for chat or task status."),
+        ]
+
     tools += [
         StructuredTool.from_function(
             coroutine=automate, name="automate",
@@ -345,7 +385,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return await box().write_file(path, content)
 
         async def git_push(branch: str) -> str:
-            return await box().git_push(branch)
+            out = await box().git_push(branch)
+            if ctx.project and "[exit code 0]" in out:
+                repo.schedule(ctx.owner_id, ctx.project["id"])  # the repo knowledge catches up with the push
+            return out
 
         tools += [
             StructuredTool.from_function(coroutine=run_shell, name="run_shell",

@@ -21,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, runs, sandbox, usage
+from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, repo, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -737,6 +737,63 @@ async def app_events(toolkit: str, user: User = Depends(current_user)):
         return await automations.app_events(toolkit, limit=30)
     except Exception as e:
         raise HTTPException(502, f"Couldn't load {toolkit.title()}'s events: {str(e)[:120]}") from e
+
+
+# ------------------------------------------------------------------ repo knowledge (repo.py)
+def _repo_view(stored: dict[str, Any]) -> dict[str, Any]:
+    b = stored.get("brief") or {}
+    areas = (stored.get("areas") or {}).get("areas") or {}
+    return {"state": stored.get("state"), "brief": repo.brief_text(stored), "generated": b.get("text") or "",
+            "edited": bool(b.get("edited")), "notes": b.get("notes") or [],
+            "areas": [{"name": a, "summary": v["summary"], "files": v["files"]} for a, v in areas.items()],
+            "log": ((stored.get("log") or {}).get("entries") or [])[:20]}
+
+
+@app.get("/projects/{project_id}/repo")
+async def get_repo(project_id: str, user: User = Depends(current_user)):
+    p = await owned("projects", project_id, user, "project")
+    stored = await repo.get(project_id) if p.get("repo_url") else {}
+    return {"repo": "/".join(repo.parse(p.get("repo_url")) or ()) or None, **_repo_view(stored)}
+
+
+class RepoChoice(BaseModel):
+    repo: str | None = Field(None, max_length=200)  # "owner/name", or null to remove it
+
+
+@app.put("/projects/{project_id}/repo")
+async def set_repo(project_id: str, body: RepoChoice, user: User = Depends(current_user)):
+    """Pick (or remove) the project's GitHub repo; picking one starts reading it in the background."""
+    await owned("projects", project_id, user, "project")
+    target = repo.parse(body.repo) if body.repo else None
+    if body.repo and not target:
+        raise HTTPException(400, "Give the repo as owner/name.")
+    url = f"https://github.com/{target[0]}/{target[1]}" if target else None
+    await db.update("projects", {"id": f"eq.{project_id}"}, {"repo_url": url})
+    if url:
+        repo.schedule(user["id"], project_id, force=True)
+    else:
+        await repo.forget(project_id)
+    return {"repo": "/".join(target) if target else None}
+
+
+@app.post("/projects/{project_id}/repo/reindex")
+async def reindex_repo(project_id: str, user: User = Depends(current_user)):
+    p = await owned("projects", project_id, user, "project")
+    if not repo.parse(p.get("repo_url")):
+        raise HTTPException(400, "This project has no repo.")
+    repo.schedule(user["id"], project_id, force=True)
+    return {"ok": True}
+
+
+class BriefEdit(BaseModel):
+    text: str | None = Field(None, max_length=8000)  # null: go back to the generated brief
+
+
+@app.patch("/projects/{project_id}/repo/brief")
+async def edit_repo_brief(project_id: str, body: BriefEdit, user: User = Depends(current_user)):
+    await owned("projects", project_id, user, "project")
+    await repo.edit_brief(project_id, (body.text or "").strip() or None)
+    return _repo_view(await repo.get(project_id))
 
 
 @app.get("/apps/{toolkit}/choices/{field}")

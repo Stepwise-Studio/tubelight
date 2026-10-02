@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, config, connectors, db, floor, followups, llm, memory, push, reactions, tools as T
+from . import automations, config, connectors, db, floor, followups, llm, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -208,6 +208,14 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         p = ctx.project
         lines.append(f'You are in the project group "{p["name"]}".' + (f" About: {p['description']}" if p.get("description") else "")
                      + (f" Repo: {p['repo_url']}" if p.get("repo_url") else ""))
+        if p.get("repo_url"):
+            stored = await repo.get(p["id"])
+            brief = repo.brief_text(stored) if stored else ""
+            if brief:
+                lines.append("What you know about the repo (kept current; use repo_context to search the code or read a "
+                             f"file, repo_note to add a lasting fact):\n{brief[:3500]}")
+            elif (stored.get("state") or {}).get("status") in ("reading", "checking"):
+                lines.append("The repo is still being read for the first time; repo_context can search what's in so far.")
         lines.append("Group members:\n" + "\n".join(
             f"- {m['name']} (@{m['handle']}, {m['role']}){' - that is you' if m['id'] == tm['id'] else ''}" for m in ctx.members))
         lines.append("Other members' messages appear as '[Name · role]: text'; only your own earlier replies are yours. Never "

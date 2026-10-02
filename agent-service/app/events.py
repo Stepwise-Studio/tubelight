@@ -191,7 +191,15 @@ async def tick(now: datetime | None = None) -> None:
 
 
 async def schedule_loop() -> None:
+    from . import repo
+    n = 0
     while True:
+        if n % 20 == 0:  # every 10 minutes: repos whose last check is over 6 hours old look for new commits
+            try:
+                await repo.tick()
+            except Exception as e:
+                log.warning("repo tick failed: %s", e)
+        n += 1
         try:
             await tick()
         except Exception as e:

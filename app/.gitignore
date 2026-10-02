@@ -43,3 +43,7 @@ example
 /android
 
 .env
+
+# Push: Firebase config and the FCM sending key (secret; upload to Expo, then delete)
+google-services.json
+fcm-key.json

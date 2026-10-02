@@ -1,9 +1,15 @@
 """Automations: set up by chatting, run on a schedule (in the user's time zone) or on app events, quiet when idle."""
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app import automations, config, connectors, events
 from tests.conftest import OWNER, ai, settle, teammate
+
+
+def day(n: int, h: int, m: int) -> datetime:
+    """A UTC time n days from now: schedules ignore time before the automation existed, so tests run in the future."""
+    d = datetime.now(UTC) + timedelta(days=n)
+    return datetime(d.year, d.month, d.day, h, m, tzinfo=UTC)
 
 
 def rule_of(fdb):
@@ -37,16 +43,16 @@ async def test_schedules_run_in_the_users_time_zone_quietly_when_idle_and_rememb
     await automations.create(OWNER, ivy, None, name="Morning brief", instructions="Summarise yesterday's mail.",
                              cron="0 8 * * *", tz="Asia/Kolkata", when="every day at 8 AM")
     # 8 AM in Kolkata is 02:30 UTC: nothing is due at midnight UTC (05:30 there).
-    await events.tick(datetime(2026, 9, 29, 0, 0, tzinfo=UTC))
+    await events.tick(day(2, 0, 0))
     assert not fdb.rows("events", type="schedule")
     fake.script = [ai("QUIET")]
-    await events.tick(datetime(2026, 9, 29, 2, 31, tzinfo=UTC))
+    await events.tick(day(2, 2, 31))
     await settle()
     first = fake.calls[-1][-1].content
     assert "[Automation: Morning brief, every day at 8 AM]" in first and "first run" in first and "QUIET" in first
     assert not fdb.rows("messages", sender_type="teammate")  # nothing to say: nothing posted
     fake.script = [ai("Three mails need you today.")]
-    await events.tick(datetime(2026, 9, 30, 2, 31, tzinfo=UTC))
+    await events.tick(day(3, 2, 31))
     await settle()
     assert "It last ran" in fake.calls[-1][-1].content and "never repeat" in fake.calls[-1][-1].content
     [msg] = fdb.rows("messages", sender_type="teammate")
@@ -164,11 +170,11 @@ async def test_a_slot_missed_while_offline_runs_once_late_but_not_when_it_is_sta
     await automations.create(OWNER, ivy, None, name="Morning brief", instructions="Brief.", cron="0 8 * * *",
                              tz="Asia/Kolkata", when="every day at 8 AM")
     fake.script = [ai("Here's the brief.")]
-    await events.tick(datetime(2026, 10, 1, 5, 0, tzinfo=UTC))  # 10:30 AM there: 2.5 h late, still worth it
+    await events.tick(day(2, 5, 0))  # 10:30 AM there: 2.5 h late, still worth it
     await settle()
     assert "This run is late (it was due 08:00 AM" in fake.calls[-1][-1].content
-    await events.tick(datetime(2026, 10, 1, 5, 1, tzinfo=UTC))  # once only
-    await events.tick(datetime(2026, 10, 2, 12, 0, tzinfo=UTC))  # 5:30 PM there: too stale to replay
+    await events.tick(day(2, 5, 1))  # once only
+    await events.tick(day(3, 12, 0))  # 5:30 PM there: too stale to replay
     assert len(fdb.rows("events", type="schedule")) == 1
 
 
