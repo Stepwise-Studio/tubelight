@@ -180,24 +180,34 @@ def files_of(root: Path) -> dict[str, str]:
     return out
 
 
+AREA_MAX = 40  # files: a bigger folder is split into its subfolders, so each summary stays specific
+
+
 def areas_of(paths: list[str]) -> dict[str, list[str]]:
     """Group files into areas: top-level folders; a folder holding packages (apps/*, packages/*, services/*) splits
-    into one area per package; loose top-level files form "(root)"."""
-    groups: dict[str, list[str]] = {}
-    tops: dict[str, set[str]] = {}
-    for p in paths:
-        parts = p.split("/")
-        if len(parts) > 2:
-            tops.setdefault(parts[0], set()).add(parts[1])
-    for p in paths:
+    into one area per package; a folder over AREA_MAX files splits into its subfolders (its own loose files stay
+    under its name), up to four levels deep; loose top-level files form "(root)"."""
+    def key(p: str, depth: int) -> str:
         parts = p.split("/")
         if len(parts) == 1:
-            key = "(root)"
-        elif parts[0] in ("apps", "packages", "services", "libs", "modules", "crates") and len(parts) > 2:
-            key = f"{parts[0]}/{parts[1]}"
-        else:
-            key = parts[0]
-        groups.setdefault(key, []).append(p)
+            return "(root)"
+        return "/".join(parts[:min(depth, len(parts) - 1)])
+
+    depth = {p: 2 if p.split("/")[0] in ("apps", "packages", "services", "libs", "modules", "crates") and p.count("/") > 1 else 1
+             for p in paths}
+    for _ in range(4):
+        groups: dict[str, list[str]] = {}
+        for p in paths:
+            groups.setdefault(key(p, depth[p]), []).append(p)
+        split = False
+        for k, files in groups.items():
+            deeper = [p for p in files if p.count("/") > depth[p]]
+            if k != "(root)" and len(files) > AREA_MAX and deeper:
+                for p in deeper:
+                    depth[p] += 1
+                split = True
+        if not split:
+            break
     return dict(sorted(groups.items(), key=lambda kv: -len(kv[1])))
 
 
@@ -344,7 +354,8 @@ async def index(owner_id: str, project_id: str, force: bool = False) -> None:
             await _set_state(project_id, status="ready", sha=sha, files=count, indexed_at=_now(), checked_at=_now(), progress=100)
         except Exception as e:
             log.warning("repo pass for %s failed: %s", full, e)
-            await _set_state(project_id, status="error", error=str(e)[:300])
+            # checked_at too: a broken repo is retried on the normal 6-hour rhythm, not every 10 minutes
+            await _set_state(project_id, status="error", error=_plain(e, full), checked_at=_now())
 
 
 async def _summarise(project_id: str, full: str, files: dict[str, str], stored: dict[str, Any], force: bool) -> None:
@@ -380,6 +391,16 @@ async def _summarise(project_id: str, full: str, files: dict[str, str], stored: 
         text = await _ask(BRIEF.format(repo=full), f"Areas:\n{layout}\n\nKey files:\n{key}")
         b = stored.get("brief") or {}
         await _put(project_id, "brief", {**b, "text": text[:6000], "generated_at": _now()})
+
+
+def _plain(e: Exception, full: str) -> str:
+    text = str(e)
+    if "connected account" in text.lower():
+        return "GitHub isn't connected. Connect it in Profile → Apps, then tap refresh."
+    if "Not Found" in text or "404" in text:
+        return (f"GitHub can't find {full}: it may have been renamed, deleted or made private to another account. "
+                "Pick it again in the project's settings.")
+    return text[:300]
 
 
 def _now() -> str:

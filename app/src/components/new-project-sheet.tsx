@@ -3,11 +3,13 @@ import { useState } from 'react'
 import { View } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, Link01Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon } from '@hugeicons/core-free-icons'
 
 import { ColorSwatches, FormSection, SheetHeader, TeammateToggles } from '@/components/form-bits'
+import { RepoPicker } from '@/components/repo-picker'
 import { openSheet, useSheet } from '@/components/sheet-screen'
-import { COLORS, REPO_RE } from '@/lib/catalog'
+import { api } from '@/lib/api'
+import { COLORS } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Project } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
@@ -22,10 +24,10 @@ export function NewProject() {
   const insets = useSafeAreaInsets()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [repo, setRepo] = useState('')
+  const [repo, setRepo] = useState<string | null>(null)
   const [color, setColor] = useState(COLORS[1].value)
   const [members, setMembers] = useState<Set<string>>(new Set())
-  const [errors, setErrors] = useState<{ name?: string; repo?: string }>({})
+  const [errors, setErrors] = useState<{ name?: string }>({})
   const [saving, setSaving] = useState(false)
 
   const toggle = (id: string) => setMembers((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -33,12 +35,11 @@ export function NewProject() {
   const create = async () => {
     const e: typeof errors = {}
     if (!name.trim()) e.name = 'Give the project a name.'
-    if (repo.trim() && !REPO_RE.test(repo.trim())) e.repo = 'Paste the full address, like https://github.com/you/repo.'
     setErrors(e)
     if (Object.keys(e).length) return
     setSaving(true)
     const { data, error } = await supabase.from('projects')
-      .insert({ name: name.trim(), description: description.trim(), repo_url: repo.trim() || null, color })
+      .insert({ name: name.trim(), description: description.trim(), color })
       .select().single()
     if (error) { setSaving(false); toast({ title: 'Unable to create the project', body: 'Check your connection and try again.', tone: 'error' }); return }
     const project = data as Project
@@ -46,6 +47,9 @@ export function NewProject() {
       const { error: mErr } = await supabase.from('project_members').insert([...members].map((teammate_id) => ({ project_id: project.id, teammate_id })))
       if (mErr) toast({ title: 'Project created, but members weren’t added', body: 'Add them from project settings.', tone: 'error' })
     }
+    // Picking the repo through the service starts reading it in the background.
+    if (repo) await api(`/projects/${project.id}/repo`, { method: 'PUT', json: { repo } }).catch(() =>
+      toast({ title: 'Project created, but the repo wasn’t set', body: 'Pick it again in project settings.', tone: 'error' }))
     await ws.refresh()
     haptic.success()
     // The chat opens underneath as the sheet slides away.
@@ -59,18 +63,9 @@ export function NewProject() {
         <FormSection title="Details">
           <TextField label="Name" value={name} onChangeText={setName} placeholder="Stepwise UI" error={errors.name} autoCapitalize="words" maxLength={60} />
           <TextField label="Description" value={description} onChangeText={setDescription} placeholder="What the team is working on" multiline showCount maxLength={280} hint="Every member reads this before replying." />
-          <TextField
-            label="Repository (optional)"
-            icon={Link01Icon}
-            value={repo}
-            onChangeText={setRepo}
-            placeholder="https://github.com/you/repo"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            error={errors.repo}
-            hint="Teammates get a copy of it in their sandbox."
-          />
+        </FormSection>
+        <FormSection title="Repository" hint="Optional. Teammates here read it and keep up with its changes.">
+          <RepoPicker value={repo} onChange={setRepo} />
         </FormSection>
         <FormSection title="Colour">
           <ColorSwatches colors={COLORS} value={color} onChange={setColor} />

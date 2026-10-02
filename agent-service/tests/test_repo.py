@@ -104,3 +104,14 @@ async def test_picking_a_repo_from_the_app_starts_reading_it(api, env, monkeypat
     assert r["repo"] == "acme/app" and fdb.rows("projects")[0]["repo_url"] == "https://github.com/acme/app"
     assert started == [("p2", True)]
     await settle()
+
+
+def test_errors_read_as_plain_words():
+    assert "can't find acme/app" in repo._plain(RuntimeError('{"message":"Not Found","status":"404"}'), "acme/app")
+    assert "isn't connected" in repo._plain(RuntimeError("404 No connected account found for user"), "acme/app")
+
+
+def test_a_big_folder_splits_into_its_subfolders():
+    paths = [f"app/src/components/c{i}.tsx" for i in range(30)] + [f"app/src/ui/u{i}.tsx" for i in range(25)] + ["app/package.json"]
+    areas = repo.areas_of(paths)
+    assert set(areas) == {"app/src/components", "app/src/ui", "app"} and areas["app"] == ["app/package.json"]

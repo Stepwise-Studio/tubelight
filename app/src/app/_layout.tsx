@@ -69,6 +69,7 @@ function Root() {
               <Stack.Screen name="chat/[threadId]" />
               <Stack.Screen name="teammate/[id]" />
               <Stack.Screen name="project/[id]/settings" />
+              <Stack.Screen name="project/[id]/repo" />
               <Stack.Screen name="connections" />
               <Stack.Screen name="memory" />
               <Stack.Screen name="automations" />

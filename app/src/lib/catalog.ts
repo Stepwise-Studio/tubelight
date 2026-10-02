@@ -61,7 +61,6 @@ export const recommendedModel = (_role: string) => 'gemini:gemini-3.8-flash'
 
 export const DEFAULT_MODEL = 'gemini:gemini-3.8-flash'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
-export const REPO_RE = /^https?:\/\/\S+\.\S+/
 
 /** Mid-light pastels: readable faces on zinc-950 and on white. */
 export const COLORS = [

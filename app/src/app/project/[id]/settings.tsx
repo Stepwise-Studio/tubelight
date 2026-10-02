@@ -6,23 +6,24 @@ import { KeyboardAwareScrollView, useReanimatedKeyboardAnimation } from 'react-n
 import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, AlertCircleIcon, Cancel01Icon, Delete02Icon, Link01Icon, Mail01Icon, MinusSignIcon,
+  Add01Icon, AlertCircleIcon, BookOpen01Icon, Cancel01Icon, Delete02Icon, Mail01Icon, MinusSignIcon,
   SourceCodeIcon, UserAdd01Icon, UserRemove01Icon, WebhookIcon,
 } from '@hugeicons/core-free-icons'
 
 import { CodeBlock, ColorSwatches, FormSection, RowWithAction, TeammateToggles } from '@/components/form-bits'
 import { MemoryList } from '@/components/memory-list'
 import { AutomationRows } from '@/components/automation-rows'
+import { RepoPicker, repoStatusLine, useRepoKnowledge } from '@/components/repo-picker'
 import { ScreenHeader } from '@/components/screen-header'
 import { api } from '@/lib/api'
-import { COLORS, REPO_RE } from '@/lib/catalog'
+import { COLORS } from '@/lib/catalog'
 import { useAutomations } from '@/lib/automations'
 import { supabase } from '@/lib/supabase'
 import type { EventRule, Project, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import {
-  AvatarStack, Button, Chip, Divider, EmptyState, Icon, IconButton, NumberPop, Sheet, Skeleton, Surface,
+  AvatarStack, Button, Chip, Divider, EmptyState, Icon, IconButton, ListRow, NumberPop, Sheet, Skeleton, Surface,
   TeammateAvatar, Text, TextField, Toggle, confirm, haptic, toast, type IconSvgElement,
 } from '@/ui'
 
@@ -93,6 +94,7 @@ function Settings({ p }: { p: Project }) {
       />
       <KeyboardAwareScrollView bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40, gap: 40 }}>
         <Details p={p} />
+        <Repository p={p} />
         <Members p={p} members={members} />
         <FormSection title="Memory" hint="Facts every member knows about this project.">
           <MemoryList scope="project" id={p.id} owner={p.name} />
@@ -110,25 +112,59 @@ function Settings({ p }: { p: Project }) {
 
 // ------------------------------------------------------------------ details
 
+function Repository({ p }: { p: Project }) {
+  const ws = useWorkspace()
+  const { k, reload, setK } = useRepoKnowledge(p.id)
+  const [saving, setSaving] = useState(false)
+  const pick = async (repo: string | null) => {
+    if ((repo ?? null) === (k?.repo ?? null)) return
+    if (k?.repo && !repo && !await confirm({ title: 'Remove the repo?', body: `Teammates forget what they learned about ${k.repo}.`, confirmLabel: 'Remove', destructive: true })) return
+    setSaving(true)
+    try {
+      await api(`/projects/${p.id}/repo`, { method: 'PUT', json: { repo } })
+      setK((x) => (x ? { ...x, repo, state: repo ? { repo, status: 'checking', progress: 0 } : null } : x))
+      await ws.refresh()
+      haptic.success()
+      if (repo) toast({ title: 'Reading the repo', body: 'Teammates here will know it in a few minutes.' })
+      reload()
+    } catch (e) {
+      toast({ title: 'Unable to change the repo', body: (e as Error).message, tone: 'error' })
+    } finally { setSaving(false) }
+  }
+  const status = repoStatusLine(k?.state)
+  return (
+    <FormSection title="Repository" hint={k?.repo ? undefined : 'Pick a repo and every teammate here learns the code and keeps up with its changes.'}>
+      <RepoPicker value={k?.repo ?? null} onChange={pick} />
+      {k?.repo && (
+        <>
+          <Text variant="footnote" color={status.tone} accessibilityLiveRegion="polite">{saving ? 'Saving…' : status.text}</Text>
+          <Surface style={{ overflow: 'hidden' }}>
+            <ListRow title="Repo knowledge" subtitle="The brief teammates read, its areas and recent changes" icon={BookOpen01Icon} chevron
+              onPress={() => router.push({ pathname: '/project/[id]/repo', params: { id: p.id } })} />
+          </Surface>
+        </>
+      )}
+    </FormSection>
+  )
+}
+
 function Details({ p }: { p: Project }) {
   const ws = useWorkspace()
   const [name, setName] = useState(p.name)
   const [description, setDescription] = useState(p.description)
-  const [repo, setRepo] = useState(p.repo_url ?? '')
   const [color, setColor] = useState(p.color)
-  const [errors, setErrors] = useState<{ name?: string; repo?: string }>({})
+  const [errors, setErrors] = useState<{ name?: string }>({})
   const [saving, setSaving] = useState(false)
-  const dirty = name !== p.name || description !== p.description || repo !== (p.repo_url ?? '') || color !== p.color
+  const dirty = name !== p.name || description !== p.description || color !== p.color
 
   const save = async () => {
     const e: typeof errors = {}
     if (!name.trim()) e.name = 'Give the project a name.'
-    if (repo.trim() && !REPO_RE.test(repo.trim())) e.repo = 'Paste the full address, like https://github.com/you/repo.'
     setErrors(e)
     if (Object.keys(e).length) return
     setSaving(true)
     const { error } = await supabase.from('projects')
-      .update({ name: name.trim(), description: description.trim(), repo_url: repo.trim() || null, color, updated_at: new Date().toISOString() })
+      .update({ name: name.trim(), description: description.trim(), color, updated_at: new Date().toISOString() })
       .eq('id', p.id)
     if (!error) await ws.refresh()
     setSaving(false)
@@ -140,11 +176,10 @@ function Details({ p }: { p: Project }) {
     <FormSection title="Details">
       <TextField label="Name" value={name} onChangeText={setName} error={errors.name} maxLength={60} />
       <TextField label="Description" value={description} onChangeText={setDescription} placeholder="What the team is working on" multiline showCount maxLength={280} />
-      <TextField label="Repository (optional)" icon={Link01Icon} value={repo} onChangeText={setRepo} placeholder="https://github.com/you/repo" autoCapitalize="none" autoCorrect={false} keyboardType="url" error={errors.repo} />
       <ColorSwatches colors={COLORS} value={color} onChange={setColor} />
       {dirty && (
         <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Discard" variant="ghost" onPress={() => { setName(p.name); setDescription(p.description); setRepo(p.repo_url ?? ''); setColor(p.color); setErrors({}) }} />
+          <Button label="Discard" variant="ghost" onPress={() => { setName(p.name); setDescription(p.description); setColor(p.color); setErrors({}) }} />
           <Button label="Save details" loading={saving} onPress={save} />
         </View>
       )}

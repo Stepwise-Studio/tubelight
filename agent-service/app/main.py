@@ -744,7 +744,7 @@ def _repo_view(stored: dict[str, Any]) -> dict[str, Any]:
     b = stored.get("brief") or {}
     areas = (stored.get("areas") or {}).get("areas") or {}
     return {"state": stored.get("state"), "brief": repo.brief_text(stored), "generated": b.get("text") or "",
-            "edited": bool(b.get("edited")), "notes": b.get("notes") or [],
+            "edited": bool(b.get("edited")), "mine": b.get("edited") or "", "notes": b.get("notes") or [],
             "areas": [{"name": a, "summary": v["summary"], "files": v["files"]} for a, v in areas.items()],
             "log": ((stored.get("log") or {}).get("entries") or [])[:20]}
 
