@@ -207,7 +207,7 @@ function PushSection() {
       <Surface padding={16} style={{ gap: 8 }}>
         <Toggle
           label="Notify me on this phone"
-          description="When a teammate needs your approval or posts on their own."
+          description="When a teammate replies, needs your approval or posts on their own, while you’re away from the app."
           value={!!on}
           onChange={change}
           disabled={blocked || busy || on === null}
