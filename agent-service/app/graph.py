@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, config, connectors, db, floor, followups, genui, llm, memory, push, reactions, repo, tools as T
+from . import automations, computers, config, connectors, db, floor, followups, genui, llm, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -58,11 +58,12 @@ class RunCtx:
     trigger: str = "message"
     event_type: str | None = None
     docker: bool = False
+    computer: dict | None = None  # the user's online computer and their choices (computers.for_run)
     turn_tools: dict[str, list] = field(default_factory=dict)
     apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
     only: list[str] | None = None  # an automation run: just these apps (see scope)
     brief: str = ""  # the running summary of this chat (brief.py)
-    sandboxes: dict[str, Sandbox] = field(default_factory=dict)
+    sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
     @property
@@ -76,9 +77,17 @@ class RunCtx:
         p = {"run_id": self.run_id, "teammate_id": tm["id"] if tm else None, "state": state}
         return {**p, "label": label} if label else p
 
-    def sandbox(self, tm: dict) -> Sandbox:
+    @property
+    def box_on_computer(self) -> bool:
+        """Builders' sandboxes run on the user's computer: they chose it, or chose auto and the server has no Docker."""
+        c = self.computer
+        return bool(c and c["docker"] and (c["code_on"] == "computer" or (c["code_on"] == "auto" and not self.docker)))
+
+    def sandbox(self, tm: dict) -> Sandbox | computers.Box:
         if tm["id"] not in self.sandboxes:
-            self.sandboxes[tm["id"]] = Sandbox(self.run_id, tm["id"], (self.project or {}).get("repo_url"), self.owner_id)
+            repo_url = (self.project or {}).get("repo_url")
+            self.sandboxes[tm["id"]] = (computers.Box(self.computer["id"], self.run_id, tm["id"], repo_url, self.owner_id)
+                                        if self.box_on_computer else Sandbox(self.run_id, tm["id"], repo_url, self.owner_id))
         return self.sandboxes[tm["id"]]
 
     def scope(self, msgs: list[BaseMessage]) -> None:
@@ -241,6 +250,11 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                  "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
                  "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
+    if "computer_list" in tool_names:
+        c = ctx.computer
+        lines.append(f"You can work on {ctx.user_name}'s computer '{c['name']}' ({c['os']}), in the folders they shared: "
+                     f"{', '.join(c['folders'])}. Look first (computer_list, computer_read); writing a file or running a "
+                     "command waits for their approval, so propose one clear step at a time and say what it does.")
     lines.append(genui.PROMPT)
     if "run_shell" in tool_names:
         lines.append("You have a code sandbox (run_shell, read_file, write_file) with the project's repo in /workspace. "

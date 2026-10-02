@@ -18,10 +18,10 @@ from croniter import croniter
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, config, connectors, db, events, files, followups, live, llm, memory, push, reactions, repo, runs, sandbox, usage
+from . import automations, computers, config, connectors, db, events, files, followups, live, llm, memory, push, reactions, repo, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -886,6 +886,82 @@ async def patch_notify_prefs(body: NotifyPrefs, user: User = Depends(current_use
         raise HTTPException(400, "Unknown sound.")
     return {**await push.set_prefs(user["id"], **body.model_dump(exclude_none=True) | (
         {"chats": body.chats} if body.chats is not None else {})), "sounds": list(push.SOUNDS)}
+
+
+# ------------------------------------------------------------------ your computers (computers.py)
+class ComputerPrefs(BaseModel):
+    code_on: Literal["server", "computer", "auto"] | None = None
+    cowork: bool | None = None
+
+
+@app.get("/computers")
+async def get_computers(user: User = Depends(current_user)):
+    return {"computers": await computers.listing(user["id"]), **await computers.prefs(user["id"])}
+
+
+@app.post("/computers/pair")
+async def pair_computer(user: User = Depends(current_user)):
+    return computers.pair_code(user["id"])
+
+
+@app.patch("/computers/prefs")
+async def patch_computer_prefs(body: ComputerPrefs, user: User = Depends(current_user)):
+    return await computers.set_prefs(user["id"], body.code_on, body.cowork)
+
+
+@app.delete("/computers/{computer_id}")
+async def delete_computer(computer_id: str, user: User = Depends(current_user)):
+    await computers.remove(user["id"], computer_id)
+    return {"ok": True}
+
+
+class RunnerClaim(BaseModel):
+    code: str = Field(max_length=20)
+    name: str = Field("", max_length=80)
+    os: str = Field("", max_length=40)
+
+
+class RunnerResult(BaseModel):
+    id: str
+    ok: bool
+    out: Any = None
+
+
+async def runner_auth(request: Request) -> tuple[str, str]:
+    token = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    found = await computers.by_token(token) if token else None
+    if not found:
+        raise HTTPException(401, "Unknown computer.")
+    return found
+
+
+@app.post("/runner/claim")
+async def runner_claim(body: RunnerClaim):
+    try:
+        return await computers.claim(body.code, body.name, body.os)
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+
+
+@app.post("/runner/poll")
+async def runner_poll(request: Request, who: tuple[str, str] = Depends(runner_auth)):
+    job = await computers.poll(who[1], await request.json())
+    return job if job else Response(status_code=204)
+
+
+@app.post("/runner/result")
+async def runner_result(body: RunnerResult, who: tuple[str, str] = Depends(runner_auth)):
+    computers.result(who[1], body.id, body.ok, body.out)
+    return {"ok": True}
+
+
+@app.get("/runner/{name}")
+async def runner_file(name: str):
+    """The runner script and what it builds sandboxes from (public: nothing secret in them)."""
+    path = computers.FILES.get(name)
+    if not path or not path.exists():
+        raise HTTPException(404, "No such file.")
+    return FileResponse(path, media_type="text/plain")
 
 
 @app.get("/usage")

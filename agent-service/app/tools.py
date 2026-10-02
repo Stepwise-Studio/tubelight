@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, config, connectors, db, followups, llm, memory, repo, sandbox
+from . import automations, computers, config, connectors, db, followups, llm, memory, repo, sandbox
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -34,6 +34,7 @@ INTERNAL = {
     "web_search": "read", "read_page": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
+    "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -41,7 +42,8 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
+    "git_push": "Pushing commits", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
 
@@ -134,6 +136,10 @@ def title(name: str, args: dict[str, Any]) -> str:
     """Short human sentence for an approval card, e.g. 'Send email to jane@acme.com'."""
     if name == "git_push":
         return f"Push commits to branch {args.get('branch', '?')}"
+    if name == "computer_run":
+        return f"Run on your computer: {args.get('cmd', '?')}"[:140]
+    if name == "computer_write":
+        return f"Write {args.get('path', '?')} on your computer"[:140]
     _, action = _phrase(name)
     s = (action or name).capitalize()
     to = args.get("recipient_email") or args.get("to") or args.get("recipient")
@@ -417,7 +423,38 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "they connect, continue the task."),
         ]
 
-    if ctx.docker and builder(tm):
+    c = ctx.computer
+    if c and c["cowork"] and c["folders"] and not helper:
+        cid = c["id"]
+
+        async def computer_list(path: str = "") -> str:
+            return await computers.call(cid, "fs_list", {"path": path})
+
+        async def computer_read(path: str) -> str:
+            return await computers.call(cid, "fs_read", {"path": path})
+
+        async def computer_write(path: str, content: str) -> str:
+            return await computers.call(cid, "fs_write", {"path": path, "content": content})
+
+        async def computer_run(cmd: str, cwd: str = "", timeout_s: int = 120) -> str:
+            t = max(1, min(timeout_s, 600))
+            return await computers.call(cid, "shell", {"cmd": cmd, "cwd": cwd, "timeout": t}, t + 30)
+
+        where = f"the user's computer '{c['name']}'"
+        tools += [
+            StructuredTool.from_function(coroutine=computer_list, name="computer_list",
+                description=f"List a folder on {where} (only its shared folders; no path = the shared folders)."),
+            StructuredTool.from_function(coroutine=computer_read, name="computer_read",
+                description=f"Read a text file on {where}, inside its shared folders."),
+            StructuredTool.from_function(coroutine=computer_write, name="computer_write",
+                description=f"Create or overwrite a file on {where}, inside its shared folders. The user approves it first."),
+            *([StructuredTool.from_function(coroutine=computer_run, name="computer_run",
+                description=f"Run a bash command on {where} with cwd in a shared folder (default: the first). The rest "
+                            "of the disk is read-only and the home folder hidden; it has the web. The user approves "
+                            "each command first, so do several steps in one command.")] if c["shell"] else []),
+        ]
+
+    if (ctx.docker or ctx.box_on_computer) and builder(tm):
         box = lambda: ctx.sandbox(tm)  # noqa: E731
 
         async def run_shell(cmd: str, timeout_s: int = 120) -> str:
@@ -438,6 +475,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools += [
             StructuredTool.from_function(coroutine=run_shell, name="run_shell",
                 description="Run a bash command in your sandbox: a throwaway Linux box (Node 22, Python 3, git) "
+                            f"{'on the user' + chr(39) + 's computer ' if ctx.box_on_computer else ''}"
                             "with the project's repo in /workspace (cwd). It can reach the web (npm, pip) but not the "
                             "user's home network. Output is truncated to ~8k chars. git push is not allowed here."),
             StructuredTool.from_function(coroutine=read_file, name="read_file", description="Read a file under /workspace."),

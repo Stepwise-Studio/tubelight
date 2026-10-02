@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import automations, brief, db, followups, graph, learn, llm, memory, sandbox
+from . import automations, brief, computers, db, followups, graph, learn, llm, memory, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -39,6 +39,7 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         timezone=await db.user_timezone(owner_id) or "UTC",
         brief=await brief.get(thread_id),
         docker=docker_ok,
+        computer=await computers.for_run(owner_id),
     )
 
 

@@ -96,3 +96,4 @@ def test_drawings_read_as_their_title_in_notifications():
     assert genui.plain(text) == "Here is your week.\n📊 Focus hours\nNice."
     assert genui.plain("```openui\nroot = Card(null, [c])") == "📊 Chart"  # still streaming, no title
     assert "BarChart(" in genui.PROMPT
+

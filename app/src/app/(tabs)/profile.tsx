@@ -7,7 +7,7 @@ import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
-  Brain02Icon, Copy01Icon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
+  Brain02Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -69,6 +69,7 @@ export default function ProfileScreen() {
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
         <AppsSection />
         <AutomationsSection />
+        <ComputersSection />
         <UsageSection />
         <MemorySection />
         <Appearance />
@@ -275,6 +276,22 @@ function AutomationsSection() {
     <FormSection title="Automations" hint="What your teammates do on their own, on a schedule or when something happens in an app.">
       <Surface style={{ overflow: 'hidden' }}>
         <ListRow title="Open automations" subtitle={summary} icon={RepeatIcon} chevron onPress={() => router.push('/automations')} />
+      </Surface>
+    </FormSection>
+  )
+}
+
+/** Your computers, in one row: which are online and what they share. */
+function ComputersSection() {
+  const [items, setItems] = useState<{ name: string; online: boolean; folders: string[] }[] | null>(null)
+  useFocusEffect(useCallback(() => { api<{ computers: { name: string; online: boolean; folders: string[] }[] }>('/computers').then((d) => setItems(d.computers), () => setItems([])) }, []))
+  const on = (items ?? []).filter((m) => m.online)
+  const summary = items === null ? 'Loading…' : items.length === 0 ? 'Let teammates work on your laptop: run code, edit files you share'
+    : on.length ? `${on.map((m) => m.name).join(', ')} online · ${on.reduce((n, m) => n + m.folders.length, 0)} shared folders` : `${items.length} linked, none online`
+  return (
+    <FormSection title="Computers" hint="Your own machines as a place teammates can work, with your approval.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow title="Open computers" subtitle={summary} subtitleLines={2} icon={LaptopIcon} chevron onPress={() => router.push('/computers')} />
       </Surface>
     </FormSection>
   )
