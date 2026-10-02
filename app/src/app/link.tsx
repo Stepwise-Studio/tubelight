@@ -48,10 +48,10 @@ export default function LinkScreen() {
     <>
       <Text variant="headline" align="center">Couldn’t link it</Text>
       <Text variant="body" color="ink2" align="center">{error}</Text>
-      <Button label="Scan again" onPress={() => router.replace('/scan')} />
+      <Button label="Scan again" onPress={() => router.replace('/scan')} fullWidth />
     </>
   ) : !req ? (
-    <><Skeleton width="60%" height={22} /><Skeleton width="80%" /></>
+    <View style={{ alignItems: 'center', gap: 10 }}><Skeleton width="60%" height={22} /><Skeleton width="80%" /></View>
   ) : req.state === 'taken' ? (
     <>
       <Text variant="headline" align="center">Already being linked</Text>
@@ -70,11 +70,11 @@ export default function LinkScreen() {
     <>
       <Text variant="headline" align="center">Now confirm on {name}</Text>
       <Text variant="body" color="ink2" align="center">Tubelight on the computer is asking whether to link to your account. Choose Link there.</Text>
-      <ThinkingIndicator state="waiting" label="Waiting for the computer" />
+      <View style={{ alignSelf: 'center' }}><ThinkingIndicator state="waiting" label="Waiting for the computer" /></View>
     </>
   ) : (
     <>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><SuccessCheck size={22} /><Text variant="headline">{name} is linked</Text></View>
+      <View style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8 }}><SuccessCheck size={22} /><Text variant="headline">{name} is linked</Text></View>
       <Text variant="body" color="ink2" align="center">Share a folder in Tubelight on the computer (the + next to Shared folders), then ask a teammate to work in it.</Text>
       <Button label="Done" onPress={() => router.replace('/computers')} fullWidth />
     </>
@@ -83,8 +83,9 @@ export default function LinkScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       <ScreenHeader title="Link a computer" />
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: insets.bottom + 48, gap: 14 }}>
-        <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+      {/* Stretch, not center: a full-width button in a centred column measures its label at zero width on Android. */}
+      <View style={{ flex: 1, justifyContent: 'center', padding: 24, paddingBottom: insets.bottom + 48, gap: 14 }}>
+        <View style={{ alignSelf: 'center', width: 64, height: 64, borderRadius: 20, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
           <Icon icon={LaptopIcon} size={30} color="ink2" />
         </View>
         {body}

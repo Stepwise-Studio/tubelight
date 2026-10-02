@@ -304,7 +304,7 @@ def run() -> None:
     if docker:
         threading.Thread(target=lambda: _quiet(setup, load()), daemon=True).start()
     print(f"Tubelight runner {VERSION}. Sandboxes: {'yes' if docker else 'no (Docker not available)'}. Ctrl+C stops all access.", flush=True)
-    wait = 2
+    wait, first = 2, True
     while True:
         c = load()  # linking, sharing and pausing (from the window or the CLI) apply without a restart
         if not c.get("token") or c.get("paused"):
@@ -312,9 +312,10 @@ def run() -> None:
             time.sleep(3)
             continue
         info = {"folders": [str(f) for f in folders(c)], "docker": docker, "shell": bool(shutil.which("bwrap")),
-                "version": VERSION, "os": f"{platform.system()} {platform.release()}"}
+                "version": VERSION, "os": f"{platform.system()} {platform.release()}", **({"wait": 0} if first else {})}
         try:
             status, job = api(c, "/runner/poll", info, timeout=60)
+            first = False
             if status == 401:
                 print("This computer was removed in the app; unlinking.", flush=True)
                 save({k: v for k, v in load().items() if k not in ("token", "id")})

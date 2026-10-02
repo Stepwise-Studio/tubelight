@@ -234,8 +234,11 @@ async def poll(cid: str, info: dict[str, Any]) -> dict[str, Any] | None:
     _seen[cid] = {"at": time.time(), "folders": [str(f) for f in info.get("folders") or []][:20],
                   "docker": bool(info.get("docker")), "shell": bool(info.get("shell")),
                   "version": str(info.get("version") or "")[:20], "os": str(info.get("os") or "")[:40]}
+    wait = max(0.0, min(float(info.get("wait", POLL_S)), POLL_S))  # 0 on the runner's first poll: online at once
     try:
-        return await asyncio.wait_for(_q(cid).get(), POLL_S)
+        return await asyncio.wait_for(_q(cid).get(), wait) if wait else _q(cid).get_nowait()
+    except asyncio.QueueEmpty:
+        return None
     except TimeoutError:
         return None
 
