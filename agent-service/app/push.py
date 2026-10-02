@@ -28,7 +28,7 @@ from urllib.parse import quote
 
 import httpx
 
-from . import config, db, memory
+from . import config, db, genui, memory
 
 log = logging.getLogger(__name__)
 EXPO_PUSH = "https://exp.host/--/api/v2/push/send"
@@ -238,6 +238,7 @@ async def notify(owner_id: str, title: str, body: str, thread_id: str, *, kind: 
         p = {"mode": "all", "sound": "chime", "chats": {}}
     if not wanted(p, thread_id, kind):
         return
+    body = genui.plain(body)
     if teammate and not _face_file(*_face_key(teammate)).exists():  # fetch it now, so it's there when the phone asks
         t = asyncio.create_task(face_png(*_face_key(teammate)))
         _tasks.add(t)

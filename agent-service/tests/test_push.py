@@ -88,3 +88,11 @@ async def test_faces_are_served_from_the_service(api, env, monkeypatch):
     monkeypatch.setattr(push, "face_png", png)
     r = await api.get("/faces/Kai.png", params={"c": "F59E0B;rm -rf"})
     assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content == b"\x89PNGKaiF59E0B"
+
+
+def test_drawings_read_as_their_title_in_notifications():
+    from app import genui
+    text = 'Here is your week.\n```openui\nroot = Card("Focus hours", null, [c])\nc = BarChart(["Mon"], [Series("F", [3])])\n```\nNice.'
+    assert genui.plain(text) == "Here is your week.\n📊 Focus hours\nNice."
+    assert genui.plain("```openui\nroot = Card(null, [c])") == "📊 Chart"  # still streaming, no title
+    assert "BarChart(" in genui.PROMPT

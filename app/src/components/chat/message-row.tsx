@@ -8,6 +8,7 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
+import { GenUI, drawing } from '@/components/genui/genui'
 import { openAutomation, openAutomationOfRun } from '@/lib/automations'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { appToken, mentionParts } from '@/lib/mentions'
@@ -56,6 +57,8 @@ export interface ChatActions {
   handles: Set<string>
   /** Group chat (a project): name each teammate's replies. A DM needs no sender line. */
   group: boolean
+  /** Sends a message as the user (a tapped choice in a drawing). */
+  onSend: (text: string) => void
 }
 export const ChatActionsContext = createContext<ChatActions | null>(null)
 const useActions = () => useContext(ChatActionsContext)!
@@ -202,7 +205,7 @@ function Inset({ children }: { children: React.ReactNode }) {
 function Reply({ text, first, last, highlighted, head, tail }: {
   text: string; first: boolean; last: boolean; highlighted?: boolean; head?: React.ReactNode; tail?: React.ReactNode
 }) {
-  const { handles } = useActions()
+  const { handles, onSend } = useActions()
   const parts = splitWide(stripCues(text))
   if (!parts.some((p) => p.wide)) {
     return (
@@ -215,7 +218,7 @@ function Reply({ text, first, last, highlighted, head, tail }: {
   }
   if (head && parts[0].wide) parts.unshift({ wide: false, text: '' })
   return [...parts.map((p, i) => p.wide ? (
-    <View key={i} style={{ alignSelf: 'stretch', marginVertical: 2 }}><Markdown value={p.text} /></View>
+    <View key={i} style={{ alignSelf: 'stretch', marginVertical: 2 }}>{wide(p.text, onSend)}</View>
   ) : (
     <Inset key={i}>
       <Bubble side="left" first={first && i === 0} last={last && i === parts.length - 1} highlighted={highlighted}>
@@ -224,6 +227,12 @@ function Reply({ text, first, last, highlighted, head, tail }: {
       </Bubble>
     </Inset>
   )), tail && <Inset key="tail">{tail}</Inset>]
+}
+
+/** A wide block: a teammate's drawing (```openui) or code/table markdown. */
+function wide(text: string, onSend: (text: string) => void) {
+  const d = drawing(text)
+  return d ? <GenUI source={d.source} streaming={d.open} onChoose={onSend} /> : <Markdown value={text} />
 }
 
 function Bubble({ side, first, last, tone = 'panel', highlighted, style, children }: {

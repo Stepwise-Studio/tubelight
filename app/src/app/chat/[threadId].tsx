@@ -135,6 +135,7 @@ export default function Thread() {
     onReact: (m, emoji) => latest.current.t.react(m, emoji),
     handles: new Set([...handleKey.split(','), ...(isDm ? [] : ['all', 'everyone'])]),
     group: !isDm,
+    onSend: async (text) => { const err = await latest.current.t.send(text, []); if (err) toast({ title: 'Message not sent', body: err, tone: 'error' }) },
   }
   const byId = new Map(t.messages.map((m) => [m.id, m]))
 

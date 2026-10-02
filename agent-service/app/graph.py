@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, config, connectors, db, floor, followups, llm, memory, push, reactions, repo, tools as T
+from . import automations, config, connectors, db, floor, followups, genui, llm, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -241,6 +241,7 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                  "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
                  "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
+    lines.append(genui.PROMPT)
     if "run_shell" in tool_names:
         lines.append("You have a code sandbox (run_shell, read_file, write_file) with the project's repo in /workspace. "
                      "Writing a command in your reply does not run it: to check, count, test or build anything, call "

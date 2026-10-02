@@ -64,6 +64,8 @@ export const stripCues = (s: string) => s.replace(/\s?\[[a-z]+(?: [a-z]+)?\](?!\
  * become "a · b", links keep their words, markdown marks go.
  */
 export const plainText = (s: string) => stripCues(s)
+  // A teammate's drawing (components/genui) reads as its title.
+  .replace(/```openui(?:-lang)?\s[\s\S]*?(```|$)/g, (b) => ` 📊 ${/Card\(\s*"((?:[^"\\]|\\.)*)"/.exec(b)?.[1] || 'Chart'} `)
   .replace(/```[\s\S]*?(```|$)/g, ' (code) ')
   .replace(/^[ \t]*\|?[ \t]*:?-{3,}.*$/gm, '')
   .replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_, row: string) => `${row.split('|').map((c) => c.trim()).filter(Boolean).join(' · ')};`)
