@@ -24,12 +24,48 @@ READ = {"GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "QUERY", "RETRIEVE", "
 BUILDER = re.compile(r"develop|engineer|program|coder|\bqa\b|test|devops|\bsre\b|data|analyst|scien", re.I)
 
 
+def conversation_stats(rows: list[dict[str, Any]], user_name: str, members: list[dict], zone: Any) -> str:
+    """Counts over a chat's messages (oldest first): per sender, who answered whom (the next message by someone
+    else), who @mentioned whom, and per day."""
+    if not rows:
+        return "No messages in this chat yet."
+    names = {m["id"]: m["name"] for m in members}
+    handles = {m["handle"].lower(): m["name"] for m in members}
+    who = lambda r: user_name if r["sender_type"] == "user" else names.get(r["teammate_id"], "Former teammate")  # noqa: E731
+    per: dict[str, int] = {}
+    answered: dict[tuple[str, str], int] = {}
+    mentioned: dict[tuple[str, str], int] = {}
+    days: dict[str, int] = {}
+    prev = None
+    for r in rows:
+        w = who(r)
+        per[w] = per.get(w, 0) + 1
+        if prev and prev != w:
+            answered[(prev, w)] = answered.get((prev, w), 0) + 1
+        for h in re.findall(r"@([\w-]+)", r["text"] or ""):
+            if h.lower() in handles and handles[h.lower()] != w:
+                k = (w, handles[h.lower()])
+                mentioned[k] = mentioned.get(k, 0) + 1
+        d = f"{datetime.fromisoformat(r['created_at']).astimezone(zone):%b %d}"
+        days[d] = days.get(d, 0) + 1
+        prev = w
+    top = lambda d, n: sorted(d.items(), key=lambda kv: -kv[1])[:n]  # noqa: E731
+    first = datetime.fromisoformat(rows[0]["created_at"]).astimezone(zone)
+    return "\n".join([
+        f"{len(rows)} messages since {first:%b %d}.",
+        "Messages per person: " + ", ".join(f"{k} {v}" for k, v in top(per, 12)),
+        "Who answered whom (A -> B: B spoke right after A): " + ", ".join(f"{a} -> {b} {v}" for (a, b), v in top(answered, 15)),
+        "Who @mentioned whom: " + (", ".join(f"{a} -> {b} {v}" for (a, b), v in top(mentioned, 12)) or "none"),
+        "Messages per day (last 14 days with messages): " + ", ".join(f"{k} {v}" for k, v in list(days.items())[-14:]),
+    ])
+
+
 def builder(tm: dict) -> bool:
     return bool(BUILDER.search(tm.get("role") or ""))
 
 
 INTERNAL = {
-    "remember": "read", "recall": "read", "search_chat": "read", "follow_up": "read", "spawn_helper": "read",
+    "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
@@ -213,6 +249,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                          f"{ctx.user_name if r['sender_type'] == 'user' else names.get(r['teammate_id'], 'Teammate')}: "
                          f"{r['text'][:700]}" for r in sorted(best, key=lambda r: r["created_at"]))
 
+    async def chat_stats(days: int = 0) -> str:
+        params = {"thread_id": f"eq.{ctx.thread_id}", "kind": "in.(text,handoff)", "order": "created_at.desc",
+                  "limit": "2000", "select": "created_at,sender_type,teammate_id,text"}
+        if days > 0:
+            params["created_at"] = f"gte.{(datetime.now(UTC) - timedelta(days=days)).isoformat()}"
+        rows = list(reversed(await db.select("messages", params)))
+        return conversation_stats(rows, ctx.user_name, ctx.members, zone)
+
     def _when(s: str | None) -> datetime | None:
         # Their wall-clock time: an offset the model tacks on ("Z") is dropped, not honoured.
         d = datetime.fromisoformat(s.strip().rstrip("Z")) if s else None
@@ -382,6 +426,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             coroutine=app_events, name="app_events",
             description="The events an app can push to you (for automate's app_event), with their settings. app: "
                         "the app's name, e.g. 'Gmail' or 'Linear'."),
+        StructuredTool.from_function(
+            coroutine=chat_stats, name="chat_stats",
+            description="Real numbers about this chat: messages per person, who answered whom, who @mentioned whom, "
+                        "messages per day. days: only the last N days (0 = all). Use it to chart the conversation."),
         StructuredTool.from_function(
             coroutine=search_chat, name="search_chat",
             description="Search this chat's full history for earlier messages (exact wording, what was said this "

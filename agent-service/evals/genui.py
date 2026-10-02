@@ -30,6 +30,9 @@ CASES = [
      {"Donut", "BarChart"}, {15000, 6200, 2400, 1800}),
     ("stages of a plan", "Launch plan: design is done, build is in progress, QA is next, launch on Oct 20. Show the stages",
      {"Timeline"}, set()),
+    ("who talks to whom", "chat_stats gave: Messages per person: Akhil 40, Dev 22, Ivy 15. Who answered whom: Akhil -> Dev 14, "
+     "Dev -> Akhil 11, Akhil -> Ivy 9, Ivy -> Dev 4, Dev -> Ivy 3. Visualise our exchanges, me to agents and agent to agent",
+     {"Flows"}, {14, 11, 9, 4, 3}),
     ("small talk", "hey, how's your day going?", None, set()),
     ("plain question", "What's a good way to say no to a meeting politely?", None, set()),
     ("chart with no data", "Show me a chart of my sleep last week", None, set()),

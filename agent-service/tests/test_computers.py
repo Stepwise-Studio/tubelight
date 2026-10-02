@@ -34,3 +34,15 @@ def test_computer_actions_need_approval_with_plain_titles():
     assert T.classify("computer_run") == "act" and T.classify("computer_write") == "act"
     assert T.classify("computer_read") == "read"
     assert T.title("computer_run", {"cmd": "npm test"}) == "Run on your computer: npm test"
+
+
+def test_conversation_stats_counts_real_exchanges():
+    from zoneinfo import ZoneInfo
+    members = [{"id": "d", "name": "Dev", "handle": "dev"}, {"id": "i", "name": "Ivy", "handle": "ivy"}]
+    rows = [{"created_at": f"2026-10-02T10:0{n}:00+00:00", "sender_type": s, "teammate_id": t, "text": x}
+            for n, (s, t, x) in enumerate([("user", None, "@dev can you check?"), ("teammate", "d", "on it, @ivy?"),
+                                            ("teammate", "i", "yes"), ("user", None, "thanks")])]
+    out = T.conversation_stats(rows, "Akhil", members, ZoneInfo("UTC"))
+    assert "Akhil 2, Dev 1, Ivy 1" in out
+    assert "Akhil -> Dev 1" in out and "Dev -> Ivy 1" in out and "Ivy -> Akhil 1" in out
+    assert "Who @mentioned whom: Akhil -> Dev 1, Dev -> Ivy 1" in out

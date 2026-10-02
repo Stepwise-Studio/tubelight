@@ -33,6 +33,11 @@ export const Step = spec('Step', 'A stage in a Timeline.', z.object({
   when: z.string().optional(),
   status: z.enum(['done', 'current', 'todo', 'blocked']).optional(),
 }))
+export const Link = spec('Link', 'One flow between two parties in Flows.', z.object({
+  from: z.string(),
+  to: z.string(),
+  value: z.number(),
+}))
 export const Item = spec('Item', 'A row in a List.', z.object({
   title: z.string(),
   subtitle: z.string().optional(),
@@ -42,7 +47,7 @@ export const Item = spec('Item', 'A row in a List.', z.object({
 
 const blocks = () => z.array(z.union([
   Heading.ref, Para.ref, Stats.ref, BarChart.ref, LineChart.ref, Donut.ref, Table.ref, Schedule.ref, Timeline.ref,
-  List.ref, Progress.ref, Callout.ref, Choices.ref, LinkButton.ref,
+  List.ref, Progress.ref, Callout.ref, Choices.ref, LinkButton.ref, Flows.ref,
 ]))
 
 export const Heading = spec('Heading', 'A short section title.', z.object({ text: z.string() }))
@@ -73,6 +78,10 @@ export const Schedule = spec('Schedule', 'A day (or days) of time blocks, in ord
   events: z.array(Event.ref),
 }))
 export const Timeline = spec('Timeline', 'Ordered stages of a plan, project or process.', z.object({ steps: z.array(Step.ref) }))
+export const Flows = spec('Flows', 'Who sends what to whom: messages between people, money between accounts, handoffs (up to 10 links).', z.object({
+  links: z.array(Link.ref),
+  unit: z.string().optional(),
+}))
 export const List = spec('List', 'Things with a short detail each (tasks, people, results).', z.object({ items: z.array(Item.ref) }))
 export const Progress = spec('Progress', 'How far along something is.', z.object({
   label: z.string(),
@@ -92,5 +101,5 @@ export const Card = spec('Card', 'The root: a titled panel holding the blocks, t
 
 export const SPECS = [
   Card, Heading, Para, Stats, Stat, BarChart, LineChart, Series, Donut, Slice, Table, Schedule, Event, Timeline, Step,
-  List, Item, Progress, Callout, Choices, LinkButton,
+  Flows, Link, List, Item, Progress, Callout, Choices, LinkButton,
 ]

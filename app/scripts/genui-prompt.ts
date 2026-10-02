@@ -16,7 +16,8 @@ const text = library.prompt({
   additionalRules: [
     'One Card per reply. Keep it phone-sized: short labels, at most 12 bars, 7 slices, 8 table rows.',
     'Keep a one-line takeaway in plain text before the block.',
-    'Card children are only the block components listed in its signature; Stat, Series, Slice, Event, Step and Item go inside their parent (Stats, charts, Donut, Schedule, Timeline, List).',
+    'Card children are only the block components listed in its signature; Stat, Series, Slice, Event, Step, Link and Item go inside their parent (Stats, charts, Donut, Schedule, Timeline, Flows, List).',
+    'Prefer a chart, Flows or Stats over a Table; a Table is for short exact values (no sentences in cells, at most 4 columns).',
     'Choices only suggest next replies; when you need an answer before you can act, call ask_user instead.',
     'Most replies have no drawing at all. A Card that only holds text (Heading, Para, Callout) is never worth drawing: write the text. When in doubt, plain text.',
   ],

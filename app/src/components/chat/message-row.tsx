@@ -220,12 +220,13 @@ function Reply({ text, first, last, highlighted, head, tail }: {
   return [...parts.map((p, i) => p.wide ? (
     <View key={i} style={{ alignSelf: 'stretch', marginVertical: 2 }}>{wide(p.text, onSend)}</View>
   ) : (
-    <Inset key={i}>
-      <Bubble side="left" first={first && i === 0} last={last && i === parts.length - 1} highlighted={highlighted}>
+    // Prose around a full-width block spans the same width, so their edges line up.
+    <View key={i} style={{ alignSelf: 'stretch', marginVertical: 2 }}>
+      <Bubble side="left" first={first && i === 0} last={last && i === parts.length - 1} highlighted={highlighted} style={{ alignSelf: 'stretch' }}>
         {i === 0 && head}
         {!!p.text && <Markdown value={p.text} mentions={handles} />}
       </Bubble>
-    </Inset>
+    </View>
   )), tail && <Inset key="tail">{tail}</Inset>]
 }
 

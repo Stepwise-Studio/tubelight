@@ -272,13 +272,15 @@ function Table({ p }: { p: Props }) {
   const { c } = useTheme()
   const cols = arr(p.columns, (x): x is string => typeof x === 'string')
   const rows = arr(p.rows, (x): x is unknown[] => Array.isArray(x))
-  const cw = cols.length <= 3 ? undefined : 112
+  // Up to 3 columns share the width; more scroll sideways, each as wide as its longest cell (within reason).
+  const longest = cols.map((h, j) => Math.max(h.length, ...rows.map((r) => str(r[j]).length)))
+  const widths = cols.length <= 3 ? null : longest.map((n) => Math.min(200, Math.max(72, n * 7.5 + 16)))
   const numeric = cols.map((_, j) => rows.length > 0 && rows.every((r) => typeof r[j] === 'number'))  // right-aligned, header too
   const row = (cells: unknown[], head: boolean, i: number) => (
     <View key={i} style={{ flexDirection: 'row', borderTopWidth: head || i === 0 ? 0 : 1, borderColor: c.line, paddingVertical: 8 }}>
       {cols.map((_, j) => (
         <Text key={j} variant={head ? 'label' : 'caption'} color={head ? 'ink3' : j === 0 ? 'ink' : 'ink2'} tabular
-          numberOfLines={3} style={{ width: cw, flex: cw ? undefined : 1, paddingRight: 10, textAlign: j > 0 && numeric[j] ? 'right' : 'left' }}>
+          style={{ width: widths?.[j], flex: widths ? undefined : 1, paddingRight: 10, textAlign: j > 0 && numeric[j] ? 'right' : 'left' }}>
           {typeof cells[j] === 'number' ? fmt(cells[j] as number) : str(cells[j])}
         </Text>
       ))}
@@ -290,7 +292,7 @@ function Table({ p }: { p: Props }) {
       {rows.map((r, i) => row(r, false, i))}
     </View>
   )
-  return cw ? <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView> : body
+  return widths ? <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView> : body
 }
 
 function Schedule({ p }: { p: Props }) {
@@ -347,6 +349,32 @@ function Timeline({ p }: { p: Props }) {
           </View>
         )
       })}
+    </View>
+  )
+}
+
+function Flows({ p }: { p: Props }) {
+  const { c } = useTheme()
+  const links = els(p.links, 'Link').map((l) => ({ from: str(l.props.from), to: str(l.props.to), value: Math.max(0, num(l.props.value)) }))
+    .sort((a, b) => b.value - a.value).slice(0, 10)
+  const unit = str(p.unit) || undefined
+  const top = Math.max(1, ...links.map((l) => l.value))
+  const senders = [...new Set(links.map((l) => l.from))]
+  return (
+    <View style={{ gap: 10 }}>
+      {links.map((l, i) => (
+        <View key={i} style={{ gap: 5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+            <Text variant="bodyMedium" numberOfLines={1} style={{ flexShrink: 1 }}>{l.from}</Text>
+            <Text variant="caption" color="ink3">→</Text>
+            <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{l.to}</Text>
+            <Text variant="label" tabular color="ink2">{fmt(l.value, unit)}</Text>
+          </View>
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: c.panel2 }}>
+            <View style={{ width: `${(l.value / top) * 100}%`, height: '100%', borderRadius: 3, backgroundColor: hue(c, senders.indexOf(l.from)) }} />
+          </View>
+        </View>
+      ))}
     </View>
   )
 }
@@ -440,7 +468,7 @@ function Card({ p }: { p: Props }) {
 }
 
 const BLOCKS: Record<string, (x: { p: Props }) => ReactNode> = {
-  Card, Stats, BarChart, LineChart, Donut, Table, Schedule, Timeline, List, Progress, Callout, Choices, LinkButton,
+  Card, Stats, BarChart, LineChart, Donut, Table, Schedule, Timeline, Flows, List, Progress, Callout, Choices, LinkButton,
   Heading: ({ p }) => <Text variant="headline">{str(p.text)}</Text>,
   Para: ({ p }) => <Markdown value={str(p.text)} />,
 }

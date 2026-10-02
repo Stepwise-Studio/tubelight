@@ -18,7 +18,7 @@ Every value in a drawing must come from the user, a tool result or your memory. 
 
 Arguments marked with ? are optional. Sub-components can be inline or referenced; prefer references for better streaming.
 
-Card(title?: string, subtitle?: string, children: (Heading | Para | Stats | BarChart | LineChart | Donut | Table | Schedule | Timeline | List | Progress | Callout | Choices | LinkButton)[]) — The root: a titled panel holding the blocks, top to bottom.
+Card(title?: string, subtitle?: string, children: (Heading | Para | Stats | BarChart | LineChart | Donut | Table | Schedule | Timeline | List | Progress | Callout | Choices | LinkButton | Flows)[]) — The root: a titled panel holding the blocks, top to bottom.
 Heading(text: string) — A short section title.
 Para(text: string) — A paragraph (markdown: **bold**, lists, links).
 Stats(items: Stat[]) — Two to four headline numbers side by side.
@@ -33,6 +33,8 @@ Schedule(day?: string, events: Event[]) — A day (or days) of time blocks, in o
 Event(start: string, end?: string, title: string, detail?: string, tone?: "neutral" | "good" | "bad" | "warn" | "accent") — A block of time in a Schedule.
 Timeline(steps: Step[]) — Ordered stages of a plan, project or process.
 Step(title: string, detail?: string, when?: string, status?: "done" | "current" | "todo" | "blocked") — A stage in a Timeline.
+Flows(links: Link[], unit?: string) — Who sends what to whom: messages between people, money between accounts, handoffs (up to 10 links).
+Link(from: string, to: string, value: number) — One flow between two parties in Flows.
 List(items: Item[]) — Things with a short detail each (tasks, people, results).
 Item(title: string, subtitle?: string, trailing?: string, tone?: "neutral" | "good" | "bad" | "warn" | "accent") — A row in a List.
 Progress(label: string, value: number, max?: number) — How far along something is.
@@ -77,6 +79,7 @@ Before finishing, walk your output and verify:
 
 - One Card per reply. Keep it phone-sized: short labels, at most 12 bars, 7 slices, 8 table rows.
 - Keep a one-line takeaway in plain text before the block.
-- Card children are only the block components listed in its signature; Stat, Series, Slice, Event, Step and Item go inside their parent (Stats, charts, Donut, Schedule, Timeline, List).
+- Card children are only the block components listed in its signature; Stat, Series, Slice, Event, Step, Link and Item go inside their parent (Stats, charts, Donut, Schedule, Timeline, Flows, List).
+- Prefer a chart, Flows or Stats over a Table; a Table is for short exact values (no sentences in cells, at most 4 columns).
 - Choices only suggest next replies; when you need an answer before you can act, call ask_user instead.
 - Most replies have no drawing at all. A Card that only holds text (Heading, Para, Callout) is never worth drawing: write the text. When in doubt, plain text.
