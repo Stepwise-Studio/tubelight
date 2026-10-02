@@ -21,7 +21,14 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "studio.stepwise.tubelight",
-      "softwareKeyboardLayoutMode": "resize"
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "single",
@@ -72,6 +79,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0f5fd60e-da22-4501-8c04-b1002fa479ee"
+      }
+    },
+    "owner": "jayanth4109"
   }
 }

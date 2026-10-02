@@ -457,8 +457,10 @@ def make_teammate(ctx: RunCtx, tm: dict):
                 "meta": {"stream_id": stream_id, "tool_calls": ctx.turn_tools.pop(tm["id"], []),
                          **({"event_type": ctx.event_type} if ctx.event_type else {})},
             })
-            if ctx.proactive:
-                await push.notify(ctx.owner_id, tm["name"], text, ctx.thread_id)
+            # Every reply: while the app is open on screen Android doesn't show it (no foreground handler), so this
+            # only reaches the user when they've stepped away, like any chat app.
+            title = f"{tm['name']} in {ctx.project['name']}" if ctx.project else tm["name"]
+            await push.notify(ctx.owner_id, title, re.sub(r"[*_`#>|]+", "", text).strip(), ctx.thread_id)
             asked = [m["id"] for m in floor.tagged(text, ctx.members) if m["id"] != tm["id"]]
             if asked:
                 return {"messages": [*updates, ai], **_ask(state, asked)}
