@@ -24,6 +24,7 @@ DICTATE_MODEL = env("DICTATE_MODEL", "gemini-3.5-transcribe-live")
 COMPOSIO_API_KEY = env("COMPOSIO_API_KEY")
 GITHUB_TOKEN = env("GITHUB_TOKEN")  # optional, used only by the approved git_push tool
 APP_URL = env("APP_URL", "http://localhost:3000")
+PUBLIC_URL = env("PUBLIC_URL", "https://tubelight.stepwise.studio").rstrip("/")  # where phones reach this service
 CORS_ORIGINS = list({o.strip() for o in f"{env('CORS_ORIGINS', APP_URL)},http://localhost:8081".split(",") if o.strip()})
 SANDBOX_IMAGE = env("SANDBOX_IMAGE", "tubelight-sandbox")
 # On the home server (deploy/server-setup.sh): sandboxes live on an internal network and reach the web only through

@@ -67,14 +67,59 @@ def wanted(p: dict[str, Any], thread_id: str, kind: str) -> bool:
     return mode == "all" or (mode == "needed" and kind in NEEDS_YOU)
 
 
-def face(tm: dict[str, Any] | None) -> str | None:
-    """The teammate's face as a PNG URL (the app draws the same DiceBear Notionists face from the same seed)."""
-    if not tm:
-        return None
+def _face_key(tm: dict[str, Any]) -> tuple[str, str]:
+    """(seed, colour) of a teammate's face: the same DiceBear Notionists face the app draws."""
     shape = tm.get("avatar_shape") or ""
     seed = shape[5:] if shape.startswith("face:") else tm.get("name") or "Teammate"
-    color = (tm.get("color") or "#a1a1aa").lstrip("#")
-    return f"https://api.dicebear.com/9.x/notionists/png?seed={quote(seed)}&backgroundColor={color}&radius=50&size=192"
+    return seed, re.sub(r"[^0-9a-fA-F]", "", tm.get("color") or "a1a1aa")[:6] or "a1a1aa"
+
+
+def face(tm: dict[str, Any] | None) -> str | None:
+    """The teammate's face as a PNG URL on this service (/faces, a cached copy of DiceBear's PNG): DiceBear's CDN
+    often stalls from a phone, and the phone gives up on an image after 8 s."""
+    if not tm:
+        return None
+    seed, color = _face_key(tm)
+    return f"{config.PUBLIC_URL}/faces/{quote(seed, safe='')}.png?c={color}"
+
+
+def _face_file(seed: str, color: str):
+    from pathlib import Path
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", seed)[:60]
+    return Path(config.WORKSPACES).parent / "faces" / f"{safe}-{color}.png"
+
+
+async def face_png(seed: str, color: str) -> bytes:
+    """DiceBear's PNG for a face, fetched once per seed and colour and kept on disk (it outlives redeploys).
+    DiceBear can stall for many seconds, so it's tried a few times; prewarm_faces fetches them ahead of time."""
+    f = _face_file(seed, color)
+    if f.exists():
+        return f.read_bytes()
+    url = f"https://api.dicebear.com/9.x/notionists/png?seed={quote(seed)}&backgroundColor={color}&radius=50&size=128"
+    last: Exception | None = None
+    for _ in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=15)) as c:
+                r = await c.get(url)
+            r.raise_for_status()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(r.content)
+            return r.content
+        except httpx.HTTPError as e:
+            last = e
+    raise last or httpx.HTTPError("no face")
+
+
+async def prewarm_faces() -> None:
+    """Every teammate's face on disk before the first notification needs it (run at startup, best effort)."""
+    try:
+        for tm in await db.select("teammates", {"select": "name,avatar_shape,color"}):
+            try:
+                await face_png(*_face_key(tm))
+            except httpx.HTTPError:
+                pass
+    except Exception as e:
+        log.warning("face prewarm failed: %s", e)
 
 
 def plain(text: str) -> str:
@@ -193,6 +238,10 @@ async def notify(owner_id: str, title: str, body: str, thread_id: str, *, kind: 
         p = {"mode": "all", "sound": "chime", "chats": {}}
     if not wanted(p, thread_id, kind):
         return
+    if teammate and not _face_file(*_face_key(teammate)).exists():  # fetch it now, so it's there when the phone asks
+        t = asyncio.create_task(face_png(*_face_key(teammate)))
+        _tasks.add(t)
+        t.add_done_callback(lambda task: (_tasks.discard(task), task.exception()))
     if kind != "reply":
         data = {"thread_id": thread_id, **({"approval_id": approval_id} if approval_id else {})}
         await _send(owner_id, _message(p, title, plain(body), data, kind, approval_id or f"{thread_id}:{kind}", face(teammate)))

@@ -50,7 +50,7 @@ export function previewSound(id: SoundId) {
 }
 
 const MODES: { value: NotifyMode; label: string }[] = [
-  { value: 'all', label: 'Everything' }, { value: 'needed', label: 'Only when needed' }, { value: 'off', label: 'Nothing' },
+  { value: 'all', label: 'Everything' }, { value: 'needed', label: 'When needed' }, { value: 'off', label: 'Nothing' },
 ]
 const MODE_HINT: Record<NotifyMode, string> = {
   all: 'Replies (bundled when several land at once), approvals, questions and automations.',
@@ -72,7 +72,8 @@ export function NotifyChoices() {
         label="Sound"
         value={prefs.sound}
         onChange={(v) => { const sound = v as SoundId; previewSound(sound); change({ sound }) }}
-        intro="Pick one to hear it. Notifications from every chat use it."
+        stayOpen
+        intro="Tap one to hear it; the last one you tap is used. Notifications from every chat use it."
         options={SOUNDS.map((s) => ({
           value: s.id, title: s.name, subtitle: s.about,
           leading: <View style={{ width: 32, alignItems: 'center' }}><Icon icon={s.id === 'silent' ? VolumeOffIcon : VolumeHighIcon} size={20} color="ink2" /></View>,

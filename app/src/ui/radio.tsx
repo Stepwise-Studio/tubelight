@@ -74,9 +74,11 @@ export interface PickerOption {
 
 /** A field showing the current choice that opens a sheet of radio rows: pick one and the sheet closes. With many
  * options (8+) it gets a search box. `intro` is a line of context at the top of the sheet. */
-export function PickerField({ label, value, options, onChange, intro, placeholder = 'Choose', disabled }: {
+export function PickerField({ label, value, options, onChange, intro, placeholder = 'Choose', disabled, stayOpen }: {
   label: string; value: string | null; options: PickerOption[]; onChange: (v: string) => void
   intro?: string; placeholder?: string; disabled?: boolean
+  /** Keep the sheet open after a pick (e.g. sounds, where you try a few before settling). */
+  stayOpen?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -90,7 +92,7 @@ export function PickerField({ label, value, options, onChange, intro, placeholde
     if (g) g[1].push(o)
     else groups.push([o.group ?? '', [o]])
   }
-  const pick = (v: string) => { onChange(v); setOpen(false); setQ('') }
+  const pick = (v: string) => { onChange(v); if (!stayOpen) { setOpen(false); setQ('') } }
   return (
     <>
       <Surface style={{ overflow: 'hidden', opacity: disabled ? 0.5 : 1 }}>

@@ -24,7 +24,7 @@ async def test_replies_in_a_burst_go_out_as_one_and_needs_you_kinds_at_once(env,
     burst = sent[1]
     assert burst["title"] == "Tess and Dev · Launch" and burst["body"] == "Tess: Third (+2 more)"
     assert burst["tag"] == "proj:p" and burst["categoryId"] == "reply" and burst["channelId"] == "tl-chime"
-    assert "seed=Kai" in burst["richContent"]["image"] and "backgroundColor=F59E0B" in burst["richContent"]["image"]
+    assert burst["richContent"]["image"].endswith("/faces/Kai.png?c=F59E0B")
 
 
 async def test_only_when_it_needs_me_and_per_chat_settings(env, monkeypatch):
@@ -80,3 +80,11 @@ async def test_fcm_tokens_go_through_firebase_and_expo_tokens_are_the_fallback(e
     monkeypatch.setattr(push, "_service_account", lambda: {"project_id": "p"})
     await push._send(OWNER, {"title": "t", "body": "b", "data": {}, "channelId": "tl-chime", "tag": "x"})
     assert via == [("fcm", ["fcm-1"])] and [r["token"] for r in fdb.tables["push_tokens"]] == ["ExponentPushToken[x]"]
+
+
+async def test_faces_are_served_from_the_service(api, env, monkeypatch):
+    async def png(seed, color):
+        return b"\x89PNG" + seed.encode() + color.encode()
+    monkeypatch.setattr(push, "face_png", png)
+    r = await api.get("/faces/Kai.png", params={"c": "F59E0B;rm -rf"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content == b"\x89PNGKaiF59E0B"

@@ -18,7 +18,7 @@ from croniter import croniter
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import automations, config, connectors, db, events, files, followups, live, llm, memory, push, reactions, repo, runs, sandbox, usage
@@ -57,8 +57,10 @@ async def lifespan(_: FastAPI):
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
     scheduler = asyncio.create_task(events.schedule_loop())
     warm = asyncio.create_task(_warm_catalog())  # the first Connections visit shouldn't wait on Composio
+    faces = asyncio.create_task(push.prewarm_faces())  # notification faces ready before they're needed
     yield
     warm.cancel()
+    faces.cancel()
     scheduler.cancel()
     for t in list(runs.tasks.values()):
         t.cancel()
@@ -854,6 +856,17 @@ async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Dep
     if body.enabled is not None and body.enabled != rule["enabled"]:
         rule = await automations.set_enabled(rule, body.enabled, "You")
     return _automation_view(rule, None)
+
+
+@app.get("/faces/{seed}.png")
+async def face_image(seed: str, c: str = "a1a1aa"):
+    """A teammate's face for notifications (public: it's a cartoon from a seed, nothing private)."""
+    color = re.sub(r"[^0-9a-fA-F]", "", c)[:6] or "a1a1aa"
+    try:
+        png = await push.face_png(seed[:80], color)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, "Couldn't draw that face right now.") from e
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
 
 
 class NotifyPrefs(BaseModel):
