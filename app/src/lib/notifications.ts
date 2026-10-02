@@ -72,9 +72,15 @@ async function confirm(title: string, body: string) {
   }).catch(() => {})
 }
 
+const handled = new Set<string>()
+
 /** What a notification button does. Returns false for a plain tap (the caller opens the chat). */
 export async function handleAction(actionId: string, userText: string | undefined, data: PushData, notificationId?: string) {
   if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) return false
+  // With the app alive in the background, both the background task and the in-app listener get the same press.
+  const key = `${notificationId}:${actionId}:${userText ?? ''}`
+  if (handled.has(key)) return true
+  handled.add(key)
   if (notificationId) await Notifications.dismissNotificationAsync(notificationId).catch(() => {})
   try {
     if ((actionId === 'approve' || actionId === 'reject') && data.approval_id) {

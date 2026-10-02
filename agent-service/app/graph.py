@@ -228,6 +228,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     lines.append("Your tools: " + (", ".join(tool_names) or "none") + ". Use tools instead of guessing; never invent results: "
                  "numbers, versions, file contents or outputs you didn't get from a tool this turn are made up, so say "
                  "you can't check instead. "
+                 "The same goes for who to contact: a phone number, email address, username or chat ID must come from "
+                 "the user, a tool result or your memory, never from a guess; if you don't have it, ask for it or look it "
+                 "up first, and when you ask before sending, name the exact address or number. "
                  "Never say you did something (scheduled, sent, saved, created, set a reminder) unless one of your tool "
                  "calls did it in this turn; if you can't, say what you can do instead.")
     if T.MULTI in tool_names:
