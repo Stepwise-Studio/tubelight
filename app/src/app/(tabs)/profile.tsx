@@ -12,6 +12,7 @@ import {
 
 import { BrandTile } from '@/components/brand-mark'
 import { FormSection } from '@/components/form-bits'
+import { NotifyChoices } from '@/components/notify-prefs'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ApiError, api } from '@/lib/api'
@@ -213,6 +214,7 @@ function PushSection() {
           disabled={blocked || busy || on === null}
         />
         {problem && <Text variant="footnote" color={blocked ? 'ink3' : 'warning'} accessibilityLiveRegion="polite">{problem}</Text>}
+        {on && <View style={{ paddingTop: 8 }}><NotifyChoices /></View>}
       </Surface>
     </FormSection>
   )

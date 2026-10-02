@@ -5,6 +5,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 
 import { Composer } from '@/components/chat/composer'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
+import { ChatNotifyButton } from '@/components/notify-prefs'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
@@ -153,7 +154,12 @@ export default function Thread() {
 
   const header = (
     <ScreenHeader
-      right={<FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />}
+      right={
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <ChatNotifyButton threadId={threadId} title={title} />
+          <FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />
+        </View>
+      }
       middle={
         <Press
           radius={12}

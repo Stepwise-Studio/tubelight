@@ -233,7 +233,8 @@ async def after_failure(run_id: str) -> None:
     if len(runs) == FAILS_TO_PAUSE and all(r["status"] == "error" for r in runs):
         await set_enabled(rule, False, "Tubelight", why="failing")
         await push.notify(rule["owner_id"], f"{rule['name']} paused",
-                          f"It failed {FAILS_TO_PAUSE} times in a row. Open it to see why, then turn it back on.", thread_of(rule))
+                          f"It failed {FAILS_TO_PAUSE} times in a row. Open it to see why, then turn it back on.",
+                          thread_of(rule), kind="alert")
 
 
 async def delete(rule: dict[str, Any], by: str) -> None:

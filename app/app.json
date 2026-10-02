@@ -59,7 +59,14 @@
       [
         "expo-notifications",
         {
-          "color": "#9FE3F0"
+          "color": "#9FE3F0",
+          "sounds": [
+            "./assets/sounds/chime.wav",
+            "./assets/sounds/pop.wav",
+            "./assets/sounds/drop.wav",
+            "./assets/sounds/bell.wav",
+            "./assets/sounds/pulse.wav"
+          ]
         }
       ],
       [

@@ -460,7 +460,7 @@ def make_teammate(ctx: RunCtx, tm: dict):
             # Every reply: while the app is open on screen Android doesn't show it (no foreground handler), so this
             # only reaches the user when they've stepped away, like any chat app.
             title = f"{tm['name']} in {ctx.project['name']}" if ctx.project else tm["name"]
-            await push.notify(ctx.owner_id, title, re.sub(r"[*_`#>|]+", "", text).strip(), ctx.thread_id)
+            await push.notify(ctx.owner_id, title, text, ctx.thread_id, teammate=tm)
             asked = [m["id"] for m in floor.tagged(text, ctx.members) if m["id"] != tm["id"]]
             if asked:
                 return {"messages": [*updates, ai], **_ask(state, asked)}
@@ -542,7 +542,9 @@ def make_gate(ctx: RunCtx):
             label = {"question": "Waiting for your answer", "connect": "Waiting for you to connect"}.get(first["kind"], "Waiting for your approval")
             await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "waiting", label))
             heading = f"{tm['name']} needs your approval" if first["kind"] == "approval" else f"{tm['name']} asked you"
-            await push.notify(ctx.owner_id, heading, first["title"], ctx.thread_id)
+            more = f" (+{len(pending) - 1} more)" if len(pending) > 1 else ""
+            await push.notify(ctx.owner_id, heading, first["title"] + more, ctx.thread_id, kind=first["kind"], teammate=tm,
+                              approval_id=first.get("approval_id"))
         return {"pending": pending, "decisions": {}}
 
     return gate

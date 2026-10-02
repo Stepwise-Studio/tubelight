@@ -21,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import automations, config, connectors, db, events, files, followups, live, llm, memory, reactions, repo, runs, sandbox, usage
+from . import automations, config, connectors, db, events, files, followups, live, llm, memory, push, reactions, repo, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -854,6 +854,25 @@ async def patch_automation(rule_id: str, body: AutomationPatch, user: User = Dep
     if body.enabled is not None and body.enabled != rule["enabled"]:
         rule = await automations.set_enabled(rule, body.enabled, "You")
     return _automation_view(rule, None)
+
+
+class NotifyPrefs(BaseModel):
+    mode: Literal["all", "needed", "off"] | None = None
+    sound: str | None = None
+    chats: dict[str, Literal["all", "needed", "off"] | None] | None = None  # a chat's own setting; null = follow overall
+
+
+@app.get("/notifications/prefs")
+async def get_notify_prefs(user: User = Depends(current_user)):
+    return {**await push.prefs(user["id"]), "sounds": list(push.SOUNDS)}
+
+
+@app.patch("/notifications/prefs")
+async def patch_notify_prefs(body: NotifyPrefs, user: User = Depends(current_user)):
+    if body.sound and body.sound not in push.SOUNDS:
+        raise HTTPException(400, "Unknown sound.")
+    return {**await push.set_prefs(user["id"], **body.model_dump(exclude_none=True) | (
+        {"chats": body.chats} if body.chats is not None else {})), "sounds": list(push.SOUNDS)}
 
 
 @app.get("/usage")
