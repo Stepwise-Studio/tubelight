@@ -36,7 +36,7 @@ export function ImageViewer({ url, name, onClose }: { url: string | null; name: 
           <IconButton icon={Cancel01Icon} variant="soft" round accessibilityLabel="Close" onPress={onClose} />
         </View>
         <View style={{ position: 'absolute', left: 20, right: 20, bottom: insets.bottom + 20 }}>
-          <Button label="Save to photos" icon={Download04Icon} loading={saving}
+          <Button label="Save to photos" icon={Download04Icon} loading={saving} fullWidth
             onPress={async () => { if (!url) return; setSaving(true); await saveImage(url, name); setSaving(false) }} />
         </View>
       </View>
