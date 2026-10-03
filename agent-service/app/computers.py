@@ -509,6 +509,11 @@ _SUB_OK = {  # commands that also change things: only these subcommands/forms ar
 
 
 def read_only(cmd: str) -> bool:
+    # A $( ... ) that only looks is fine (upower -i $(upower -e | grep BAT)): check what's inside, then the rest.
+    while (m := re.search(r"\$\(([^()]*)\)", cmd)):
+        if not read_only(m.group(1)):
+            return False
+        cmd = cmd[:m.start()] + "X" + cmd[m.end():]
     if "`" in cmd or "$(" in cmd or "<(" in cmd or ">(" in cmd:
         return False
     if re.search(r"(?<![0-9&])>>?(?!\s*/dev/null|&[12])|[0-9]>>?(?!\s*/dev/null|&[12])", cmd):
