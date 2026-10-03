@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated'
-import { Cancel01Icon, Clock01Icon, Edit02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { Edit02Icon } from '@hugeicons/core-free-icons'
 
+import { Capsule } from '@/components/chat/capsule'
 import { ApiError, api } from '@/lib/api'
 import { relativeTime } from '@/lib/format'
 import type { Approval, Teammate } from '@/lib/types'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import {
-  Beam, Button, Icon, Sheet, Squircle, SuccessCheck, TeammateAvatar, Text, TextField, haptic, toast,
+  Beam, Button, Sheet, Squircle, TeammateAvatar, Text, TextField, haptic, toast,
 } from '@/ui'
 
 type Shape = 'email' | 'post' | 'code' | 'other'
@@ -109,19 +110,35 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
   }
 
   if (current !== 'pending') {
+    // Decided: the same capsule as follow-ups in the chat; tapping it shows what exactly was approved.
     const text = current === 'approved' ? 'Approved' : current === 'rejected' ? 'Rejected' : 'Expired'
+    const shown = fields(approval, shape)
     return (
       <Animated.View entering={justDecided ? FadeIn.duration(motion.duration.fast) : undefined} layout={LinearTransition.duration(motion.duration.fast)}>
-        <Squircle style={{ borderRadius: radius.md, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {current === 'approved'
-            ? (justDecided ? <SuccessCheck size={20} /> : <Icon icon={Tick02Icon} size={18} color="success" strokeWidth={2} />)
-            : <Icon icon={current === 'rejected' ? Cancel01Icon : Clock01Icon} size={18} color="ink3" />}
-          <Text variant="caption" color="ink2" numberOfLines={2} style={{ flex: 1 }}>
-            <Text variant="label" color={current === 'approved' ? 'success' : 'ink2'}>{text}</Text>
-            {`  ${approval.title}`}
-          </Text>
-          {approval.decided_at && <Text variant="footnote" color="ink3" tabular>{relativeTime(approval.decided_at)}</Text>}
-        </Squircle>
+        <Capsule
+          text={`${text}: ${approval.title}`}
+          tone={current === 'approved' ? 'success' : current === 'rejected' ? 'danger' : 'neutral'}
+          detail={(
+            <View style={{ gap: 12 }}>
+              {shown.map((k) => (
+                <View key={k} style={{ gap: 3 }}>
+                  <Text variant="footnote" color="ink3">{label(k)}</Text>
+                  {k === 'cmd' || k === 'diff' ? (
+                    <Squircle style={{ borderRadius: radius.sm + 2, backgroundColor: c.panel2, padding: 10 }}>
+                      <Text style={[typeScale.mono, { color: c.ink }]} selectable>{show(approval.final_args?.[k] ?? approval.draft[k])}</Text>
+                    </Squircle>
+                  ) : (
+                    <Text variant="body" selectable>{show(approval.final_args?.[k] ?? approval.draft[k])}</Text>
+                  )}
+                </View>
+              ))}
+              {!!approval.note && <Text variant="caption" color="ink2">Note: {approval.note}</Text>}
+              <Text variant="footnote" color="ink3">
+                {[teammate && `Asked by ${teammate.name}`, approval.decided_at && `${text.toLowerCase()} ${relativeTime(approval.decided_at)}`].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+          )}
+        />
       </Animated.View>
     )
   }

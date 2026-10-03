@@ -1,6 +1,6 @@
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Text as RNText, ScrollView, TextInput, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Text as RNText, ScrollView, TextInput, View } from 'react-native'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -62,6 +62,12 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const [focused, setFocused] = useState(false)
 
   useEffect(() => { if (replyTo) input.current?.focus() }, [replyTo])
+  // Android keeps the field focused when the keyboard goes away (a tap on the chat, Back): let go, so the bar shrinks
+  // back and the cursor goes.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => input.current?.blur())
+    return () => sub.remove()
+  }, [])
 
   // Connected apps can be @mentioned too (DMs included): the teammate who answers gets that app for the request.
   const { connections } = useConnections()

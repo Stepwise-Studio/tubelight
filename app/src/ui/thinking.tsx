@@ -13,26 +13,25 @@ const defaultLabel: Record<LiveState, string> = {
 }
 
 /**
- * "Teammate is working", as libraries.dev shows it: the striped `composing` orb in a capsule, and beside it
- * a live status line with a shimmer ("Thinking…" → "Fetching emails in Gmail"), each new step fading in.
+ * "Teammate is working", as libraries.dev shows it: the striped `composing` orb and beside it a live status line with
+ * a shimmer ("Thinking…" → "Fetching emails in Gmail"), each new step fading in. Bare, no capsule: it sits in the
+ * chat like a line of text.
  */
 export function ThinkingIndicator({ state, label }: { state: LiveState; label?: string }) {
-  const { c, scheme } = useTheme()
+  const { scheme } = useTheme()
   const text = label || defaultLabel[state]
   return (
     <View
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start',
-        height: 52, maxWidth: '100%', paddingLeft: 6, paddingRight: 20, borderRadius: 26,
-        backgroundColor: c.panel, borderWidth: 1, borderColor: c.line,
-      }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 32, maxWidth: '100%' }}
       accessible
       accessibilityLiveRegion="polite"
       accessibilityLabel={text}
     >
-      <ThinkingOrb state="composing" size={64} displaySize={40} theme={scheme} accessibilityLabel="" />
+      <View style={{ marginLeft: -4 }}>
+        <ThinkingOrb state="composing" size={32} displaySize={28} theme={scheme} accessibilityLabel="" />
+      </View>
       <Animated.View key={text} entering={FadeIn.duration(motion.duration.fast)} style={{ flexShrink: 1 }}>
-        <ShimmerText text={text} />
+        <ShimmerText text={text} size={13} />
       </Animated.View>
     </View>
   )

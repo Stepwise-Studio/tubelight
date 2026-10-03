@@ -16,12 +16,13 @@ import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
-import { fonts, motion, useTheme } from '@/theme'
+import { motion, useTheme } from '@/theme'
 import {
   Collapse, Icon, ListRow, Markdown, Notice, Press, Sheet, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
   showEmojiPicker, showMenu, useFlip, warmEmojis,
 } from '@/ui'
 
+import { Capsule, type Tone } from './capsule'
 import { ConnectCard, QuestionCard } from './prompt-cards'
 import { SwipeToReply } from './swipe-reply'
 
@@ -127,7 +128,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     case 'event': {
       // An automation's capsule opens it (unless it was deleted).
       const rule = m.meta.automation && m.meta.automation !== 'deleted' ? String(m.meta.rule_id ?? '') : ''
-      return <SystemRow text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]}
+      return <Capsule text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]}
         onPress={rule ? () => openAutomation(rule) : undefined} />
     }
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
@@ -585,7 +586,6 @@ function HandoffMessage({ m, first, last, paused }: { m: ChatMessage; first: boo
  * A centred capsule for things that happen in the chat (like WhatsApp's "X changed the group name"): what happened in
  * medium weight, then the detail after the colon ("Calendy set a follow-up for 6 PM: review the copy").
  */
-type Tone = 'neutral' | 'tube' | 'warning' | 'success' | 'danger'
 /** A follow-up capsule's colour by stage: set (accent), firing now (amber), done (green), cancelled or dropped (red). */
 const FOLLOWUP_TONE: Record<string, Tone> = {
   created: 'tube', set: 'tube', noted: 'tube', fired: 'warning', time: 'warning', met: 'warning', deadline: 'warning',
@@ -593,26 +593,6 @@ const FOLLOWUP_TONE: Record<string, Tone> = {
 }
 /** Automation capsules: set up / changed / back on (accent), paused (amber), deleted (red). */
 const AUTOMATION_TONE: Record<string, Tone> = { created: 'tube', updated: 'tube', resumed: 'tube', paused: 'warning', deleted: 'danger' }
-
-function SystemRow({ text, tone = 'neutral', onPress }: { text: string; tone?: Tone; onPress?: () => void }) {
-  const { c } = useTheme()
-  const bg = tone === 'neutral' ? c.panel2 : c[`${tone}Soft`]
-  const ink = tone === 'neutral' ? c.ink2 : c[tone]
-  const cut = text.indexOf(': ')
-  const [head, rest] = cut > 0 ? [text.slice(0, cut), text.slice(cut + 2)] : [text, '']
-  return (
-    <View style={{ alignItems: 'center', paddingVertical: 8, paddingHorizontal: 32 }} accessible={!onPress} accessibilityLabel={text}>
-      <Press radius={14} static disabled={!onPress} onPress={onPress} accessibilityLabel={text} accessibilityHint={onPress ? 'Opens it' : undefined}>
-        <Squircle style={{ paddingVertical: 6, paddingHorizontal: 14, borderRadius: 14, backgroundColor: bg }}>
-          <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>
-            <Text variant="footnote" style={{ fontFamily: fonts.medium, color: ink }}>{head}</Text>
-            {rest ? `: ${rest}` : ''}
-          </Text>
-        </Squircle>
-      </Press>
-    </View>
-  )
-}
 
 function ErrorRow({ m, onRetry }: { m: ChatMessage; onRetry: () => void }) {
   const { group } = useActions()

@@ -6,7 +6,7 @@ import { Notification03Icon, NotificationOff02Icon, VolumeHighIcon, VolumeOffIco
 
 import { api } from '@/lib/api'
 import { SOUNDS, SOUND_FILES, type SoundId } from '@/lib/notifications'
-import { Icon, IconButton, PickerField, Segment, Text, haptic, showMenu, toast } from '@/ui'
+import { Icon, PickerField, Segment, Text, haptic, showMenu, toast } from '@/ui'
 
 export type NotifyMode = 'all' | 'needed' | 'off'
 interface Prefs { mode: NotifyMode; sound: SoundId; chats: Record<string, NotifyMode> }
@@ -86,26 +86,26 @@ export function NotifyChoices() {
   )
 }
 
-/** Chat header: this chat's own setting (or the overall one), from a bell. */
-export function ChatNotifyButton({ threadId, title }: { threadId: string; title: string }) {
+/** This chat's notification setting, from the inbox's long-press menu: a menu item that opens the choices. */
+export function useChatNotify(threadId: string, title: string) {
   const { prefs, change } = useNotifyPrefs()
-  if (!prefs) return null
-  const own = prefs.chats[threadId] ?? null
-  const effective = own ?? prefs.mode
+  const own = prefs?.chats[threadId] ?? null
   const label = (m: NotifyMode) => MODES.find((x) => x.value === m)!.label
-  return (
-    <IconButton
-      icon={effective === 'off' ? NotificationOff02Icon : Notification03Icon}
-      round
-      accessibilityLabel={`Notifications for this chat: ${label(effective)}`}
-      onPress={() => showMenu({
-        title: `Notifications for ${title}`,
-        message: own ? `This chat: ${label(own)}` : `Following your setting: ${label(prefs.mode)}`,
-        items: [
-          ...MODES.map((m) => ({ label: `${m.label}${own === m.value ? ' ✓' : ''}`, onPress: () => change({ chats: { [threadId]: m.value } }) })),
-          ...(own ? [{ label: `Use my setting (${label(prefs.mode)})`, onPress: () => change({ chats: { [threadId]: null } }) }] : []),
-        ],
-      })}
-    />
-  )
+  const effective = own ?? prefs?.mode ?? 'all'
+  const open = () => prefs && showMenu({
+    title: `Notifications for ${title}`,
+    message: own ? `This chat: ${label(own)}` : `Following your setting: ${label(prefs.mode)}`,
+    items: [
+      ...MODES.map((m) => ({ label: `${m.label}${own === m.value ? ' ✓' : ''}`, onPress: () => change({ chats: { [threadId]: m.value } }) })),
+      ...(own ? [{ label: `Use my setting (${label(prefs.mode)})`, onPress: () => change({ chats: { [threadId]: null } }) }] : []),
+    ],
+  })
+  return {
+    muted: effective === 'off',
+    item: {
+      label: `Notifications: ${label(effective)}`,
+      icon: effective === 'off' ? NotificationOff02Icon : Notification03Icon,
+      onPress: () => setTimeout(open, 320),  // after the first menu's close animation
+    },
+  }
 }

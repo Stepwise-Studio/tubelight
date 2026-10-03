@@ -250,6 +250,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                  "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
                  "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
+    if computers.device_of(tm):
+        lines.append("Report sizes the way their file manager does: decimal GB/MB (`df -h --si`, `du -sh --si`, "
+                     "`ls -lh --si`), and say so; plain `-h` prints GiB labelled 'G', which reads as wrong next to it.")
     if "computer_list" in tool_names:
         c = ctx.computer
         lines.append(f"You can work on {ctx.user_name}'s computer '{c['name']}' ({c['os']}), in the folders they shared: "

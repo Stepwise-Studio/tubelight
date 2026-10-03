@@ -2,10 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 
 import { Composer } from '@/components/chat/composer'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
-import { ChatNotifyButton } from '@/components/notify-prefs'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
@@ -15,15 +16,15 @@ import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { useWorkspace } from '@/lib/workspace'
-import { useTheme } from '@/theme'
-import { Button, EmptyState, Press, Skeleton, TeammateAvatar, Text, TextSwap, toast } from '@/ui'
+import { motion, useTheme } from '@/theme'
+import { Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, TextSwap, elevation, haptic, toast } from '@/ui'
 
 const GROUP_GAP_MS = 5 * 60_000
 
 export default function Thread() {
   const { threadId: raw } = useLocalSearchParams<{ threadId: string }>()
   const threadId = decodeURIComponent(raw ?? '')
-  const { c } = useTheme()
+  const { c, scheme } = useTheme()
   const ws = useWorkspace()
   const { session } = useSession()
   const t = useThread(threadId, session?.user.id)
@@ -111,7 +112,16 @@ export default function Thread() {
   // The composer floats over the chat (which scrolls under its fade): the list keeps its height clear.
   const [composerH, setComposerH] = useState(64)
 
+  // Scrolled up past the latest messages: a round ↓ button jumps back (with a dot when something new came in).
+  const [away, setAway] = useState(false)
+  const [fresh, setFresh] = useState(false)
+  const awayRef = useRef(false)
+  const toLatest = () => { list.current?.scrollToOffset({ offset: 0, animated: true }); setFresh(false) }
+  const newestKey = items[0]?.key
+  useEffect(() => { if (awayRef.current && newestKey) setFresh(true) }, [newestKey])
+
   const send = async (text: string, mentions: string[], opts: SendOptions = {}) => {
+    toLatest()  // what you just sent is at the bottom: go there, like any chat app
     const err = await t.send(text, mentions, { ...opts, reply_to: replyTo?.id ?? null })
     setReplyTo(null)
     if (err) toast({ title: 'Message not sent', body: err, tone: 'error' })
@@ -160,7 +170,6 @@ export default function Thread() {
     <ScreenHeader
       right={
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <ChatNotifyButton threadId={threadId} title={title} />
           <FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />
         </View>
       }
@@ -271,9 +280,24 @@ export default function Thread() {
             maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: 120 }}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={64}
+            onScroll={(e) => {
+              const a = e.nativeEvent.contentOffset.y > 320  // inverted: 0 is the latest message
+              if (a !== awayRef.current) { awayRef.current = a; setAway(a); if (!a) setFresh(false) }
+            }}
           />
         )}
         </View>
+        {away && (
+          <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.fast)}
+            style={{ position: 'absolute', right: 16, bottom: composerH + 10 }}>
+            <Press radius={20} onPress={() => { haptic.tap(); toLatest() }} accessibilityLabel={fresh ? 'New messages. Jump to the latest' : 'Jump to the latest'}
+              style={[{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }, elevation(scheme)]}>
+              <Icon icon={ArrowDown01Icon} size={20} color="ink" />
+              {fresh && <View style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: 5, backgroundColor: c.tube }} />}
+            </Press>
+          </Animated.View>
+        )}
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         <Composer
           placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team' : 'Message the project'}

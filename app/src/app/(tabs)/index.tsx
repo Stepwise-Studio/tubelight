@@ -4,11 +4,12 @@ import { BackHandler, FlatList, Pressable, RefreshControl, TextInput, View, useW
 import Animated, { FadeIn, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, BubbleChatIcon, Cancel01Icon, CheckListIcon, Search01Icon, Settings01Icon, UserAdd01Icon, UserGroupIcon,
+  Add01Icon, BubbleChatIcon, Cancel01Icon, CheckListIcon, NotificationOff02Icon, Search01Icon, Settings01Icon, UserAdd01Icon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
 import { CrewList } from '@/components/crew'
 import { FabMenu } from '@/components/fab-menu'
+import { useChatNotify } from '@/components/notify-prefs'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ThreadAvatar } from '@/components/thread-avatar'
 import { openSheet } from '@/components/sheet-screen'
@@ -252,6 +253,7 @@ function ChatRow({ thread }: { thread: Thread }) {
       : previewText(p, thread, (id) => ws.teammate(id)?.name)
 
   const people = ws.threadTeammates(thread.id)
+  const notify = useChatNotify(thread.id, title)
   const subtitleColor = working || pending ? 'tube' : unread ? 'ink2' : 'ink3'
 
   return (
@@ -266,6 +268,7 @@ function ChatRow({ thread }: { thread: Thread }) {
           thread.kind === 'dm'
             ? { label: 'View profile', icon: Settings01Icon, onPress: () => router.push({ pathname: '/teammate/[id]', params: { id: thread.teammate_id! } }) }
             : { label: 'Project settings', icon: Settings01Icon, onPress: () => router.push({ pathname: '/project/[id]/settings', params: { id: thread.project_id! } }) },
+          notify.item,
         ],
       })}
       accessibilityLabel={`${title}${unread ? ', unread' : ''}. ${sub}${p ? `. ${relativeTime(p.created_at)}` : ''}`}
@@ -278,6 +281,7 @@ function ChatRow({ thread }: { thread: Thread }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text variant="headline" numberOfLines={1} style={{ flexShrink: 1, fontSize: 16 }}>{title}</Text>
           {thread.kind === 'project' && <Text variant="footnote" color="ink3" tabular>{people.length}</Text>}
+          {notify.muted && <Icon icon={NotificationOff02Icon} size={14} color="ink3" />}
           <View style={{ flex: 1 }} />
           {(p || thread.last_message_at) && (
             <Text variant="footnote" tabular color={unread ? 'tube' : 'ink3'}>{relativeTime(p?.created_at ?? thread.last_message_at!)}</Text>
