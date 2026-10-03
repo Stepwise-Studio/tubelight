@@ -122,7 +122,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
       if (cancelled) return
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
       channel = supabase
-        .channel(`workspace:${userId}`)
+        .channel(`workspace:${userId}:${Math.random().toString(36).slice(2)}`) // unique: the assistant panel runs a second one
         .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (e) => {
           if (e.eventType === 'DELETE') setThreads((l) => l.filter((x) => x.id !== (e.old as Thread).id))
           else {

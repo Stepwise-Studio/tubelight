@@ -18,6 +18,47 @@ let localSeq = 0
  * Everything one thread needs: paginated messages (newest first), approvals, live typing
  * status and streamed ghost text over the private `thread:<id>` channel, and send.
  */
+// One realtime channel per chat, shared: the app and the assistant panel are two React roots in one JS runtime, and
+// Supabase hands back the already-joined channel for a topic (the server broadcasts to "thread:<id>", so the name
+// can't vary). Every screen showing the chat gets the events; the channel closes when the last one leaves.
+type PgEvent = { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: unknown; old: unknown }
+interface ThreadListener {
+  status: (s: StatusEvent) => void
+  delta: (d: DeltaEvent) => void
+  done: (d: DoneEvent & { discarded?: boolean }) => void
+  message: (e: PgEvent) => void
+  approval: (e: PgEvent) => void
+  joined: () => void
+}
+const hubs = new Map<string, { listeners: Set<ThreadListener>; channel: ReturnType<typeof supabase.channel> }>()
+
+function joinThread(threadId: string, l: ThreadListener): () => void {
+  let hub = hubs.get(threadId)
+  if (!hub) {
+    const listeners = new Set<ThreadListener>()
+    const each = (f: (x: ThreadListener) => void) => listeners.forEach(f)
+    const channel = supabase
+      .channel(`thread:${threadId}`, { config: { private: true } })
+      .on('broadcast', { event: 'status' }, ({ payload }) => each((x) => x.status(payload as StatusEvent)))
+      .on('broadcast', { event: 'delta' }, ({ payload }) => each((x) => x.delta(payload as DeltaEvent)))
+      .on('broadcast', { event: 'done' }, ({ payload }) => each((x) => x.done(payload as DoneEvent & { discarded?: boolean })))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `thread_id=eq.${threadId}` }, (e) => each((x) => x.message(e as PgEvent)))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'approvals', filter: `thread_id=eq.${threadId}` }, (e) => each((x) => x.approval(e as PgEvent)))
+      .subscribe((status) => { if (status === 'SUBSCRIBED') each((x) => x.joined()) })
+    hub = { listeners, channel }
+    hubs.set(threadId, hub)
+  } else if (hub.channel.state === 'joined') {
+    l.joined() // already live: catch up now
+  }
+  hub.listeners.add(l)
+  return () => {
+    const h = hubs.get(threadId)
+    if (!h) return
+    h.listeners.delete(l)
+    if (!h.listeners.size) { hubs.delete(threadId); supabase.removeChannel(h.channel) }
+  }
+}
+
 export function useThread(threadId: string, ownerId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -81,15 +122,13 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     load()
 
     let cancelled = false
-    let channel: ReturnType<typeof supabase.channel> | null = null
+    let leave: (() => void) | null = null
     ;(async () => {
       const { data } = await supabase.auth.getSession()
       if (cancelled) return
       if (data.session) await supabase.realtime.setAuth(data.session.access_token)
-      channel = supabase
-        .channel(`thread:${threadId}`, { config: { private: true } })
-        .on('broadcast', { event: 'status' }, ({ payload }) => {
-          const s = payload as StatusEvent
+      leave = joinThread(threadId, {
+        status: (s) => {
           if (s.state === 'idle') {
             setStatuses(({ [s.run_id]: _, ...rest }) => rest)
             // Contract: idle ends the run; drop ghosts that never finished (cancelled / failed).
@@ -97,32 +136,25 @@ export function useThread(threadId: string, ownerId: string | undefined) {
           } else {
             setStatuses((st) => ({ ...st, [s.run_id]: s }))
           }
-        })
-        .on('broadcast', { event: 'delta' }, ({ payload }) => {
-          const d = payload as DeltaEvent
-          setGhosts((g) => ({ ...g, [d.stream_id]: { stream_id: d.stream_id, run_id: d.run_id, teammate_id: d.teammate_id, text: d.text, done: false, event_type: d.event_type } }))
-        })
-        .on('broadcast', { event: 'done' }, ({ payload }) => {
-          const d = payload as DoneEvent & { discarded?: boolean }
-          setGhosts((g) => {
-            if (!g[d.stream_id]) return g
-            if (d.discarded) { const { [d.stream_id]: _, ...rest } = g; return rest }
-            return { ...g, [d.stream_id]: { ...g[d.stream_id], done: true } }
-          })
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `thread_id=eq.${threadId}` }, (e) => {
+        },
+        delta: (d) => setGhosts((g) => ({ ...g, [d.stream_id]: { stream_id: d.stream_id, run_id: d.run_id, teammate_id: d.teammate_id, text: d.text, done: false, event_type: d.event_type } })),
+        done: (d) => setGhosts((g) => {
+          if (!g[d.stream_id]) return g
+          if (d.discarded) { const { [d.stream_id]: _, ...rest } = g; return rest }
+          return { ...g, [d.stream_id]: { ...g[d.stream_id], done: true } }
+        }),
+        message: (e) => {
           if (e.eventType === 'DELETE') setMessages((l) => l.filter((x) => x.id !== (e.old as Message).id))
           else upsert(e.new as Message)
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'approvals', filter: `thread_id=eq.${threadId}` }, (e) => {
-          if (e.eventType !== 'DELETE') { const a = e.new as Approval; setApprovals((m) => ({ ...m, [a.id]: a })) }
-        })
+        },
+        approval: (e) => { if (e.eventType !== 'DELETE') { const a = e.new as Approval; setApprovals((m) => ({ ...m, [a.id]: a })) } },
         // Rows can land between the first load and the join (or during a dropped socket): reload on every join.
-        .subscribe((status) => { if (status === 'SUBSCRIBED') load() })
+        joined: load,
+      })
     })()
     return () => {
       cancelled = true
-      if (channel) supabase.removeChannel(channel)
+      leave?.()
     }
   }, [threadId, load, upsert])
 
