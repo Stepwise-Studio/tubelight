@@ -516,14 +516,35 @@ def read_only(cmd: str) -> bool:
         cmd = cmd[:m.start()] + "X" + cmd[m.end():]
     if "`" in cmd or "$(" in cmd or "<(" in cmd or ">(" in cmd:
         return False
-    if re.search(r"(?<![0-9&])>>?(?!\s*/dev/null|&[12])|[0-9]>>?(?!\s*/dev/null|&[12])", cmd):
-        return False  # writing a file
-    for part in re.split(r"\|\||&&|[|;\n]", cmd):
-        try:
-            words = shlex.split(part)
-        except ValueError:
-            return False
-        words = [w for w in words if not re.fullmatch(r"\d?>&?\d|\d?>/dev/null|/dev/null", w)]
+    try:  # quote-aware: a | inside 'a|b' is part of a word, not a pipe
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return False
+    parts: list[list[str]] = [[]]
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("|", "||", "&&", ";", "&", ";;", "|&"):
+            parts.append([])
+        elif t in (">", ">>", ">|", "&>", "&>>"):
+            target = tokens[i + 1] if i + 1 < len(tokens) else ""
+            if target != "/dev/null":
+                return False  # writing a file
+            if parts[-1] and parts[-1][-1].isdigit():
+                parts[-1].pop()  # the 2 of 2>/dev/null
+            i += 1
+        elif t == ">&":
+            if parts[-1] and parts[-1][-1].isdigit():
+                parts[-1].pop()  # 2>&1
+            i += 1
+        elif t in ("<", "<<", "<<<"):
+            i += 1
+        else:
+            parts[-1].append(t)
+        i += 1
+    for words in parts:
         if not words:
             continue
         head = words[0]
@@ -538,7 +559,7 @@ def read_only(cmd: str) -> bool:
             return False
         if head == "journalctl" and any(w.startswith(("--vacuum", "--rotate", "--flush")) for w in words):
             return False
-        if head in {"env", "printenv"} and len(words) > 1 and head == "env":
+        if head == "env" and len(words) > 1:
             return False  # `env X=1 cmd` runs cmd
     return True
 

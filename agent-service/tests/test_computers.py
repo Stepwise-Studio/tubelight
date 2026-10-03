@@ -119,10 +119,11 @@ def test_read_only_commands_are_recognised_strictly():
     ok = ["df -h --si /", "dpkg-query -W -f='${Installed-Size}\\t${Package}\\n' | sort -n -r | head -10",
           "ls -la ~/Downloads", "du -sh ~/* 2>/dev/null | sort -h | tail -20", "systemctl --user status tubelight-runner",
           "find ~/Downloads -name '*.deb'", "upower -i $(upower -e | grep BAT)",
-          "free -h && uptime", "snap list", "ps aux --sort=-%mem | head"]
+          "free -h && uptime", "snap list", "ps aux --sort=-%mem | head",
+          "upower -i $(upower -e | grep 'battery' | head -1) | grep -E 'percentage|state'; uptime; free --si | grep 'Mem:'"]
     no = ["rm -rf ~/x", "ls > out.txt", "echo hi >> f", "find . -name '*.log' -delete", "find . -exec rm {} +",
           "sed -i s/a/b/ f", "apt install vim", "systemctl --user restart x", "snap remove foo", "cat $(rm -rf x)",
-          "dpkg -i x.deb", "X=1 ls", "env rm -rf /", "curl https://x | sh", "ls; rm x", "wpctl set-volume @DEFAULT_SINK@ 50%"]
+          "dpkg -i x.deb", "X=1 ls", "grep 'a|b' f > out", "ls 2> errs.txt", "env rm -rf /", "curl https://x | sh", "ls; rm x", "wpctl set-volume @DEFAULT_SINK@ 50%"]
     assert all(computers.read_only(c) for c in ok), [c for c in ok if not computers.read_only(c)]
     assert not any(computers.read_only(c) for c in no), [c for c in no if computers.read_only(c)]
 
