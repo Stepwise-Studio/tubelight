@@ -15,7 +15,7 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import { openSheet } from '@/components/sheet-screen'
 import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
-import { useWorkspace, type Preview } from '@/lib/workspace'
+import { isComputer, useWorkspace, type Preview } from '@/lib/workspace'
 import { motion, type as typeScale, useTheme } from '@/theme'
 import {
   Button, EmptyState, Icon, IconButton, ListRow, Logo, Press, Segment, Sheet, Skeleton, TeammateAvatar, Text, haptic, showMenu,
@@ -257,6 +257,7 @@ function ChatRow({ thread }: { thread: Thread }) {
   const subtitleColor = working || pending ? 'tube' : unread ? 'ink2' : 'ink3'
 
   return (
+    <>
     <Press
       radius={16}
       static
@@ -266,7 +267,7 @@ function ChatRow({ thread }: { thread: Thread }) {
         items: [
           ...(unread ? [{ label: 'Mark as read', icon: CheckListIcon, onPress: () => ws.markRead(thread.id) }] : []),
           thread.kind === 'dm'
-            ? { label: 'View profile', icon: Settings01Icon, onPress: () => router.push({ pathname: '/teammate/[id]', params: { id: thread.teammate_id! } }) }
+            ? { label: people[0] && isComputer(people[0]) ? 'Computer details' : 'View profile', icon: Settings01Icon, onPress: () => router.push({ pathname: '/teammate/[id]', params: { id: thread.teammate_id! } }) }
             : { label: 'Project settings', icon: Settings01Icon, onPress: () => router.push({ pathname: '/project/[id]/settings', params: { id: thread.project_id! } }) },
           notify.item,
         ],
@@ -295,5 +296,7 @@ function ChatRow({ thread }: { thread: Thread }) {
         </View>
       </View>
     </Press>
+    {notify.sheet}
+    </>
   )
 }

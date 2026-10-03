@@ -2,7 +2,7 @@
 // choose where builders' code runs and whether teammates may work in your folders. What a computer shares is set on
 // the computer itself; this screen only shows it.
 import * as Clipboard from 'expo-clipboard'
-import { router, useFocusEffect } from 'expo-router'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshControl, ScrollView, Share, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -38,6 +38,13 @@ export default function ComputersScreen() {
     toast({ title: 'Unable to load computers', body: e.message, tone: 'error' })
   }), [])
   useFocusEffect(useCallback(() => { load() }, [load]))
+  // Opened from a computer's chat (its header, or its profile link): show that computer straight away.
+  const { open: openId } = useLocalSearchParams<{ open?: string }>()
+  const opened = useRef(false)
+  useEffect(() => {
+    const m = openId && !opened.current ? data?.computers.find((x) => x.id === openId) : undefined
+    if (m) { opened.current = true; setOpen(m) }
+  }, [openId, data])
 
   const change = async (patch: Partial<Pick<Data, 'code_on' | 'cowork'>>) => {
     setData((d) => d && { ...d, ...patch })

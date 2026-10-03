@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router'
+import { Redirect, router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
@@ -21,7 +21,7 @@ import { useAutomations } from '@/lib/automations'
 import { modelName, useModels } from '@/lib/catalog'
 import { supabase } from '@/lib/supabase'
 import type { Activity, Teammate } from '@/lib/types'
-import { useWorkspace } from '@/lib/workspace'
+import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import {
   Button, Divider, EmptyState, IconButton, ListRow, Segment, Skeleton, Surface, TeammateAvatar, Text,
@@ -39,6 +39,8 @@ export default function TeammateProfile() {
   const t = ws.teammate(id)
   const [tab, setTab] = useState<Tab>('overview')
 
+  // A linked computer's chat is a teammate only under the hood: its page is the computer's.
+  if (t && isComputer(t)) return <Redirect href={{ pathname: '/computers', params: { open: computerId(t)! } }} />
   if (!t) {
     return (
       <View style={{ flex: 1, backgroundColor: c.canvas }}>
@@ -77,7 +79,7 @@ function Profile({ t, tab, setTab }: { t: Teammate; tab: Tab; setTab: (t: Tab) =
   const working = ws.isWorking(t.id)
 
   const save = async () => {
-    const e = validateTeammate(draft, ws.teammates, t.id)
+    const e = validateTeammate(draft, ws.everyone, t.id)
     setErrors(e)
     if (Object.keys(e).length) return
     setSaving(true)

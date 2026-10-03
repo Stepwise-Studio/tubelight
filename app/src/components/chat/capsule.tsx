@@ -4,9 +4,10 @@ import { useState, type ReactNode } from 'react'
 import { View } from 'react-native'
 
 import { fonts, useTheme } from '@/theme'
-import { Press, Sheet, Squircle, Text } from '@/ui'
+import { Chip, Press, Sheet, Squircle, Text, type ChipColor } from '@/ui'
 
 export type Tone = 'neutral' | 'tube' | 'success' | 'warning' | 'danger'
+const CHIP: Record<Tone, ChipColor> = { neutral: 'idle', tube: 'info', success: 'success', warning: 'warning', danger: 'danger' }
 
 export function Capsule({ text, tone = 'neutral', onPress, detail }: {
   text: string
@@ -33,9 +34,13 @@ export function Capsule({ text, tone = 'neutral', onPress, detail }: {
         </Squircle>
       </Press>
       {!onPress && (
-        <Sheet open={open} onClose={() => setOpen(false)} title={head}>
-          <View style={{ paddingHorizontal: 20, paddingBottom: 28, gap: 14 }}>
-            {!!rest && <Text variant="body" selectable>{rest}</Text>}
+        <Sheet open={open} onClose={() => setOpen(false)} accessibilityLabel={text}>
+          {/* Status chip, then what it was about (the headline), then the details, the quietest last. */}
+          <View style={{ paddingHorizontal: 20, paddingBottom: 28, gap: 16 }}>
+            <View style={{ gap: 10, alignItems: 'flex-start' }}>
+              <Chip label={head} color={CHIP[tone]} variant="soft" size="sm" dot />
+              {!!rest && <Text variant="heading" selectable>{rest}</Text>}
+            </View>
             {detail}
           </View>
         </Sheet>

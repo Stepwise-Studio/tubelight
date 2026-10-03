@@ -72,18 +72,16 @@ export interface PickerOption {
   keywords?: string
 }
 
-/** A field showing the current choice that opens a sheet of radio rows: pick one and the sheet closes. With many
- * options (8+) it gets a search box. `intro` is a line of context at the top of the sheet. */
-export function PickerField({ label, value, options, onChange, intro, placeholder = 'Choose', disabled, stayOpen }: {
-  label: string; value: string | null; options: PickerOption[]; onChange: (v: string) => void
-  intro?: string; placeholder?: string; disabled?: boolean
+/** The radio-list sheet (as in the model picker): pick one; with many options (8+) a search box. `intro` is a line of
+ * context at the top. Used by PickerField, ChoiceRow and anything that opens choices from a menu. */
+export function ChoiceSheet({ open, onClose, title, value, options, onPick, intro, stayOpen }: {
+  open: boolean; onClose: () => void; title: string; value: string | null; options: PickerOption[]
+  onPick: (v: string) => void; intro?: string
   /** Keep the sheet open after a pick (e.g. sounds, where you try a few before settling). */
   stayOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const { height } = useWindowDimensions()
-  const current = options.find((o) => o.value === value)
   const query = q.trim().toLowerCase()
   const shown = query ? options.filter((o) => `${o.title} ${o.subtitle ?? ''} ${o.keywords ?? ''}`.toLowerCase().includes(query)) : options
   const groups: [string, PickerOption[]][] = []
@@ -92,7 +90,38 @@ export function PickerField({ label, value, options, onChange, intro, placeholde
     if (g) g[1].push(o)
     else groups.push([o.group ?? '', [o]])
   }
-  const pick = (v: string) => { onChange(v); if (!stayOpen) { setOpen(false); setQ('') } }
+  const close = () => { onClose(); setQ('') }
+  return (
+    <Sheet open={open} onClose={close} title={title}>
+      <View style={{ maxHeight: height * 0.7 }}>
+        {options.length >= 8 && <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}><SearchField value={q} onChangeText={setQ} /></View>}
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 12 }}>
+          {intro && <Text variant="caption" color="ink3" style={{ paddingHorizontal: 12, paddingBottom: 6 }}>{intro}</Text>}
+          {groups.map(([g, list]) => (
+            <View key={g || 'all'} accessibilityRole="radiogroup">
+              {g ? <Text variant="footnote" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 12, paddingTop: 14, paddingBottom: 2 }}>{g}</Text> : null}
+              {list.map((o) => (
+                <RadioRow key={o.value} title={o.title} subtitle={o.subtitle} leading={o.leading} trailing={o.trailing} subtitleLines={2}
+                  checked={o.value === value} onPress={() => { onPick(o.value); if (!stayOpen) close() }} />
+              ))}
+            </View>
+          ))}
+          {!shown.length && <Text variant="caption" color="ink3" style={{ textAlign: 'center', paddingVertical: 24 }}>Nothing called “{q.trim()}”.</Text>}
+        </ScrollView>
+      </View>
+    </Sheet>
+  )
+}
+
+/** A field showing the current choice that opens a ChoiceSheet. */
+export function PickerField({ label, value, options, onChange, intro, placeholder = 'Choose', disabled, stayOpen }: {
+  label: string; value: string | null; options: PickerOption[]; onChange: (v: string) => void
+  intro?: string; placeholder?: string; disabled?: boolean
+  /** Keep the sheet open after a pick (e.g. sounds, where you try a few before settling). */
+  stayOpen?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const current = options.find((o) => o.value === value)
   return (
     <>
       <Surface style={{ overflow: 'hidden', opacity: disabled ? 0.5 : 1 }}>
@@ -113,24 +142,29 @@ export function PickerField({ label, value, options, onChange, intro, placeholde
           <Icon icon={UnfoldMoreIcon} size={18} color="ink3" />
         </Press>
       </Surface>
-      <Sheet open={open} onClose={() => { setOpen(false); setQ('') }} title={label}>
-        <View style={{ maxHeight: height * 0.7 }}>
-          {options.length >= 8 && <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}><SearchField value={q} onChangeText={setQ} /></View>}
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 12 }}>
-            {intro && <Text variant="caption" color="ink3" style={{ paddingHorizontal: 12, paddingBottom: 6 }}>{intro}</Text>}
-            {groups.map(([g, list]) => (
-              <View key={g || 'all'} accessibilityRole="radiogroup">
-                {g ? <Text variant="footnote" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 12, paddingTop: 14, paddingBottom: 2 }}>{g}</Text> : null}
-                {list.map((o) => (
-                  <RadioRow key={o.value} title={o.title} subtitle={o.subtitle} leading={o.leading} trailing={o.trailing}
-                    checked={o.value === value} onPress={() => pick(o.value)} />
-                ))}
-              </View>
-            ))}
-            {!shown.length && <Text variant="caption" color="ink3" style={{ textAlign: 'center', paddingVertical: 24 }}>Nothing called “{q.trim()}”.</Text>}
-          </ScrollView>
-        </View>
-      </Sheet>
+      <ChoiceSheet open={open} onClose={() => setOpen(false)} title={label} value={value} options={options} onPick={onChange} intro={intro} stayOpen={stayOpen} />
+    </>
+  )
+}
+
+/** A settings row, "Label ··· Current ⌄", that opens a ChoiceSheet. Sits in a Surface with other rows. */
+export function ChoiceRow({ label, value, options, onChange, intro, stayOpen, icon }: {
+  label: string; value: string; options: PickerOption[]; onChange: (v: string) => void; intro?: string; stayOpen?: boolean
+  icon?: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const current = options.find((o) => o.value === value)
+  return (
+    <>
+      <Press radius={0} static onPress={() => { haptic.tap(); setOpen(true) }} accessibilityLabel={`${label}, ${current?.title ?? ''}`}
+        accessibilityHint="Opens the choices"
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingVertical: 10, paddingHorizontal: 16 }}>
+        {icon}
+        <Text variant="bodyMedium" style={{ flex: 1 }}>{label}</Text>
+        <Text variant="body" color="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>{current?.title ?? ''}</Text>
+        <Icon icon={UnfoldMoreIcon} size={16} color="ink3" />
+      </Press>
+      <ChoiceSheet open={open} onClose={() => setOpen(false)} title={label} value={value} options={options} onPick={onChange} intro={intro} stayOpen={stayOpen} />
     </>
   )
 }

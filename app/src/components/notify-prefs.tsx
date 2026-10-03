@@ -6,7 +6,7 @@ import { Notification03Icon, NotificationOff02Icon, VolumeHighIcon, VolumeOffIco
 
 import { api } from '@/lib/api'
 import { SOUNDS, SOUND_FILES, type SoundId } from '@/lib/notifications'
-import { Icon, PickerField, Segment, Text, haptic, showMenu, toast } from '@/ui'
+import { ChoiceRow, ChoiceSheet, Divider, Icon, Rise, haptic, toast } from '@/ui'
 
 export type NotifyMode = 'all' | 'needed' | 'off'
 interface Prefs { mode: NotifyMode; sound: SoundId; chats: Record<string, NotifyMode> }
@@ -49,63 +49,63 @@ export function previewSound(id: SoundId) {
   } catch { /* preview is a nicety */ }
 }
 
-const MODES: { value: NotifyMode; label: string }[] = [
-  { value: 'all', label: 'Everything' }, { value: 'needed', label: 'When needed' }, { value: 'off', label: 'Nothing' },
+const MODES: { value: NotifyMode; label: string; about: string }[] = [
+  { value: 'all', label: 'Everything', about: 'Replies (bundled when several land at once), approvals, questions and automations' },
+  { value: 'needed', label: 'When needed', about: 'Only what waits on you: approvals, questions, apps to connect, a stopped automation' },
+  { value: 'off', label: 'Nothing', about: 'No notifications' },
 ]
-const MODE_HINT: Record<NotifyMode, string> = {
-  all: 'Replies (bundled when several land at once), approvals, questions and automations.',
-  needed: 'Only what waits on you: approvals, questions, apps to connect, an automation that stopped.',
-  off: 'No notifications. Chats you set on their own still follow their setting.',
-}
+const modeOptions = MODES.map((m) => ({ value: m.value, title: m.label, subtitle: m.about }))
 
-/** Profile: what notifies you and how it sounds. */
+/** Profile, under the notifications switch: what notifies you and how it sounds, rows that open radio sheets. They
+ * rise in one after the other when the switch turns on. */
 export function NotifyChoices() {
   const { prefs, change } = useNotifyPrefs()
   if (!prefs) return null
+  const own = Object.keys(prefs.chats).length
   return (
-    <View style={{ gap: 14 }}>
-      <View style={{ gap: 6 }}>
-        <Segment<NotifyMode> value={prefs.mode} onChange={(mode) => change({ mode })} accessibilityLabel="What notifies you" options={MODES} />
-        <Text variant="footnote" color="ink3">{MODE_HINT[prefs.mode]}</Text>
-      </View>
-      <PickerField
-        label="Sound"
-        value={prefs.sound}
-        onChange={(v) => { const sound = v as SoundId; previewSound(sound); change({ sound }) }}
-        stayOpen
-        intro="Tap one to hear it; the last one you tap is used. Notifications from every chat use it."
-        options={SOUNDS.map((s) => ({
-          value: s.id, title: s.name, subtitle: s.about,
-          leading: <View style={{ width: 32, alignItems: 'center' }}><Icon icon={s.id === 'silent' ? VolumeOffIcon : VolumeHighIcon} size={20} color="ink2" /></View>,
-        }))}
-      />
-      {Object.keys(prefs.chats).length > 0 && (
-        <Text variant="footnote" color="ink3">{Object.keys(prefs.chats).length} chat{Object.keys(prefs.chats).length > 1 ? 's have' : ' has'} its own setting (from the bell in the chat).</Text>
-      )}
-    </View>
+    <>
+      <Rise index={0}>
+        <Divider />
+        <ChoiceRow label="Notify me about" value={prefs.mode} options={modeOptions} onChange={(v) => change({ mode: v as NotifyMode })}
+          intro={own ? `${own} chat${own > 1 ? 's have' : ' has'} its own setting (long-press it in the inbox).` : undefined} />
+      </Rise>
+      <Rise index={1}>
+        <Divider />
+        <ChoiceRow label="Sound" value={prefs.sound} stayOpen
+          onChange={(v) => { const sound = v as SoundId; previewSound(sound); change({ sound }) }}
+          intro="Tap one to hear it; the last one you tap is used."
+          options={SOUNDS.map((x) => ({
+            value: x.id, title: x.name, subtitle: x.about,
+            leading: <View style={{ width: 32, alignItems: 'center' }}><Icon icon={x.id === 'silent' ? VolumeOffIcon : VolumeHighIcon} size={20} color="ink2" /></View>,
+          }))} />
+      </Rise>
+    </>
   )
 }
 
-/** This chat's notification setting, from the inbox's long-press menu: a menu item that opens the choices. */
+/** This chat's notification setting, from the inbox's long-press menu: an item showing the current setting that opens
+ * the radio sheet (render `sheet` next to the row). */
 export function useChatNotify(threadId: string, title: string) {
   const { prefs, change } = useNotifyPrefs()
+  const [open, setOpen] = useState(false)
   const own = prefs?.chats[threadId] ?? null
-  const label = (m: NotifyMode) => MODES.find((x) => x.value === m)!.label
   const effective = own ?? prefs?.mode ?? 'all'
-  const open = () => prefs && showMenu({
-    title: `Notifications for ${title}`,
-    message: own ? `This chat: ${label(own)}` : `Following your setting: ${label(prefs.mode)}`,
-    items: [
-      ...MODES.map((m) => ({ label: `${m.label}${own === m.value ? ' ✓' : ''}`, onPress: () => change({ chats: { [threadId]: m.value } }) })),
-      ...(own ? [{ label: `Use my setting (${label(prefs.mode)})`, onPress: () => change({ chats: { [threadId]: null } }) }] : []),
-    ],
-  })
+  const label = (m: NotifyMode) => MODES.find((x) => x.value === m)!.label
+  const options = [
+    ...MODES.map((m) => ({ value: m.value as string, title: m.label, subtitle: m.about })),
+    ...(prefs ? [{ value: 'default', title: 'Use my setting', subtitle: `What you chose in Profile: ${label(prefs.mode)}` }] : []),
+  ]
   return {
     muted: effective === 'off',
     item: {
-      label: `Notifications: ${label(effective)}`,
+      label: 'Notifications',
+      value: own ? label(own) : 'My setting',
       icon: effective === 'off' ? NotificationOff02Icon : Notification03Icon,
-      onPress: () => setTimeout(open, 320),  // after the first menu's close animation
+      onPress: () => setTimeout(() => setOpen(true), 320),  // after the menu's close animation
     },
+    sheet: (
+      <ChoiceSheet open={open} onClose={() => setOpen(false)} title={`Notifications for ${title}`} value={own ?? 'default'}
+        options={options} onPick={(v) => change({ chats: { [threadId]: v === 'default' ? null : (v as NotifyMode) } })} />
+    ),
   }
 }

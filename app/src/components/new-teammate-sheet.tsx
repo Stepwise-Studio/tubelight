@@ -37,11 +37,11 @@ export function NewTeammate() {
     haptic.tap()
     setPicked(t?.role ?? 'blank')
     setErrors({})
-    setDraft(t ? { ...fromTemplate(t), handle: freeHandle(t.handle, ws.teammates) } : BLANK)
+    setDraft(t ? { ...fromTemplate(t), handle: freeHandle(t.handle, ws.everyone) } : BLANK)
   }
 
   const save = async () => {
-    const e = validateTeammate(draft, ws.teammates)
+    const e = validateTeammate(draft, ws.everyone)
     setErrors(e)
     if (Object.keys(e).length) return
     setSaving(true)

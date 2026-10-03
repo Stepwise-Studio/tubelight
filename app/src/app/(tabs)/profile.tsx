@@ -24,7 +24,7 @@ import { supabase } from '@/lib/supabase'
 import type { MemoryItem, Profile } from '@/lib/types'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
-  Button, Chip, Divider, ListRow, Press, Segment, Skeleton, Surface, Text, TextField, Toggle,
+  Button, ChoiceRow, Chip, Divider, ListRow, Press, Skeleton, Surface, Text, TextField, Toggle,
   confirm, haptic, toast,
 } from '@/ui'
 
@@ -133,12 +133,13 @@ function Appearance() {
   const { preference, setPreference } = useTheme()
   return (
     <FormSection title="Appearance">
-      <Segment<ThemePreference>
-        value={preference}
-        onChange={setPreference}
-        accessibilityLabel="Appearance"
-        options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
-      />
+      <Surface style={{ overflow: 'hidden' }}>
+        <ChoiceRow label="Theme" value={preference} onChange={(v) => setPreference(v as ThemePreference)} options={[
+          { value: 'system', title: 'System', subtitle: 'Light or dark, as your phone is set' },
+          { value: 'light', title: 'Light' },
+          { value: 'dark', title: 'Dark' },
+        ]} />
+      </Surface>
     </FormSection>
   )
 }
@@ -225,19 +226,13 @@ function PushSection() {
 
   const blocked = !!pushUnavailable()
   return (
-    <FormSection title="Notifications">
-      <Surface padding={16} style={{ gap: 8 }}>
-        <Toggle
-          label="Notify me on this phone"
-          description="When a teammate replies, needs your approval or posts on their own, while you’re away from the app."
-          value={!!on}
-          onChange={change}
-          disabled={blocked || busy || on === null}
-        />
+    <Surface style={{ overflow: 'hidden' }}>
+      <View style={{ paddingHorizontal: 16, paddingVertical: 14, gap: 6 }}>
+        <Toggle label="Notifications" value={!!on} onChange={change} disabled={blocked || busy || on === null} />
         {problem && <Text variant="footnote" color={blocked ? 'ink3' : 'warning'} accessibilityLiveRegion="polite">{problem}</Text>}
-        {on && <View style={{ paddingTop: 8 }}><NotifyChoices /></View>}
-      </Surface>
-    </FormSection>
+      </View>
+      {on && <NotifyChoices />}
+    </Surface>
   )
 }
 
@@ -453,11 +448,9 @@ const CHECKS: { key: keyof Omit<Health, 'ok'>; title: string; on: string; off: s
   { key: 'db', title: 'Database', on: 'Connected', off: 'The service can’t reach Supabase. Check SUPABASE_DB_URL in agent-service/.env.' },
   { key: 'docker', title: 'Code sandbox', on: 'Docker is running', off: 'Docker isn’t running, so teammates can’t run code. Start Docker where the service runs.' },
   { key: 'composio', title: 'App connectors', on: 'Ready', off: 'No COMPOSIO_API_KEY, so Gmail, GitHub, Linear and Notion can’t connect.' },
-  { key: 'push', title: 'Push delivery', on: 'Ready', off: 'Push delivery is off on the service.' },
 ]
 
 function ServiceStatus() {
-  const { c } = useTheme()
   const [health, setHealth] = useState<Health | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
@@ -474,24 +467,18 @@ function ServiceStatus() {
             const ok = health?.[ch.key]
             return (
               <View key={ch.key}>
-                {i > 0 && <Divider inset={40} />}
+                {i > 0 && <Divider />}
                 <View
-                  style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingVertical: 12, minHeight: 48 }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, minHeight: 52, gap: 4, justifyContent: 'center' }}
                   accessible
                   accessibilityLabel={health ? `${ch.title}, ${ok ? ch.on : `off. ${ch.off}`}` : `${ch.title}, checking`}
                 >
-                  <View style={{ width: 12, paddingTop: 7, alignItems: 'center' }}>
-                    {health
-                      ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ok ? c.success : c.warning }} />
-                      : <Skeleton width={8} height={8} radius={4} />}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text variant="bodyMedium" style={{ flex: 1 }}>{ch.title}</Text>
+                    {health ? <Chip label={ok ? ch.on : 'Off'} color={ok ? 'success' : 'warning'} size="sm" dot />
+                      : <Skeleton width={56} height={22} radius={11} />}
                   </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text variant="bodyMedium" style={{ flex: 1 }}>{ch.title}</Text>
-                      {health && <Text variant="caption" color={ok ? 'ink3' : 'warning'}>{ok ? ch.on : 'Off'}</Text>}
-                    </View>
-                    {health && !ok && <Text variant="caption" color="ink3">{ch.off}</Text>}
-                  </View>
+                  {health && !ok && <Text variant="caption" color="ink3">{ch.off}</Text>}
                 </View>
               </View>
             )

@@ -168,7 +168,7 @@ function StarterTemplates() {
 
   const add = async (t: Template) => {
     setAdding(t.role)
-    const { error } = await supabase.from('teammates').insert({ ...fromTemplate(t), handle: freeHandle(t.handle, ws.teammates) })
+    const { error } = await supabase.from('teammates').insert({ ...fromTemplate(t), handle: freeHandle(t.handle, ws.everyone) })
     if (error) { setAdding(null); toast({ title: `Unable to add ${t.name}`, body: 'Check your connection and try again.', tone: 'error' }); return }
     haptic.success()
     await ws.refresh()

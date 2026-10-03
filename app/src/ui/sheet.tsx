@@ -115,6 +115,8 @@ function SheetBody({ open, onClose, onGone, title, children, accessibilityLabel 
 
 export interface MenuItem {
   label: string
+  /** The current setting, on the right (a menu item that opens its choices). */
+  value?: string
   icon?: IconSvgElement
   destructive?: boolean
   onPress: () => void
@@ -184,6 +186,8 @@ export function MenuHost() {
             key={it.label}
             title={it.label}
             destructive={it.destructive}
+            accessory={it.value ? <Text variant="caption" color="ink3">{it.value}</Text> : undefined}
+            chevron={!!it.value}
             leading={it.icon && <View style={{ width: 28, alignItems: 'center' }}><Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} /></View>}
             onPress={() => { close(); it.onPress() }}
             style={{ minHeight: 52 }}

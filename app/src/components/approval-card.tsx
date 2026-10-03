@@ -119,22 +119,28 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
           text={`${text}: ${approval.title}`}
           tone={current === 'approved' ? 'success' : current === 'rejected' ? 'danger' : 'neutral'}
           detail={(
-            <View style={{ gap: 12 }}>
+            <View style={{ gap: 16 }}>
               {shown.map((k) => (
-                <View key={k} style={{ gap: 3 }}>
-                  <Text variant="footnote" color="ink3">{label(k)}</Text>
+                <View key={k} style={{ gap: 6 }}>
+                  <Text variant="label" color="ink3">{label(k)}</Text>
                   {k === 'cmd' || k === 'diff' ? (
-                    <Squircle style={{ borderRadius: radius.sm + 2, backgroundColor: c.panel2, padding: 10 }}>
+                    <Squircle style={{ borderRadius: radius.md, backgroundColor: c.panel2, padding: 12 }}>
                       <Text style={[typeScale.mono, { color: c.ink }]} selectable>{show(approval.final_args?.[k] ?? approval.draft[k])}</Text>
                     </Squircle>
                   ) : (
-                    <Text variant="body" selectable>{show(approval.final_args?.[k] ?? approval.draft[k])}</Text>
+                    <Text variant="body" color="ink2" selectable>{show(approval.final_args?.[k] ?? approval.draft[k])}</Text>
                   )}
                 </View>
               ))}
-              {!!approval.note && <Text variant="caption" color="ink2">Note: {approval.note}</Text>}
-              <Text variant="footnote" color="ink3">
-                {[teammate && `Asked by ${teammate.name}`, approval.decided_at && `${text.toLowerCase()} ${relativeTime(approval.decided_at)}`].filter(Boolean).join(' · ')}
+              {!!approval.note && (
+                <View style={{ gap: 6 }}>
+                  <Text variant="label" color="ink3">Your note</Text>
+                  <Text variant="body" color="ink2">{approval.note}</Text>
+                </View>
+              )}
+              <View style={{ height: 1, backgroundColor: c.line }} />
+              <Text variant="footnote" color="ink4">
+                {[teammate && `Asked by ${teammate.name}`, approval.decided_at && `${text} ${relativeTime(approval.decided_at)}`].filter(Boolean).join(' · ')}
               </Text>
             </View>
           )}

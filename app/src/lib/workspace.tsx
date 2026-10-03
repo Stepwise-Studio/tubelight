@@ -10,7 +10,10 @@ export interface Workspace {
   loading: boolean
   /** Last load failed (offline, etc.). */
   error: string | null
+  /** The crew: teammates without linked computers (those are chats of their own, under Profile → Computers). */
   teammates: Teammate[]
+  /** Everyone, computers included: for handle checks and lookups. */
+  everyone: Teammate[]
   projects: Project[]
   members: ProjectMember[]
   threads: Thread[]
@@ -34,6 +37,10 @@ export interface Workspace {
 }
 
 const Ctx = createContext<Workspace | null>(null)
+/** A linked computer's own chat stands in as a teammate whose avatar_shape is `device:<computer id>`. */
+export const isComputer = (t: { avatar_shape: string }) => t.avatar_shape.startsWith('device:')
+export const computerId = (t: { avatar_shape: string }) => (isComputer(t) ? t.avatar_shape.slice(7) : null)
+
 /** Teammate lookup alone. Changes only when teammates do, so chat rows don't re-render on every message or run update. */
 const TeammatesCtx = createContext<(id: string | null | undefined) => Teammate | undefined>(() => undefined)
 export const useTeammate = (id: string | null | undefined) => use(TeammatesCtx)(id)
@@ -177,9 +184,10 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const isWorking = (teammateId: string) => liveRuns.some((r) => r.teammate_id === teammateId && r.status === 'running')
   const isThreadLive = (threadId: string) => liveRuns.some((r) => r.thread_id === threadId)
 
+  const crew = teammates.filter((t) => !isComputer(t))
   return (
     <Ctx value={{
-      loading, error, teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
+      loading, error, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
       refresh, markRead, teammate, project, thread, membersOf, threadTeammates, threadTitle, isWorking, isThreadLive,
     }}>
       <TeammatesCtx value={teammate}>{children}</TeammatesCtx>

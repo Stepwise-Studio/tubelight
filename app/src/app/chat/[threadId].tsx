@@ -15,7 +15,7 @@ import { api } from '@/lib/api'
 import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
-import { useWorkspace } from '@/lib/workspace'
+import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import { Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, TextSwap, elevation, haptic, toast } from '@/ui'
 
@@ -162,7 +162,8 @@ export default function Thread() {
     ? (isDm || !workerName ? 'Working' : `${workerName} is working`)
     : isDm ? dmMate?.role ?? '' : people.length ? people.map((p) => p.name).join(', ') : 'No members yet'
   const openDetails = () => {
-    if (dmMate) router.push({ pathname: '/teammate/[id]', params: { id: dmMate.id } })
+    if (dmMate && isComputer(dmMate)) router.push({ pathname: '/computers', params: { open: computerId(dmMate)! } })
+    else if (dmMate) router.push({ pathname: '/teammate/[id]', params: { id: dmMate.id } })
     else if (project) router.push({ pathname: '/project/[id]/settings', params: { id: project.id } })
   }
 
@@ -179,8 +180,10 @@ export default function Thread() {
           static
           onPress={openDetails}
           accessibilityLabel={`${title}. ${subtitle}`}
-          accessibilityHint={isDm ? 'Opens the teammate profile' : 'Opens project settings'}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, paddingRight: 8 }}
+          accessibilityHint={dmMate && isComputer(dmMate) ? 'Opens the computer' : isDm ? 'Opens the teammate profile' : 'Opens project settings'}
+          // Room on the left for the avatar's working ring (3pt outside it), which the rounded press area would clip.
+          outerStyle={{ marginLeft: -4 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, paddingLeft: 4, paddingRight: 8 }}
         >
           <ThreadAvatar threadId={threadId} size={36} />
           <View style={{ flex: 1, minWidth: 0 }}>
