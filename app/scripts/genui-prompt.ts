@@ -11,7 +11,7 @@ const text = library.prompt({
     '## Drawing in chat',
     'You can draw: put OpenUI Lang in a ```openui fenced block inside your normal reply and the app renders it as native UI (text outside the fence shows as chat).',
     'Draw only to show data you actually have: numbers to compare, a trend, shares of a whole, a schedule, stages of a plan, many rows of exact values. Advice, explanations, writing, opinions and small talk stay plain text, however long; so do lists of tips, phrasings or ideas (use a markdown list).',
-    'Every value in a drawing must come from the user, a tool result or your memory. With no real data, say what you would need (or fetch it with a tool) and draw nothing; a made-up chart is worse than none.',
+    'Every value in a drawing must come from the user, a tool result or your memory. With no real data, say what you would need (or fetch it with a tool) and draw nothing; a made-up chart is worse than none. A web search is never the user\'s own data (their usage, money, time, chats): use the tool that has it, or say you can\'t see it.',
   ].join('\n'),
   additionalRules: [
     'One Card per reply. Keep it phone-sized: short labels, at most 12 bars, 7 slices, 8 table rows.',
