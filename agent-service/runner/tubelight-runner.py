@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "5"  # 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "7"  # 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -181,6 +181,82 @@ def fs_write(c: dict, a: dict) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(a.get("content", ""))
     return f"Wrote {len(a.get('content', ''))} chars to {p}"
+
+
+MAX_FILE = 25 * 1024 * 1024  # the phone side's attachment limit
+
+
+def fs_get(c: dict, a: dict) -> dict:
+    """A file's bytes for the phone (full access only)."""
+    p = anywhere(a["path"]) if full(c, a) else inside(c, a["path"])
+    if not p.is_file():
+        raise FileNotFoundError(f"No such file: {p}")
+    if p.stat().st_size > MAX_FILE:
+        raise ValueError(f"{p.name} is {p.stat().st_size / 1e6:.0f} MB; the phone takes files up to 25 MB.")
+    return {"name": p.name, "size": p.stat().st_size, "b64": base64.b64encode(p.read_bytes()).decode()}
+
+
+def fs_put(c: dict, a: dict) -> str:
+    """A file from the phone, saved under the folder given (full access only); never overwrites."""
+    folder = anywhere(a.get("folder") or "~/Downloads/Tubelight") if full(c, a) else inside(c, a.get("folder") or "")
+    folder.mkdir(parents=True, exist_ok=True)
+    name = Path(a["name"]).name or "file"
+    p, n = folder / name, 1
+    while p.exists():
+        p, n = folder / f"{Path(name).stem} ({n}){Path(name).suffix}", n + 1
+    p.write_bytes(base64.b64decode(a["b64"]))
+    return str(p)
+
+
+# Long jobs: started detached (they outlive the 10-minute limit and a runner restart), logged to a file, and reported
+# to the computer's chat when they end.
+JOBS = CACHE / "jobs"
+
+
+def job_start(c: dict, a: dict) -> dict:
+    if not full(c, a):
+        raise PermissionError("Long jobs run from the computer's own chat.")
+    JOBS.mkdir(parents=True, exist_ok=True)
+    jid = os.urandom(4).hex()
+    log = JOBS / f"{jid}.log"
+    cwd = anywhere(a.get("cwd") or "~")
+    with open(log, "wb") as out:
+        p = subprocess.Popen(["bash", "-lc", a["cmd"]], cwd=cwd if cwd.is_dir() else Path.home(), stdout=out,
+                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    threading.Thread(target=_report, args=(jid, a.get("title") or a["cmd"][:60], p, log, time.time()), daemon=True).start()
+    return {"id": jid, "log": str(log)}
+
+
+def _report(jid: str, title: str, p: subprocess.Popen, log: Path, began: float) -> None:
+    code = p.wait()
+    tail = log.read_text(errors="replace")[-2500:] if log.exists() else ""
+    for _ in range(20):  # the server may be restarting: keep trying for ~10 minutes
+        try:
+            if api(load(), "/runner/done", {"id": jid, "title": title, "exit": code, "seconds": int(time.time() - began),
+                                            "tail": tail})[0] == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(30)
+
+
+def stats() -> dict:
+    """What the status strip in the computer's chat shows: battery, disk, memory, load."""
+    out: dict = {}
+    try:
+        du = shutil.disk_usage("/")
+        out["disk"] = round(du.used / du.total * 100)
+        mem = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line)
+        total, avail = int(mem["MemTotal"].split()[0]), int(mem["MemAvailable"].split()[0])
+        out["mem"] = round((total - avail) / total * 100)
+        out["load"] = round(os.getloadavg()[0] / (os.cpu_count() or 1) * 100)
+        for b in sorted(Path("/sys/class/power_supply").glob("BAT*")):
+            out["battery"] = int((b / "capacity").read_text().strip())
+            out["charging"] = (b / "status").read_text().strip() in ("Charging", "Full", "Not charging")  # plugged in
+            break
+    except Exception:
+        pass
+    return out
 
 
 def run_as_user(a: dict) -> str:
@@ -340,7 +416,7 @@ def box_close(c: dict, a: dict) -> str:
     return diff
 
 
-OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell,
+OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close}
 
@@ -387,7 +463,7 @@ def run() -> None:
             time.sleep(3)
             continue
         info = {"folders": [str(f) for f in folders(c)], "docker": docker, "shell": bool(shutil.which("bwrap")),
-                "full": c.get("full_access", True),
+                "full": c.get("full_access", True), "stats": stats(),
                 "version": VERSION, "os": f"{platform.system()} {platform.release()}", **({"wait": 0} if first else {})}
         try:
             status, job = api(c, "/runner/poll", info, timeout=60)
@@ -451,6 +527,10 @@ GUI_SRC = HERE / "tubelight_window.py"
 
 
 def gui() -> None:
+    c = load()
+    if c.get("url") and update(c):  # opening the window updates: the service restarts on the new code, and so does this
+        subprocess.run(["systemctl", "--user", "restart", "tubelight-runner"], capture_output=True)
+        os.execv(sys.executable, [sys.executable, str(UPDATES / "tubelight-runner.py"), "app"])
     sys.path.insert(0, str(HERE))
     import importlib.util
     spec = importlib.util.spec_from_file_location("tubelight_window", GUI_SRC)

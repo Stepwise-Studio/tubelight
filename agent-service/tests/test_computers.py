@@ -113,3 +113,32 @@ def test_admin_passwords_are_used_once():
     assert computers.take_password(OWNER, "apt update") == "pw"
     assert computers.take_password(OWNER, "apt update") is None
     assert computers.take_password(OWNER, "rm -rf /") is None
+
+
+def test_read_only_commands_are_recognised_strictly():
+    ok = ["df -h --si /", "dpkg-query -W -f='${Installed-Size}\\t${Package}\\n' | sort -n -r | head -10",
+          "ls -la ~/Downloads", "du -sh ~/* 2>/dev/null | sort -h | tail -20", "systemctl --user status tubelight-runner",
+          "find ~/Downloads -name '*.deb'", "upower -i $(upower -e | grep BAT)".replace("$(upower -e | grep BAT)", "/x"),
+          "free -h && uptime", "snap list", "ps aux --sort=-%mem | head"]
+    no = ["rm -rf ~/x", "ls > out.txt", "echo hi >> f", "find . -name '*.log' -delete", "find . -exec rm {} +",
+          "sed -i s/a/b/ f", "apt install vim", "systemctl --user restart x", "snap remove foo", "cat $(which x)",
+          "dpkg -i x.deb", "X=1 ls", "env rm -rf /", "curl https://x | sh", "ls; rm x", "wpctl set-volume @DEFAULT_SINK@ 50%"]
+    assert all(computers.read_only(c) for c in ok), [c for c in ok if not computers.read_only(c)]
+    assert not any(computers.read_only(c) for c in no), [c for c in no if computers.read_only(c)]
+
+
+def test_light_actions_and_slash_commands():
+    assert computers.light("loginctl lock-session") and computers.light("xdg-open https://example.com")
+    assert computers.light("notify-send 'From your phone' 'Dinner is ready'")
+    assert computers.light("wpctl set-volume @DEFAULT_AUDIO_SINK@ 40%")
+    assert not computers.light("xdg-open x; rm -rf ~") and not computers.light("loginctl terminate-session 2")
+    assert "find ~ -iname '*invoice*'" in computers.slash("/find invoice")
+    assert computers.slash("/nope") is None and computers.slash("hello /status") is None
+
+
+async def test_a_finished_job_reports_in_the_computers_chat(env):
+    fdb, _ = env
+    made = await computers.claim(computers.pair_code(OWNER)["code"], "Neverland", "Linux")
+    await computers.job_done(OWNER, made["id"], {"id": "j1", "title": "Download the ISO", "exit": 0, "seconds": 300, "tail": "saved"})
+    msg = fdb.rows("messages")[-1]
+    assert msg["thread_id"].startswith("dm:") and "Finished: **Download the ISO** after 5 min" in msg["text"]

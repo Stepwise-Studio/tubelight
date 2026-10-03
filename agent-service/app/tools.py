@@ -1,6 +1,7 @@
 """Tool classification (read / draft / act), human labels, and each teammate's toolset."""
 from __future__ import annotations
 
+import base64
 import re
 import time
 import uuid
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, followups, llm, memory, repo, sandbox, usage
+from . import automations, computers, config, connectors, db, files, followups, llm, memory, repo, sandbox, usage
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -71,6 +72,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
+    "computer_send_file": "read", "computer_receive": "read", "computer_start_job": "act",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -175,6 +177,8 @@ def title(name: str, args: dict[str, Any]) -> str:
     if name == "computer_run":  # the command itself shows below the title on the card
         what = str(args.get("title") or "").strip().rstrip(".") or "Run a command"
         return f"{what[:1].upper()}{what[1:]}{' (admin)' if args.get('sudo') else ''}"[:80]
+    if name == "computer_start_job":
+        return f"Start: {str(args.get('title') or 'a long job').strip().rstrip('.')}"[:80]
     if name == "computer_write":
         return f"Write {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]}"[:80]
     _, action = _phrase(name)
@@ -517,7 +521,40 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 job |= {"sudo": True, "password": password}
             return await computers.call(dev, "shell", job, t + 30)
 
+        async def computer_send_file(path: str) -> str:
+            got = await computers.call(dev, "fs_get", {"path": path, "full": True}, 180)
+            att = await files.upload(ctx.owner_id, got["name"], base64.b64decode(got["b64"]))
+            ctx.outgoing.setdefault(tm["id"], []).append(att)
+            return f"Attached {got['name']} ({got['size'] / 1e6:.1f} MB) to your reply; it shows in the chat on their phone."
+
+        async def computer_receive(folder: str = "~/Downloads/Tubelight") -> str:
+            rows = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "sender_type": "eq.user",
+                                                "order": "created_at.desc", "limit": "5", "select": "meta"})
+            atts = next(((r.get("meta") or {}).get("attachments") for r in rows if (r.get("meta") or {}).get("attachments")), None)
+            if not atts:
+                return "No attached files in their recent messages. Ask them to attach it with the + in the chat."
+            saved = []
+            for a in atts[:6]:
+                data = await files._download(ctx.owner_id, a["path"])
+                saved.append(await computers.call(dev, "fs_put", {"name": a["name"], "folder": folder, "full": True,
+                                                                  "b64": base64.b64encode(data).decode()}, 180))
+            return "Saved on the computer: " + ", ".join(saved)
+
+        async def computer_start_job(cmd: str, title: str, cwd: str = "~") -> str:
+            got = await computers.call(dev, "job_start", {"cmd": cmd, "title": title, "cwd": cwd, "full": True})
+            return (f"Started in the background (job {got['id']}). Its output goes to {got['log']}; when it ends, the "
+                    "result is posted in this chat and they get a notification. Tell them that, and stop here.")
+
         tools += [
+            StructuredTool.from_function(coroutine=computer_start_job, name="computer_start_job",
+                description="Start a long command (a big download, a build, a backup, anything over a few minutes) in the "
+                            "background on this computer. It keeps running past the 10-minute command limit and reports "
+                            "back in this chat when it finishes. title: 2-6 words. To check on it, tail its log."),
+            StructuredTool.from_function(coroutine=computer_send_file, name="computer_send_file",
+                description="Send a file from this computer to the chat, so they can open it on their phone (up to 25 MB)."),
+            StructuredTool.from_function(coroutine=computer_receive, name="computer_receive",
+                description="Save the files they attached in this chat onto the computer (default ~/Downloads/Tubelight). "
+                            "Use it when they attach something and want it on the laptop."),
             StructuredTool.from_function(coroutine=computer_list, name="computer_list",
                 description="List a folder on this computer (any path; ~ is home)."),
             StructuredTool.from_function(coroutine=computer_read, name="computer_read",

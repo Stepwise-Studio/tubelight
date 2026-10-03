@@ -5,7 +5,7 @@ import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller
 import Animated, { FadeIn, FadeOut, LinearTransition, interpolate, useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, Alert02Icon, ArrowTurnBackwardIcon, ArrowUp02Icon, Camera01Icon, Cancel01Icon, File01Icon, Image01Icon, Mic01Icon, StopIcon, UserGroupIcon,
+  Add01Icon, Alert02Icon, ArrowTurnBackwardIcon, ArrowUp02Icon, Camera01Icon, Cancel01Icon, CommandLineIcon, File01Icon, Image01Icon, Mic01Icon, StopIcon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
 import { pickDocuments, pickPhotos, takePhoto, upload, type Draft } from '@/lib/attachments'
@@ -39,6 +39,8 @@ export interface ComposerProps {
   onCancelReply?: () => void
   /** Shows the mic while the input is empty. */
   onVoice?: () => void
+  /** A computer's chat: its slash commands, offered when the message starts with "/". */
+  commands?: { name: string; about: string; arg: boolean }[]
 }
 
 type Item = Draft & { att?: Attachment }
@@ -48,7 +50,7 @@ type Item = Draft & { att?: Attachment }
  * trailing action (mic when empty, send when there's something, stop while a run is live). Behind it there's no solid
  * band: the chat fades into the canvas and blurs more toward the bottom edge.
  */
-export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice }: ComposerProps) {
+export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, commands }: ComposerProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const kb = useReanimatedKeyboardAnimation()
@@ -71,7 +73,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
 
   // Connected apps can be @mentioned too (DMs included): the teammate who answers gets that app for the request.
   const { connections } = useConnections()
-  const apps = (connections ?? []).filter((a) => a.connected).map((a) => ({ ...a, token: appToken(a.toolkit) }))
+  // A computer's chat has no apps to lend: its menu is slash commands instead.
+  const apps = commands ? [] : (connections ?? []).filter((a) => a.connected).map((a) => ({ ...a, token: appToken(a.toolkit) }))
   const known = new Set([...members.map((m) => m.handle.toLowerCase()), ...(members.length > 1 ? ['all', 'everyone'] : []), ...apps.map((a) => a.token)])
 
   const before = text.slice(0, sel)
@@ -81,6 +84,15 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const offerAll = query !== undefined && members.length > 1 && ('all'.startsWith(query) || 'everyone'.startsWith(query))
   const people = matches
   const appRows = appMatches
+  const slashQuery = commands ? /^\/(\w*)$/.exec(text.trim())?.[1]?.toLowerCase() : undefined
+  const cmdRows = slashQuery === undefined ? [] : commands!.filter((x) => x.name.startsWith(slashQuery))
+  const runCommand = (x: { name: string; arg: boolean }) => {
+    haptic.tap()
+    if (x.arg) { const t = `/${x.name} `; setText(t); setSel(t.length); return }
+    onSend(`/${x.name}`, [], {})
+    setText('')
+    setSel(0)
+  }
 
   const pad = useAnimatedStyle(() => ({ paddingBottom: interpolate(kb.progress.value, [0, 1], [Math.max(insets.bottom, 10), 10]) }))
 
@@ -216,7 +228,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
     <Animated.View style={[{ paddingHorizontal: focused ? 8 : 28, paddingTop: 10 }, pad]}>
       {/* Behind the bar: the chat fades out smoothly toward the bottom edge, clear at the top. */}
       <BottomEdge style={{ top: -36 }} />
-      {(people.length > 0 || appRows.length > 0 || offerAll) && (
+      {(people.length > 0 || appRows.length > 0 || offerAll || cmdRows.length > 0) && (
         <Animated.View
           entering={FadeIn.duration(motion.duration.fast)}
           exiting={FadeOut.duration(motion.duration.quick)}
@@ -225,6 +237,20 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           <Squircle style={{ borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 4 }} accessibilityRole="menu">
             {/* Scrolls when there are many (all your apps); short enough to fit above the keyboard. */}
             <ScrollView style={{ maxHeight: 252 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {cmdRows.map((x) => (
+                <ListRow
+                  key={x.name}
+                  title={`/${x.name}`}
+                  subtitle={x.about}
+                  leading={
+                    <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon icon={CommandLineIcon} size={16} color={c.ink2} />
+                    </View>
+                  }
+                  onPress={() => runCommand(x)}
+                  style={{ minHeight: 48 }}
+                />
+              ))}
               {(offerAll || people.length > 0) && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: 2 }}>Teammates</Text>}
               {offerAll && (
                 <ListRow

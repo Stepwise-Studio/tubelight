@@ -6,6 +6,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 
 import { Composer } from '@/components/chat/composer'
+import { ComputerStrip, type ComputerInfo } from '@/components/chat/computer-strip'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
@@ -34,6 +35,19 @@ export default function Thread() {
   const dmMate = isDm ? people[0] : undefined
   const project = isDm ? undefined : ws.project(threadId.slice(5))
   const title = ws.threadTitle(threadId)
+  // A linked computer's chat: its slash commands and a live status strip (agent computers.py).
+  const computer = dmMate && isComputer(dmMate) ? computerId(dmMate) : null
+  const [commands, setCommands] = useState<{ name: string; about: string; arg: boolean }[] | undefined>()
+  const [pc, setPc] = useState<ComputerInfo | null>(null)
+  useEffect(() => {
+    if (!computer) return
+    api<{ name: string; about: string; arg: boolean }[]>('/computers/commands').then(setCommands, () => {})
+    const load = () => api<{ computers: (ComputerInfo & { id: string })[] }>('/computers')
+      .then((d) => setPc(d.computers.find((x) => x.id === computer) ?? null), () => {})
+    load()
+    const t = setInterval(load, 30_000)
+    return () => clearInterval(t)
+  }, [computer])
   // A chat made by the service (a linked computer's) can arrive before its teammate is loaded here.
   const missing = isDm && !dmMate && !ws.loading
   useEffect(() => { if (missing) ws.refresh() }, [missing])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -247,6 +261,7 @@ export default function Thread() {
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       {header}
+      {computer && <ComputerStrip pc={pc} onCommand={(cmd) => send(cmd, [])} />}
       <ChatActionsContext.Provider value={ctx}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         {/* In flow, so it shrinks above the keyboard; the composer is pinned to its bottom (absolute children skip the padding). */}
@@ -311,6 +326,7 @@ export default function Thread() {
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           onVoice={() => setVoice(true)}
+          commands={computer ? commands ?? [] : undefined}
         />
         </View>
         </View>

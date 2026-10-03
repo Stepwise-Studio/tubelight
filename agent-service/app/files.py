@@ -27,6 +27,20 @@ async def _download(owner_id: str, path: str) -> bytes:
     return r.content
 
 
+async def upload(owner_id: str, name: str, data: bytes) -> dict[str, Any]:
+    """Store a file a teammate brings (a computer's file) in the user's attachments folder, shaped like the app's."""
+    import mimetypes
+    import uuid
+
+    safe = re.sub(r"[^\w.\- ()]", "_", name)[:120] or "file"
+    path = f"{owner_id}/{uuid.uuid4()}/{safe}"
+    mime = mimetypes.guess_type(safe)[0] or "application/octet-stream"
+    r = await db.client().post(f"{config.SUPABASE_URL}/storage/v1/object/attachments/{path}", content=data,
+                               headers={"Content-Type": mime, "x-upsert": "false"})
+    r.raise_for_status()
+    return {"path": path, "name": safe, "mime": mime, "size": len(data)}
+
+
 def _pdf(data: bytes) -> str:
     from pypdf import PdfReader
 

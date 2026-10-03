@@ -905,6 +905,12 @@ async def get_computers(user: User = Depends(current_user)):
     return {"computers": await computers.listing(user["id"]), **await computers.prefs(user["id"])}
 
 
+@app.get("/computers/commands")
+async def computer_commands(user: User = Depends(current_user)):
+    """The slash commands a computer's chat understands (computers.SLASH)."""
+    return [{"name": n, "about": a, "arg": "{arg}" in instr} for n, (a, instr) in computers.SLASH.items()]
+
+
 @app.post("/computers/pair")
 async def pair_computer(user: User = Depends(current_user)):
     return computers.pair_code(user["id"])
@@ -997,6 +1003,20 @@ async def runner_link_confirm(body: RunnerLink):
         return await computers.confirm(body.request, body.approve)
     except (LookupError, PermissionError) as e:
         raise HTTPException(409, str(e)) from e
+
+
+class RunnerDone(BaseModel):
+    id: str = Field(max_length=32)
+    title: str = Field("", max_length=200)
+    exit: int | None = None
+    seconds: int = 0
+    tail: str = Field("", max_length=4000)
+
+
+@app.post("/runner/done")
+async def runner_done(body: RunnerDone, who: tuple[str, str] = Depends(runner_auth)):
+    await computers.job_done(who[0], who[1], body.model_dump())
+    return {"ok": True}
 
 
 @app.post("/runner/unlink")

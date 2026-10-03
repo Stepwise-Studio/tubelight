@@ -231,7 +231,7 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     return {"id": row["id"], "name": row["name"], "os": seen.get("os") or row.get("os"), "online": online,
             "last_seen": seen.get("at"), "folders": seen.get("folders") or [], "docker": bool(seen.get("docker")),
             "shell": bool(seen.get("shell")), "full": bool(seen.get("full")), "version": seen.get("version"),
-            "teammate_id": row.get("teammate_id"), "ask": row.get("ask", True)}
+            "teammate_id": row.get("teammate_id"), "ask": row.get("ask", True), "stats": seen.get("stats") or {}}
 
 
 async def listing(owner_id: str) -> list[dict[str, Any]]:
@@ -311,6 +311,7 @@ def take_password(owner_id: str, cmd: str) -> str | None:
 async def poll(cid: str, info: dict[str, Any]) -> dict[str, Any] | None:
     _seen[cid] = {"at": time.time(), "folders": [str(f) for f in info.get("folders") or []][:20],
                   "docker": bool(info.get("docker")), "shell": bool(info.get("shell")), "full": bool(info.get("full")),
+                  "stats": {k: v for k, v in (info.get("stats") or {}).items() if k in ("disk", "mem", "load", "battery", "charging")},
                   "version": str(info.get("version") or "")[:20], "os": str(info.get("os") or "")[:40]}
     wait = max(0.0, min(float(info.get("wait", POLL_S)), POLL_S))  # 0 on the runner's first poll: online at once
     try:
@@ -336,9 +337,12 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
     if time.time() - seen.get("at", 0) > ONLINE_S:
         raise RuntimeError("The computer is offline (the Tubelight runner isn't running there).")
     version = int(seen.get("version") or 0) if str(seen.get("version") or "0").isdigit() else 0
-    if (args.get("full") and version < 3) or (args.get("sudo") and version < 4):  # older runners can't do it
-        raise RuntimeError("This computer runs an older Tubelight that can't give its chat full access. Download the "
-                           f"new one on it from {config.PUBLIC_URL}/desktop and install it (the link and shared folders stay).")
+    needs = [(args.get("full"), 3, "full access from its chat"), (args.get("sudo"), 4, "admin commands"),
+             (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs")]
+    missing = next((what for wanted, v, what in needs if wanted and version < v), None)
+    if missing:  # it updates itself within 6 hours; restarting Tubelight on it updates it now
+        raise RuntimeError(f"Tubelight on this computer is too old for {missing}. It updates itself within a few hours; "
+                           "to update now, open Tubelight on the computer (or restart it).")
     job = {"id": str(uuid.uuid4()), "op": op, "args": args}
     fut = asyncio.get_running_loop().create_future()
     _waiting[job["id"]] = (cid, fut)
@@ -477,3 +481,147 @@ def desktop_deb() -> tuple[str, bytes]:
     }
     deb = _ar([("debian-binary", b"2.0\n"), ("control.tar.gz", _tgz(control)), ("data.tar.gz", _tgz(data))])
     return f"tubelight-desktop_{version}_all.deb", deb
+
+
+# ------------------------------------------------------------------ commands that only look
+# Read-only commands run without asking (the chat would otherwise ask before every `ls`). Deliberately strict:
+# every part of a pipeline or chain must start with a known read-only command, with no writing redirects, no command
+# substitution, and the per-command flags that change things refused. Anything else asks, as before.
+READ_ONLY = {
+    "ls", "cat", "head", "tail", "wc", "du", "df", "free", "uptime", "uname", "whoami", "id", "hostname", "date", "cal",
+    "ps", "pgrep", "lsblk", "lscpu", "lsusb", "lspci", "lsof", "stat", "file", "which", "whereis", "type", "echo",
+    "printf", "tree", "dpkg-query", "apt-cache", "snap", "flatpak", "systemctl", "journalctl", "sensors", "upower",
+    "nproc", "realpath", "basename", "dirname", "pwd", "cd", "grep", "egrep", "rg", "sort", "uniq", "cut", "tr", "column",
+    "numfmt", "find", "locate", "top", "ip", "ss", "free", "lsmod", "xdg-user-dir", "test", "[", "true", "md5sum",
+    "sha256sum", "diff", "cmp", "less", "more", "nl", "fold", "fmt", "env", "printenv", "dpkg", "apt", "gsettings", "wpctl",
+    "wl-paste",
+}
+_SUB_OK = {  # commands that also change things: only these subcommands/forms are looking
+    "snap": {"list", "info", "find", "version", "changes"},
+    "flatpak": {"list", "info", "search", "remotes", "history"},
+    "systemctl": {"status", "list-units", "list-unit-files", "is-active", "is-enabled", "show", "list-timers", "--user"},
+    "apt": {"list", "show", "policy", "search"},
+    "dpkg": {"-l", "-L", "-s", "--list", "--listfiles", "--status", "-S", "--search", "--get-selections"},
+    "ip": {"addr", "a", "route", "r", "link", "-br", "-4", "-6", "-s"},
+    "gsettings": {"get", "list-keys", "list-schemas", "list-recursively"},
+    "wpctl": {"status", "get-volume", "inspect"},
+}
+
+
+def read_only(cmd: str) -> bool:
+    if "`" in cmd or "$(" in cmd or "<(" in cmd or ">(" in cmd:
+        return False
+    if re.search(r"(?<![0-9&])>>?(?!\s*/dev/null|&[12])|[0-9]>>?(?!\s*/dev/null|&[12])", cmd):
+        return False  # writing a file
+    for part in re.split(r"\|\||&&|[|;\n]", cmd):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            return False
+        words = [w for w in words if not re.fullmatch(r"\d?>&?\d|\d?>/dev/null|/dev/null", w)]
+        if not words:
+            continue
+        head = words[0]
+        if "=" in head or head not in READ_ONLY:
+            return False
+        if head in _SUB_OK and not any(w in _SUB_OK[head] for w in words[1:2] + (words[1:3] if head == "systemctl" else [])):
+            return False
+        if head == "systemctl" and any(w in {"start", "stop", "restart", "enable", "disable", "mask", "kill", "reload",
+                                             "suspend", "poweroff", "reboot", "hibernate"} for w in words):
+            return False
+        if head == "find" and any(w in {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fls"} for w in words):
+            return False
+        if head == "journalctl" and any(w.startswith(("--vacuum", "--rotate", "--flush")) for w in words):
+            return False
+        if head in {"env", "printenv"} and len(words) > 1 and head == "env":
+            return False  # `env X=1 cmd` runs cmd
+    return True
+
+
+# Light actions: change something trivial and visible on the computer (lock, open, volume, play/pause, a note on its
+# screen). Asking first would just be a second tap, so they run straight away, like the read-only ones.
+LIGHT = [
+    r"loginctl lock-session",
+    r"xdg-open \S+(\s+\S+)?",
+    r"gtk-launch [\w.\-]+(\s+\S+)?",
+    r"notify-send( -\w+( \S+)?)* (\"[^\"]*\"|'[^']*'|\S+)( (\"[^\"]*\"|'[^']*'|\S+))?",
+    r"wpctl set-(volume|mute) @DEFAULT_AUDIO_SINK@ [\d.%+\-]+|wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    r"gdbus call --session --dest org\.mpris\.MediaPlayer2\.[\w.\-]+ --object-path /org/mpris/MediaPlayer2 --method "
+    r"org\.mpris\.MediaPlayer2\.Player\.(PlayPause|Play|Pause|Next|Previous|Stop)",
+    r"gdbus call --session --dest org\.freedesktop\.DBus --object-path /org/freedesktop/DBus --method org\.freedesktop\.DBus\.ListNames",
+    r"wl-copy (\"[^\"]*\"|'[^']*')",
+]
+
+
+def light(cmd: str) -> bool:
+    c = cmd.strip()
+    return not re.search(r"[;&|`$<>]", c.replace("@DEFAULT_AUDIO_SINK@", "")) and any(re.fullmatch(p, c) for p in LIGHT)
+
+
+# Slash commands in a computer's chat: the app lists them when the message starts with "/", the service hands the
+# teammate the instructions (graph.preamble). {arg} is whatever follows the command.
+SLASH: dict[str, tuple[str, str]] = {
+    "status": ("Battery, CPU, memory, disk, uptime",
+               "Report this computer's state now in one compact Stats drawing: battery % and whether charging (upower), "
+               "CPU load (uptime), memory used/total (free --si), disk used/free (df -h --si /), uptime. One command."),
+    "big": ("The largest apps and folders",
+            "Find what takes the most space: the 10 largest installed apps (dpkg-query sizes are KiB; include snaps) "
+            "and the 10 largest folders in home (du -sh --si ~/* ~/.[!.]* 2>/dev/null | sort -h | tail -10). "
+            "Two short lists, every row, in GB/MB."),
+    "clean": ("Free up space safely",
+              "Find what can be cleaned safely: the apt cache, old snap revisions, ~/.cache, the Trash, journal logs. "
+              "Show a preview with each size first. Then propose cleanup commands one by one (admin where needed). "
+              "Never touch documents, photos, projects or Downloads."),
+    "update": ("Check for system updates",
+               "Check for updates (apt list --upgradable, snap refresh --list) and show them grouped. If they want to "
+               "update, run it as one admin command (sudo=true)."),
+    "find": ("Find a file by name",
+             "Find files whose name is like '{arg}' in their home, newest first, with size and date: "
+             "find ~ -iname '*{arg}*' -not -path '*/.*' -printf '%TY-%Tm-%Td %s %p\\n' 2>/dev/null | sort -r | head -20. "
+             "If nothing has that name, say so and suggest a shorter name."),
+    "top": ("What's using CPU and memory",
+            "Show what's using the most CPU and memory right now (ps aux --sort=-%cpu | head -8 and --sort=-%mem), as a "
+            "short list of apps, not processes where you can tell. Offer to quit a heavy one (that asks)."),
+    "send": ("Send a file to this phone",
+             "Send the file they mean ('{arg}') to the chat with computer_send_file: find it first if the path isn't "
+             "exact (newest match in their home), and say which one you sent."),
+    "open": ("Open an app, file or link",
+             "Open '{arg}' on the computer: a link or file with xdg-open, an app with gtk-launch <desktop id> (find the "
+             "id in /usr/share/applications or ~/.local/share/applications, or via `snap list`/`flatpak list`)."),
+    "lock": ("Lock the screen", "Lock the screen now: loginctl lock-session."),
+    "sleep": ("Put it to sleep", "Suspend the computer: systemctl suspend. Say it will be offline until it's woken."),
+}
+
+
+def slash(text: str) -> str | None:
+    """The instructions for a message that is a slash command, or None."""
+    m = re.match(r"\s*/(\w+)\s*(.*)", text or "", re.S)
+    if not m or m.group(1).lower() not in SLASH:
+        return None
+    arg = m.group(2).strip().replace("'", "")[:200]
+    return f"They used the slash command /{m.group(1).lower()}{(' ' + arg) if arg else ''}: " + \
+        SLASH[m.group(1).lower()][1].replace("{arg}", arg or "what they named")
+
+
+async def job_done(owner_id: str, cid: str, job: dict[str, Any]) -> None:
+    """A long job on the computer ended: say so in its chat (and on the phone)."""
+    from . import db, push
+
+    r = await row(owner_id, cid)
+    if not r or not r.get("teammate_id"):
+        return
+    tm = await db.one("teammates", {"id": f"eq.{r['teammate_id']}"})
+    secs = int(job.get("seconds") or 0)
+    took = f"{secs // 3600} h {secs % 3600 // 60} min" if secs >= 3600 else f"{max(1, secs // 60)} min"
+    code = job.get("exit")
+    ok = code == 0
+    title = str(job.get("title") or "A job")[:120]
+    tail = str(job.get("tail") or "").strip()[-1500:]
+    text = (f"{'Finished' if ok else 'Stopped with an error'}: **{title}** after {took}"
+            f"{'' if ok else f' (exit code {code})'}."
+            + (f"\n\n```\n{tail}\n```" if tail else ""))
+    thread = f"dm:{r['teammate_id']}"
+    await db.insert("messages", {"thread_id": thread, "owner_id": owner_id, "sender_type": "teammate",
+                                 "teammate_id": r["teammate_id"], "text": text, "kind": "text", "proactive": True,
+                                 "meta": {"job": job.get("id")}})
+    await push.notify(owner_id, r["name"], f"{'Finished' if ok else 'Failed'}: {title}", thread, kind="alert", teammate=tm)

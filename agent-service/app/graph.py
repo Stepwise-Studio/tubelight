@@ -64,6 +64,7 @@ class RunCtx:
     only: list[str] | None = None  # an automation run: just these apps (see scope)
     brief: str = ""  # the running summary of this chat (brief.py)
     sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
+    outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
     @property
@@ -250,9 +251,26 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                  "Jira...), call connect_app with its name instead of telling the user to go somewhere or that it is "
                  "unavailable. When the next step depends on the user's preference, "
                  "call ask_user with 2 to 4 short options rather than listing questions in prose.")
+    if computers.device_of(tm) and (cmd := computers.slash(query)):
+        lines.append(cmd)
     if computers.device_of(tm):
+        lines.append("Doing things on its screen (these run straight away, no approval): open a link or file with "
+                     "`xdg-open <url|path>`; an app with `gtk-launch <desktop id>` (ids in /usr/share/applications, "
+                     "~/.local/share/applications, /var/lib/snapd/desktop/applications); volume with "
+                     "`wpctl set-volume @DEFAULT_AUDIO_SINK@ 40%` or `wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle`; music "
+                     "and video: list players with the D-Bus ListNames call (names starting org.mpris.MediaPlayer2.), "
+                     "then `gdbus call --session --dest <that name> --object-path /org/mpris/MediaPlayer2 --method "
+                     "org.mpris.MediaPlayer2.Player.PlayPause` (or Next, Previous); a note on its screen with "
+                     "`notify-send 'Title' 'text'`; lock with `loginctl lock-session`; the clipboard with `wl-paste` / "
+                     "`wl-copy 'text'` (if wl-clipboard is missing, offer to install it: an admin command). Files: "
+                     "computer_send_file sends one to their phone; computer_receive saves what they attached here.")
         lines.append("Report sizes the way their file manager does: decimal GB/MB (`df -h --si`, `du -sh --si`, "
-                     "`ls -lh --si`), and say so; plain `-h` prints GiB labelled 'G', which reads as wrong next to it.")
+                     "`ls -lh --si`), and say so; plain `-h` prints GiB labelled 'G', which reads as wrong next to it. "
+                     "Check the units a command prints before converting (dpkg's Installed-Size is KiB). "
+                     "Commands that only look (ls, df, du, find, dpkg-query, ps...) run straight away; anything that "
+                     "changes something waits for their OK. "
+                     "When you show a list or table from command output, include every row it returned, exactly as "
+                     "many as they asked for: count them before you answer, and never say 'top 10' over 8 rows.")
     if "computer_list" in tool_names:
         c = ctx.computer
         lines.append(f"You can work on {ctx.user_name}'s computer '{c['name']}' ({c['os']}), in the folders they shared: "
@@ -484,6 +502,7 @@ def make_teammate(ctx: RunCtx, tm: dict):
                 "thread_id": ctx.thread_id, "owner_id": ctx.owner_id, "sender_type": "teammate", "teammate_id": tm["id"],
                 "text": text, "kind": "text", "proactive": ctx.proactive, "run_id": ctx.run_id,
                 "meta": {"stream_id": stream_id, "tool_calls": ctx.turn_tools.pop(tm["id"], []),
+                         **({"attachments": ctx.outgoing.pop(tm["id"])} if ctx.outgoing.get(tm["id"]) else {}),
                          **({"event_type": ctx.event_type} if ctx.event_type else {})},
             })
             # Every reply: while the app is open on screen Android doesn't show it (no foreground handler), so this
@@ -551,6 +570,9 @@ def make_gate(ctx: RunCtx):
                 continue
             if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
                 continue
+            cmd = str(tc["args"].get("cmd", ""))
+            if tc["name"] == "computer_run" and not tc["args"].get("sudo") and (computers.read_only(cmd) or computers.light(cmd)):
+                continue  # only looks (ls, df, du, dpkg-query...): asking before every look is friction, not safety
             if tc["name"].startswith("computer_") and not tc["args"].get("sudo") and await _runs_freely(ctx, tm):
                 continue  # the user turned off "ask before commands" for this computer's chat
             tool_name, title, draft = T.approval_view(tc["name"], tc["args"])
