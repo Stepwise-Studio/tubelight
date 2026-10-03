@@ -33,6 +33,9 @@ export default function Thread() {
   const dmMate = isDm ? people[0] : undefined
   const project = isDm ? undefined : ws.project(threadId.slice(5))
   const title = ws.threadTitle(threadId)
+  // A chat made by the service (a linked computer's) can arrive before its teammate is loaded here.
+  const missing = isDm && !dmMate && !ws.loading
+  useEffect(() => { if (missing) ws.refresh() }, [missing])  // eslint-disable-line react-hooks/exhaustive-deps
   const liveRuns = ws.liveRuns.filter((r) => r.thread_id === threadId)
   const live = liveRuns.length > 0
 

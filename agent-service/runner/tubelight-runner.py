@@ -333,7 +333,12 @@ def run() -> None:
         threading.Thread(target=lambda: _quiet(setup, load()), daemon=True).start()
     print(f"Tubelight runner {VERSION}. Sandboxes: {'yes' if docker else 'no (Docker not available)'}. Ctrl+C stops all access.", flush=True)
     wait, first = 2, True
+    me = Path(__file__).resolve()
+    born = me.stat().st_mtime
     while True:
+        if me.stat().st_mtime != born:  # updated (a new .deb): start over on the new code
+            print("Updated; restarting.", flush=True)
+            os.execv(sys.executable, [sys.executable, str(me), "run"])
         c = load()  # linking, sharing and pausing (from the window or the CLI) apply without a restart
         if not c.get("token") or c.get("paused"):
             note(online=False, paused=bool(c.get("paused")))

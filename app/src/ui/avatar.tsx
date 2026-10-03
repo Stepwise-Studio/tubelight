@@ -86,8 +86,8 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
       accessibilityLabel={working ? `${teammate.name}, working` : teammate.name}
     >
       {device ? (
-        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.panel3, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon icon={LaptopIcon} size={Math.round(size * 0.52)} color="ink2" />
+        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: teammate.color || '#64748b', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
         </View>
       ) : png ? (
         <Image source={{ uri: png }} style={{ width: size, height: size }} fadeDuration={0} />

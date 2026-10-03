@@ -44,6 +44,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [teammates, setTeammates] = useState<Teammate[]>([])
+  const known = useRef(new Set<string>())
   const [projects, setProjects] = useState<Project[]>([])
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [threads, setThreads] = useState<Thread[]>([])
@@ -70,6 +71,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     }
     setError(null)
     setTeammates(t.data as Teammate[])
+    known.current = new Set((t.data as Teammate[]).map((x) => x.id))
     setProjects(p.data as Project[])
     setMembers(m.data as ProjectMember[])
     setThreads(th.data as Thread[])
@@ -119,6 +121,8 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
           else {
             const row = e.new as Thread
             setThreads((l) => (l.some((x) => x.id === row.id) ? l.map((x) => (x.id === row.id ? row : x)) : [...l, row]))
+            // Teammates aren't in the realtime feed: a new chat for one we don't know (a linked computer's) reloads them.
+            if (row.kind === 'dm' && row.teammate_id && !known.current.has(row.teammate_id)) refresh()
           }
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'approvals' }, (e) => {
