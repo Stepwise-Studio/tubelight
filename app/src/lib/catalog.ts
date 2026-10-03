@@ -48,18 +48,18 @@ export interface Toolkit {
  * server actually lists (all free) are shown; the rest stay under "All free models".
  */
 export const MODEL_HINTS: { id: string; best: string }[] = [
-  { id: 'gemini:gemini-3.8-flash', best: 'Best for real work: multi-step tasks across your apps. Big free budget.' },
-  { id: 'gemini:gemini-3.5-flash-lite', best: 'Fastest replies, still good with apps. Largest free daily quota.' },
+  { id: 'gemini:gemini-3.5-flash-lite', best: 'The everyday pick: good with apps and tools, fast, 500 free requests a day.' },
+  { id: 'gemini:gemini-3.8-flash', best: 'Sharpest for hard multi-step work, but only 20 free requests a day.' },
   { id: 'groq:openai/gpt-oss-120b', best: 'Quick chat and planning. Very fast, but small per-minute limits.' },
   { id: 'groq:qwen/qwen3.8-27b', best: 'Quick coding questions. Too small for teammates with many apps.' },
   { id: 'groq:openai/gpt-oss-20b', best: 'Quickest replies for simple jobs: triage, summaries, short answers.' },
   { id: 'openrouter:nvidia/nemotron-3-ultra-550b-a55b:free', best: 'Hardest problems, careful reasoning. Slower, with tighter daily limits.' },
 ]
 
-/** The shortlisted model to suggest for a role: Gemini's big free budget suits every role that uses apps. */
-export const recommendedModel = (_role: string) => 'gemini:gemini-3.8-flash'
+/** The shortlisted model to suggest for a role: Flash-Lite's daily budget lasts a whole day of work for any role. */
+export const recommendedModel = (_role: string) => 'gemini:gemini-3.5-flash-lite'
 
-export const DEFAULT_MODEL = 'gemini:gemini-3.8-flash'
+export const DEFAULT_MODEL = 'gemini:gemini-3.5-flash-lite'
 export const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
 
 /** Mid-light pastels: readable faces on zinc-950 and on white. */
