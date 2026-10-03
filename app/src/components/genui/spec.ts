@@ -43,6 +43,8 @@ export const Item = spec('Item', 'A row in a List.', z.object({
   subtitle: z.string().optional(),
   trailing: z.string().optional().describe('Short value on the right'),
   tone,
+  button: z.string().optional().describe('A small button on the row, e.g. "Close"'),
+  reply: z.string().optional().describe('What tapping the button sends as the user\'s reply, e.g. "Close Firefox"'),
 }))
 
 const blocks = () => z.array(z.union([

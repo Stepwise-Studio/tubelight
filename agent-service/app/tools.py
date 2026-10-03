@@ -1,6 +1,7 @@
 """Tool classification (read / draft / act), human labels, and each teammate's toolset."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
 import time
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, files, followups, images, llm, memory, repo, sandbox, usage
+from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, repo, sandbox, usage
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -72,7 +73,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_start_job": "act", "generate_image": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -80,7 +81,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "generate_image": "Drawing an image", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -179,6 +180,8 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"{what[:1].upper()}{what[1:]}{' (admin)' if args.get('sudo') else ''}"[:80]
     if name == "computer_start_job":
         return f"Start: {str(args.get('title') or 'a long job').strip().rstrip('.')}"[:80]
+    if name == "computer_close_app":
+        return f"Close {str(args.get('name') or 'an app')}"[:80]
     if name == "computer_write":
         return f"Write {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]}"[:80]
     _, action = _phrase(name)
@@ -431,6 +434,32 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "convention, where something lives). Not for chat or task status."),
         ]
 
+    if not helper:
+        async def make_document(kind: str, title: str, content: str) -> str:
+            try:
+                name, data = await asyncio.to_thread(documents.make, kind, title, content)
+            except ValueError as e:
+                return f"Not made: {e} Fix it and call make_document again."
+            ctx.outgoing.setdefault(tm["id"], []).append(await files.upload(ctx.owner_id, name, data))
+            return f"{name} ({len(data) / 1e3:.0f} KB) is attached to your reply. Say a line about what's in it; don't paste it."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=make_document, name="make_document",
+            description=(
+                "Make a file and attach it to your reply: a report, letter, plan or notes (pdf, docx, md), a "
+                "spreadsheet (xlsx) or a slide deck (pptx). Write the whole document, polished, not an outline. "
+                "kind: pdf | docx | md | xlsx | pptx. title: the document's title (also its file name). "
+                "content for pdf/docx/md: Markdown (# headings, **bold**, lists, | tables |, > quotes, ``` code). "
+                "content for xlsx: JSON {\"sheets\": [{\"name\", \"columns\": [..], \"rows\": [[..]], "
+                "\"formats\": {\"<column>\": \"#,##0.00\" | \"0%\" | \"dd-mmm-yyyy\"}}]}; numbers as numbers, "
+                "formulas as \"=SUM(B2:B9)\". content for pptx: JSON {\"slides\": [{\"type\": \"title\"|\"section\"|"
+                "\"bullets\"|\"two_column\"|\"table\"|\"stats\"|\"quote\", \"title\", \"subtitle\", \"bullets\": [..] "
+                "(indent a sub-point with two spaces), \"left\"/\"right\" + \"left_title\"/\"right_title\", \"columns\"+\"rows\", "
+                "\"stats\": [{\"value\", \"label\"}], \"quote\"+\"by\", \"notes\"}]}: 6 short bullets at most per "
+                "slide, one idea per slide, speaker notes for the detail. Never invent figures, stats or quotes: use "
+                "numbers they gave or a tool found, else a clear placeholder like [X%]. To change a file they attached, read it "
+                "(it's in their message) and make the new version.")))
+
     if images.available() and not helper:
         async def generate_image(prompt: str) -> str:
             att = await images.generate(ctx.owner_id, prompt)
@@ -541,6 +570,21 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             ctx.outgoing.setdefault(tm["id"], []).append(att)
             return f"Attached {got['name']} ({got['size'] / 1e6:.1f} MB) to your reply; it shows in the chat on their phone."
 
+        async def computer_screenshot() -> str:
+            got = await computers.call(dev, "screenshot", {"full": True}, 60)
+            ctx.outgoing.setdefault(tm["id"], []).append(
+                await files.upload(ctx.owner_id, got["name"], base64.b64decode(got["b64"])))
+            return "The screenshot is attached to your reply. Say one short line; don't describe it unless asked."
+
+        async def computer_apps() -> str:
+            got = await computers.call(dev, "live", {}, 15)
+            return "Apps running now (memory, CPU; closable = safe to close): " + "; ".join(
+                f"{a['name']} {a['mem'] / 1e9:.1f} GB CPU {a['cpu']:.0f}%{' closable' if a.get('closable') else ''}"
+                for a in got["apps"])
+
+        async def computer_close_app(name: str, force: bool = False) -> str:
+            return await computers.call(dev, "quit_app", {"name": name, "force": force, "full": True}, 30)
+
         async def computer_receive(folder: str = "~/Downloads/Tubelight") -> str:
             rows = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "sender_type": "eq.user",
                                                 "order": "created_at.desc", "limit": "5", "select": "meta"})
@@ -566,6 +610,13 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "back in this chat when it finishes. title: 2-6 words. To check on it, tail its log."),
             StructuredTool.from_function(coroutine=computer_send_file, name="computer_send_file",
                 description="Send a file from this computer to the chat, so they can open it on their phone (up to 25 MB)."),
+            StructuredTool.from_function(coroutine=computer_screenshot, name="computer_screenshot",
+                description="Capture this computer's whole screen and attach it to your reply (what's open, an error on screen)."),
+            StructuredTool.from_function(coroutine=computer_apps, name="computer_apps",
+                description="The apps running now with their memory and CPU, and which are safe to close."),
+            StructuredTool.from_function(coroutine=computer_close_app, name="computer_close_app",
+                description="Close a running app by its name exactly as computer_apps lists it (all its windows and "
+                            "processes; unsaved work may be lost). force: kill it at once if it hung."),
             StructuredTool.from_function(coroutine=computer_receive, name="computer_receive",
                 description="Save the files they attached in this chat onto the computer (default ~/Downloads/Tubelight). "
                             "Use it when they attach something and want it on the laptop."),

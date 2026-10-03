@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard'
 import { Image } from 'expo-image'
 import { Fragment, createContext, memo, useContext, useEffect, useState } from 'react'
-import { Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
+import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
   Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download04Icon, File01Icon, FlashIcon,
@@ -19,7 +19,7 @@ import { useTeammate } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import {
   Collapse, Icon, IconButton, ListRow, Markdown, Notice, Press, Sheet, Skeleton, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
-  showEmojiPicker, showMenu, useFlip, warmEmojis,
+  showEmojiPicker, showMenu, toast, useFlip, warmEmojis,
 } from '@/ui'
 
 import { Capsule, type Tone } from './capsule'
@@ -535,10 +535,19 @@ function Picture({ a }: { a: Attachment }) {
   )
 }
 
+/** Tap a file to download it under its own name (Android saves it and offers to open it). */
+async function openFile(a: Attachment) {
+  haptic.tap()
+  const { data, error } = await supabase.storage.from('attachments').createSignedUrl(a.path, 60 * 60, { download: a.name })
+  if (error || !data?.signedUrl) { toast({ title: `Unable to open ${a.name}`, body: error?.message, tone: 'error' }); return }
+  Linking.openURL(data.signedUrl)
+}
+
 function FileChip({ a }: { a: Attachment }) {
   const { c } = useTheme()
   const ext = a.name.split('.').pop()?.toUpperCase().slice(0, 4) ?? ''
   return (
+    <Pressable onPress={() => openFile(a)} accessibilityRole="button" accessibilityLabel={`${a.name}, ${formatSize(a.size)}`} accessibilityHint="Downloads it">
     <Squircle style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, backgroundColor: c.wash, padding: 8, paddingRight: 12, minWidth: 180 }}>
       <Squircle style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.panel, alignItems: 'center', justifyContent: 'center' }}>
         <Icon icon={File01Icon} size={18} color="ink2" />
@@ -547,7 +556,10 @@ function FileChip({ a }: { a: Attachment }) {
         <Text variant="label" numberOfLines={1}>{a.name}</Text>
         <Text variant="footnote" color="ink3">{[ext, formatSize(a.size)].filter(Boolean).join(' · ')}</Text>
       </View>
+      <View style={{ flex: 1 }} />
+      <Icon icon={Download04Icon} size={18} color="ink3" />
     </Squircle>
+    </Pressable>
   )
 }
 

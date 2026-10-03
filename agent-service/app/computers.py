@@ -339,7 +339,7 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
     version = int(seen.get("version") or 0) if str(seen.get("version") or "0").isdigit() else 0
     needs = [(args.get("full"), 3, "full access from its chat"), (args.get("sudo"), 4, "admin commands"),
              (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs"),
-             (op == "live", 9, "live app usage")]
+             (op == "live", 9, "live app usage"), (op in ("quit_app", "screenshot"), 10, "screenshots and closing apps")]
     missing = next((what for wanted, v, what in needs if wanted and version < v), None)
     if missing:  # it updates itself within 6 hours; restarting Tubelight on it updates it now
         raise RuntimeError(f"Tubelight on this computer is too old for {missing}. It updates itself within a few hours; "
@@ -489,7 +489,7 @@ def desktop_deb() -> tuple[str, bytes]:
 # every part of a pipeline or chain must start with a known read-only command, with no writing redirects, no command
 # substitution, and the per-command flags that change things refused. Anything else asks, as before.
 READ_ONLY = {
-    "ls", "cat", "head", "tail", "wc", "du", "df", "free", "uptime", "uname", "whoami", "id", "hostname", "date", "cal",
+    "ls", "fc-list", "fc-match", "cat", "head", "tail", "wc", "du", "df", "free", "uptime", "uname", "whoami", "id", "hostname", "date", "cal",
     "ps", "pgrep", "lsblk", "lscpu", "lsusb", "lspci", "lsof", "stat", "file", "which", "whereis", "type", "echo",
     "printf", "tree", "dpkg-query", "apt-cache", "snap", "flatpak", "systemctl", "journalctl", "sensors", "upower",
     "nproc", "realpath", "basename", "dirname", "pwd", "cd", "grep", "egrep", "rg", "sort", "uniq", "cut", "tr", "column",
@@ -615,6 +615,10 @@ SLASH: dict[str, tuple[str, str]] = {
     "open": ("Open an app, file or link",
              "Open '{arg}' on the computer: a link or file with xdg-open, an app with gtk-launch <desktop id> (find the "
              "id in /usr/share/applications or ~/.local/share/applications, or via `snap list`/`flatpak list`)."),
+    "screenshot": ("See its screen", "Take a screenshot now (computer_screenshot) and send it; one short line, no description."),
+    "apps": ("Running apps, with Close", "List the apps running now with computer_apps, in one List drawing: one Item per "
+             "app with its memory as trailing, and for apps it marks closable a button \"Close\" whose reply is "
+             "\"Close <exact app name>\". Nothing else."),
     "lock": ("Lock the screen", "Lock the screen now: loginctl lock-session."),
     "sleep": ("Put it to sleep", "Suspend the computer: systemctl suspend. Say it will be offline until it's woken."),
 }

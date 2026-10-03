@@ -31,6 +31,26 @@ def label(text: str, *classes: str, **kw) -> Gtk.Label:
     return lb
 
 
+# GNOME lets apps outside Flatpak take silent screenshots only with this permission (the portal's "screenshot" table,
+# app id "" = apps like this one). The switch below is the user's own choice; off sets it back to "no".
+def _store(method: str, args: GLib.Variant) -> GLib.Variant:
+    return Gio.bus_get_sync(Gio.BusType.SESSION).call_sync(
+        "org.freedesktop.impl.portal.PermissionStore", "/org/freedesktop/impl/portal/PermissionStore",
+        "org.freedesktop.impl.portal.PermissionStore", method, args, None, 0, 5000, None)
+
+
+def screenshots_allowed() -> bool:
+    try:
+        perms, _data = _store("Lookup", GLib.Variant("(ss)", ("screenshot", "screenshot"))).unpack()
+        return perms.get("") == ["yes"]
+    except GLib.Error:
+        return False
+
+
+def allow_screenshots(on: bool) -> None:
+    _store("SetPermission", GLib.Variant("(sbssas)", ("screenshot", True, "screenshot", "", ["yes" if on else "no"])))
+
+
 def row(title: str, subtitle: str = "") -> Adw.ActionRow:
     r = Adw.ActionRow(title=title, subtitle=subtitle)
     r.set_use_markup(False)  # paths and commands, not markup
@@ -186,6 +206,10 @@ class Window(Adw.ApplicationWindow):
                               subtitle="Its chat in the app can open any file and run any command as you, after you approve")
         whole.connect("notify::active", lambda sw, _p: self._set(full_access=sw.get_active()))
         g.add(whole)
+        shots = Adw.SwitchRow(title="Let your phone take screenshots", active=screenshots_allowed(),
+                              subtitle="Its chat can capture this screen when you ask (needs full access)")
+        shots.connect("notify::active", lambda sw, _p: allow_screenshots(sw.get_active()))
+        g.add(shots)
         page.add(g)
 
         f = Adw.PreferencesGroup(title="Shared folders",

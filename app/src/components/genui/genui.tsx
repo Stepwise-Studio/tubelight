@@ -385,6 +385,8 @@ function Flows({ p }: { p: Props }) {
 
 function List({ p }: { p: Props }) {
   const { c } = useTheme()
+  const { streaming, onChoose } = useContext(Ctx)
+  const [sent, setSent] = useState<string[]>([])
   const items = els(p.items, 'Item')
   return (
     <View>
@@ -396,6 +398,11 @@ function List({ p }: { p: Props }) {
           </View>
           {!!str(it.props.trailing) && (
             <Text variant="label" tabular style={{ color: it.props.tone ? toneColor(c, it.props.tone as Tone) : c.ink2 }}>{str(it.props.trailing)}</Text>
+          )}
+          {!!onChoose && !!str(it.props.button) && !!str(it.props.reply) && (
+            <Button label={sent.includes(str(it.props.reply)) ? 'Sent' : str(it.props.button)} variant="soft" size="sm"
+              disabled={streaming || sent.includes(str(it.props.reply))}
+              onPress={() => { haptic.tap(); setSent((x) => [...x, str(it.props.reply)]); onChoose(str(it.props.reply)) }} />
           )}
         </View>
       ))}

@@ -1,6 +1,7 @@
 import { requestRecordingPermissionsAsync } from 'expo-audio'
-import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Pressable, StyleSheet, View } from 'react-native'
+import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { BackHandler, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import Animated, { FadeIn, FadeOut, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, KeyboardIcon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
@@ -10,8 +11,8 @@ import { LIVE_WS, frameText } from '@/lib/live'
 import { plainText } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
-import { motion, useTheme } from '@/theme'
-import { Button, IconButton, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
+import { fonts, motion, radius, useTheme } from '@/theme'
+import { Button, IconButton, Squircle, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
 import { VoiceBeam, type VoiceBeamMode } from '@/vendor/voice-glow-native/VoiceBeam'
 
 import { LiveAudio } from '../../../modules/live-audio'
@@ -23,6 +24,9 @@ const TASK_TIMEOUT_MS = 120_000
 const plain = plainText
 /** Linear RMS → the raw level voice-glow's driver expects (its base gain 5 × default sensitivity 3.1). */
 const toBeam = (rms: number) => Math.min(1, rms * 15.5)
+
+/** One spoken turn in the transcript. */
+interface Line { role: 'user' | 'teammate'; text: string }
 
 export interface VoiceModeProps {
   teammate?: Teammate
@@ -50,7 +54,11 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
   const insets = useSafeAreaInsets()
   const beamLevel = useSharedValue(0)
   const [phase, setPhase] = useState<Phase>('connecting')
-  const [caption, setCaption] = useState('')
+  // The conversation as it's spoken (Claude-style): finished turns, then the one being spoken now.
+  const [lines, setLines] = useState<Line[]>([])
+  const [live, setLive] = useState<Line | null>(null)
+  const [startedAt] = useState(() => new Date().toISOString())
+  const scroll = useRef<ScrollView>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   // "Better as text": the teammate offered to continue in the chat (code, tables, long lists).
@@ -90,17 +98,22 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
         .then(() => api('/voice/transcript', { method: 'POST', json: { thread_id: threadId, turns: [{ role, text }] } }))
         .then(() => {}, () => {})
     }
+    const show = (role: Line['role'], text: string) => setLines((ls) => [...ls, { role, text }])
     const flushUser = () => {
       const t = turn.current
       if (t.userSaved || !t.user.trim()) return
       t.userSaved = true
       post('user', t.user.trim())
+      show('user', t.user.trim())
+      setLive(null)
     }
     const saveTurn = () => {
       const t = turn.current
       turn.current = { user: '', model: '', userSaved: false, result: false }
-      if (!t.userSaved && t.user.trim()) post('user', t.user.trim())
+      if (!t.userSaved && t.user.trim()) { post('user', t.user.trim()); show('user', t.user.trim()) }
       if (t.model.trim() && !t.result) post('teammate', t.model.trim())
+      if (t.model.trim()) show('teammate', t.model.trim()) // a spoken task result shows too; the chat has the full reply
+      setLive(null)
     }
 
     const runTask = async (id: string, name: string, request: string) => {
@@ -172,7 +185,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       }
       if (sc.inputTranscription?.text) {
         turn.current.user += sc.inputTranscription.text
-        if (phaseRef.current !== 'speaking') setCaption(turn.current.user.trim())
+        if (phaseRef.current !== 'speaking') setLive({ role: 'user', text: turn.current.user.trim() })
       }
       if (sc.outputTranscription?.text) {
         flushUser()
@@ -181,7 +194,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
           turn.current.result = true
           pendingResults.current -= 1
         }
-        setCaption(turn.current.model.trim())
+        setLive({ role: 'teammate', text: turn.current.model.trim() })
       }
       if (sc.turnComplete) saveTurn()
     }
@@ -264,7 +277,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     } }] } }))
     setOffer(null)
   }
-  const retry = () => { setError(''); setCaption(''); go('connecting'); setAttempt((a) => a + 1) }
+  const retry = () => { setError(''); setLive(null); go('connecting'); setAttempt((a) => a + 1) }
 
   const name = teammate?.name ?? title
   const label = {
@@ -275,6 +288,13 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     muted: 'Microphone off',
     error: error || 'Something went wrong',
   }[phase]
+  // What came before this call: the chat's last few messages, oldest first.
+  const before = useMemo(() => messages
+    .filter((m) => m.kind === 'text' && !m.local && m.created_at < startedAt && plain(m.text).trim())
+    .slice(0, 6).reverse()
+    .map((m): Line => ({ role: m.sender_type === 'user' ? 'user' : 'teammate', text: plain(m.text).trim() })), [messages, startedAt])
+  const all = [...before, ...lines, ...(live ? [live] : [])]
+  const bg = scheme === 'dark' ? '#000000' : c.canvas
   const beam: VoiceBeamMode = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking'
     : phase === 'working' || phase === 'connecting' ? 'processing' : 'idle'
 
@@ -292,15 +312,35 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
         <Text variant="headline" numberOfLines={1}>{title}</Text>
       </View>
 
-      <Pressable onPress={tap} style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingBottom: 140 }} accessibilityRole="button" accessibilityLabel={label}>
-        <View style={{ alignItems: 'center', gap: 14 }}>
-          <TextSwap variant="label" color="ink3">{label}</TextSwap>
-          {!!caption && phase !== 'error' && (
-            <Text variant="heading" numberOfLines={6} style={{ textAlign: 'center' }}>{caption}</Text>
-          )}
-          {phase === 'error' && <Button label="Try again" variant="soft" onPress={retry} />}
-        </View>
-      </Pressable>
+      {/* The transcript: earlier turns dim, the newest bright; tap anywhere to cut the teammate off. */}
+      <View style={{ flex: 1 }}>
+        <ScrollView ref={scroll} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 24, paddingTop: 48, paddingBottom: 24, gap: 22 }}>
+          <Pressable onPress={tap} style={{ gap: 22 }} accessibilityRole="button" accessibilityLabel={label}>
+            {all.map((l, i) => {
+              const recent = i >= all.length - 2
+              return l.role === 'user' ? (
+                <Squircle key={i} style={{ alignSelf: 'flex-end', maxWidth: '86%', borderRadius: radius.lg, backgroundColor: c.panel2, paddingHorizontal: 16, paddingVertical: 12, opacity: recent ? 1 : 0.6 }}>
+                  <Text variant="body" style={{ fontSize: 17, lineHeight: 24 }}>{l.text}</Text>
+                </Squircle>
+              ) : (
+                <Text key={i} style={{ fontFamily: fonts.regular, fontSize: 24, lineHeight: 32, letterSpacing: -0.3, color: recent ? c.ink : c.ink3 }}>{l.text}</Text>
+              )
+            })}
+          </Pressable>
+        </ScrollView>
+        {/* Older lines fade out under the header. */}
+        <Canvas style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 56 }} pointerEvents="none">
+          <Rect x={0} y={0} width={2000} height={56}>
+            <LinearGradient start={vec(0, 0)} end={vec(0, 56)} colors={[bg, `${bg}00`]} />
+          </Rect>
+        </Canvas>
+      </View>
+
+      <View style={{ alignItems: 'center', gap: 12, paddingBottom: insets.bottom + 132, paddingTop: 4 }}>
+        <TextSwap variant="label" color="ink3">{label}</TextSwap>
+        {phase === 'error' && <Button label="Try again" variant="soft" onPress={retry} />}
+      </View>
 
       {offer && (
         <Animated.View

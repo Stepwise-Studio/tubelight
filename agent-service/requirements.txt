@@ -22,3 +22,8 @@ pytest-asyncio>=1.4
 pypdf
 python-multipart
 cryptography>=43  # signs Firebase (FCM) requests: push.py sends Android notifications directly
+python-docx
+openpyxl
+python-pptx
+fpdf2
+markdown-it-py

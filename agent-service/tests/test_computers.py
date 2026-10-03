@@ -187,3 +187,17 @@ async def test_images_have_their_own_usage_rows_and_fall_back(env, monkeypatch):
     rows = {r["id"]: r for r in by["Images"]}
     assert rows["images:flux-1-schnell"]["used"] >= 1 and rows["images:lucid-origin"]["limit"] == 10_000 // 2784
     assert "In use" in rows["images:lucid-origin"]["note"]
+
+
+def test_the_runner_never_closes_the_desktop_or_without_full_access():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("runner", Path(__file__).parent.parent / "runner" / "tubelight-runner.py")
+    r = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(r)
+    assert r._closable("Firefox") and not r._closable("GNOME Shell") and not r._closable("gsd-power")
+    for c, a in (({}, {"name": "Firefox"}), ({"full_access": True}, {"name": "GNOME Shell", "full": True}),
+                 ({"full_access": False}, {"name": "Firefox", "full": True})):
+        with pytest.raises(PermissionError):
+            r.quit_app(c, a)
+    assert r.quit_app({"full_access": True}, {"name": "No such app", "full": True}) == "No such app isn't running."

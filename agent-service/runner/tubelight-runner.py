@@ -26,6 +26,7 @@ import platform
 import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -33,10 +34,11 @@ import tarfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "9"  # 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "11"  # 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -264,7 +266,9 @@ NICE = {"chrome": "Chrome", "chromium": "Chromium", "firefox": "Firefox", "code"
         "docker": "Docker", "dockerd": "Docker", "containerd": "Docker", "Web Content": "Firefox", "WebExtensions": "Firefox",
         "Privileged Cont": "Firefox", "RDD Process": "Firefox", "Socket Process": "Firefox", "Utility Process": "Firefox",
         "chatgpt": "ChatGPT", "claude-desktop": "Claude", "nautilus": "Files", "gnome-terminal-": "Terminal", "ptyxis": "Terminal",
-        "baobab": "Disk Usage", "zen": "Zen Browser", "postgres": "PostgreSQL", "next-server": "Next.js", "snapd": "Snap", "claude": "Claude Code"}
+        "baobab": "Disk Usage", "zen": "Zen Browser", "postgres": "PostgreSQL", "next-server": "Next.js", "snapd": "Snap", "claude": "Claude Code",
+        "gnome-calculato": "Calculator", "gnome-calendar": "Calendar", "gnome-text-edit": "Text Editor",
+        "gnome-system-mo": "System Monitor", "gnome-control-c": "Settings", "org.gnome.Nautilus": "Files"}
 
 
 def _procs() -> dict:
@@ -280,7 +284,7 @@ def _procs() -> dict:
                 argv0 = (d / "cmdline").read_bytes().split(b"\0")[0].decode(errors="replace")
                 comm = re.split(r"[ (:]", Path(argv0).name.lstrip(".").removesuffix("-wrapped"))[0] or comm
             f = st[st.rindex(")") + 2:].split()
-            out[d.name] = (comm, int(f[11]) + int(f[12]), int(f[21]) * page)  # utime+stime, RSS
+            out[d.name] = (comm, int(f[11]) + int(f[12]), int(f[21]) * page, d.stat().st_uid)  # utime+stime, RSS, owner
         except (OSError, ValueError, IndexError):
             continue
     return out
@@ -293,18 +297,95 @@ def live(c: dict, a: dict) -> dict:
     second, dt = _procs(), time.monotonic() - t0
     hz, cpus = os.sysconf("SC_CLK_TCK"), os.cpu_count() or 1
     apps: dict = {}
-    for pid, (comm, ticks, rss) in second.items():
+    for pid, (comm, ticks, rss, uid) in second.items():
         prev = first.get(pid)
         cpu = (ticks - prev[1]) / hz / dt * 100 / cpus if prev else 0.0
         name = NICE.get(comm, comm)
-        g = apps.setdefault(name, {"name": name, "mem": 0, "cpu": 0.0, "procs": 0})
+        g = apps.setdefault(name, {"name": name, "mem": 0, "cpu": 0.0, "procs": 0, "mine": False, "self": False})
         g["mem"] += rss
         g["cpu"] += cpu
         g["procs"] += 1
+        g["mine"] |= uid == os.getuid()
+        g["self"] |= int(pid) == os.getpid()
     total = int(Path("/proc/meminfo").read_text().split("MemTotal:")[1].split()[0]) * 1024
     top = sorted(apps.values(), key=lambda g: -g["mem"])[:12]
     return {"stats": stats(), "mem_total": total, "cpu_total": round(sum(g["cpu"] for g in apps.values()), 1),
-            "apps": [{**g, "cpu": round(g["cpu"], 1)} for g in top]}
+            "apps": [{"name": g["name"], "mem": g["mem"], "cpu": round(g["cpu"], 1), "procs": g["procs"],
+                      "closable": g["mine"] and not g["self"] and _closable(g["name"])} for g in top]}
+
+
+# The desktop and its plumbing: closing these logs you out or breaks sound, search, the clipboard.
+KEEP = ("GNOME Shell", "Xwayland", "systemd", "dbus", "pipewire", "wireplumber", "gnome-shell", "gnome-session",
+        "gnome-keyring", "gsd-", "gvfs", "xdg-",
+        "at-spi", "evolution-", "tracker-", "localsearch", "ibus", "gdm", "gjs", "snapd", "Docker", "PostgreSQL", "kworker")
+
+
+def _closable(name: str) -> bool:
+    return not name.startswith(KEEP)
+
+
+def quit_app(c: dict, a: dict) -> str:
+    """Close every process of one app (as grouped in `live`): politely first, then force if asked or still running."""
+    if not full(c, a):
+        raise PermissionError("Closing apps needs full access.")
+    name = a["name"]
+    if not _closable(name):
+        raise PermissionError(f"{name} is part of the desktop; closing it would break the session.")
+    me = os.getuid()
+    pids = [int(p) for p, (comm, _t, _r, uid) in _procs().items() if NICE.get(comm, comm) == name and uid == me and int(p) != os.getpid()]
+    if not pids:
+        return f"{name} isn't running."
+    for sig in (signal.SIGKILL,) if a.get("force") else (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        for _ in range(30):  # up to 3 s for it to save and quit
+            pids = [p for p in pids if Path(f"/proc/{p}").exists()]
+            if not pids:
+                return f"Closed {name}."
+            time.sleep(0.1)
+    return f"{name} is still running ({len(pids)} processes didn't stop)."
+
+
+def screenshot(c: dict, a: dict) -> dict:
+    """The whole screen as PNG, through the desktop's screenshot portal (Wayland allows nothing else). GNOME asks
+    for the "screenshot" permission once: the Tubelight window's switch grants it."""
+    if not full(c, a):
+        raise PermissionError("Screenshots need full access.")
+    from gi.repository import Gio, GLib
+    ctx = GLib.MainContext.new()
+    ctx.push_thread_default()
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        token = f"tl{int(time.time() * 1000)}"
+        path = f"/org/freedesktop/portal/desktop/request/{bus.get_unique_name()[1:].replace('.', '_')}/{token}"
+        loop, out = GLib.MainLoop.new(ctx, False), {}
+
+        def done(_c, _s, _o, _i, _sig, params):
+            out["code"], res = params.unpack()
+            out["uri"] = res.get("uri")
+            loop.quit()
+        sub = bus.signal_subscribe("org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request", "Response",
+                                   path, None, 0, done)
+        bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                      "org.freedesktop.portal.Screenshot", "Screenshot",
+                      GLib.Variant("(sa{sv})", ("", {"handle_token": GLib.Variant("s", token),
+                                                     "interactive": GLib.Variant("b", False)})), None, 0, -1, None)
+        timer = GLib.timeout_source_new_seconds(20)
+        timer.set_callback(lambda *_: loop.quit())
+        timer.attach(ctx)
+        loop.run()
+        bus.signal_unsubscribe(sub)
+    finally:
+        ctx.pop_thread_default()
+    if out.get("code") != 0 or not out.get("uri"):
+        raise PermissionError("The desktop refused the screenshot. Turn on “Let your phone take screenshots” in Tubelight on this computer.")
+    p = Path(urllib.parse.unquote(urllib.parse.urlparse(out["uri"]).path))
+    data = p.read_bytes()
+    p.unlink(missing_ok=True)  # it went to the phone; don't fill Pictures/Screenshots
+    return {"name": "Screenshot.png", "size": len(data), "b64": base64.b64encode(data).decode()}
 
 
 def run_as_user(a: dict) -> str:
@@ -465,6 +546,7 @@ def box_close(c: dict, a: dict) -> str:
 
 
 OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
+       "quit_app": quit_app, "screenshot": screenshot,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close}
 

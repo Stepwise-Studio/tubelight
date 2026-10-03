@@ -36,7 +36,7 @@ Step(title: string, detail?: string, when?: string, status?: "done" | "current" 
 Flows(links: Link[], unit?: string) — Who sends what to whom: messages between people, money between accounts, handoffs (up to 10 links).
 Link(from: string, to: string, value: number) — One flow between two parties in Flows.
 List(items: Item[]) — Things with a short detail each (tasks, people, results).
-Item(title: string, subtitle?: string, trailing?: string, tone?: "neutral" | "good" | "bad" | "warn" | "accent") — A row in a List.
+Item(title: string, subtitle?: string, trailing?: string, tone?: "neutral" | "good" | "bad" | "warn" | "accent", button?: string, reply?: string) — A row in a List.
 Progress(label: string, value: number, max?: number) — How far along something is.
 Callout(text: string, tone?: "neutral" | "good" | "bad" | "warn" | "accent") — One important note, warning or takeaway.
 Choices(options: string[]) — Tappable next steps; tapping one sends it as the user's reply.

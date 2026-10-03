@@ -941,6 +941,22 @@ async def put_project_computers(project_id: str, body: ProjectComputers, user: U
     return {"computers": await computers.set_project_computers(user["id"], project_id, body.computers)}
 
 
+class CloseApp(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    force: bool = False
+
+
+@app.post("/computers/{computer_id}/apps/close")
+async def computer_close_app(computer_id: str, body: CloseApp, user: User = Depends(current_user)):
+    """The Close button beside an app in the computer's info sheet (the computer refuses desktop parts)."""
+    if not await computers.row(user["id"], computer_id):
+        raise HTTPException(404, "No such computer.")
+    try:
+        return {"result": await computers.call(computer_id, "quit_app", {"name": body.name, "force": body.force, "full": True}, 30)}
+    except (RuntimeError, PermissionError, TimeoutError) as e:
+        raise HTTPException(409, str(e))
+
+
 @app.get("/computers/{computer_id}/live")
 async def computer_live(computer_id: str, user: User = Depends(current_user)):
     """The computer's info sheet: battery, disk, memory and the apps using memory and CPU now (polled while open)."""

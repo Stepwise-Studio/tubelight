@@ -264,7 +264,12 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "org.mpris.MediaPlayer2.Player.PlayPause` (or Next, Previous); a note on its screen with "
                      "`notify-send 'Title' 'text'`; lock with `loginctl lock-session`; the clipboard with `wl-paste` / "
                      "`wl-copy 'text'` (if wl-clipboard is missing, offer to install it: an admin command). Files: "
-                     "computer_send_file sends one to their phone; computer_receive saves what they attached here.")
+                     "computer_send_file sends one to their phone; computer_receive saves what they attached here. "
+                     "To see the screen use computer_screenshot (never scrot, grim or gnome-screenshot: Wayland blocks "
+                     "them). Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
+                     "\"Close <name>\") on the closable ones. To close or quit an app always call computer_close_app with "
+                     "its name (it runs at once; never kill, pkill or killall); if the name isn't in your last "
+                     "computer_apps list, call computer_apps first to get it exactly.")
         lines.append("Report sizes the way their file manager does: decimal GB/MB (`df -h --si`, `du -sh --si`, "
                      "`ls -lh --si`), and say so; plain `-h` prints GiB labelled 'G', which reads as wrong next to it. "
                      "Check the units a command prints before converting (dpkg's Installed-Size is KiB). "
@@ -587,6 +592,8 @@ def make_gate(ctx: RunCtx):
             cmd = str(tc["args"].get("cmd", ""))
             if tc["name"] == "computer_run" and not tc["args"].get("sudo") and (computers.read_only(cmd) or computers.light(cmd)):
                 continue  # only looks (ls, df, du, dpkg-query...): asking before every look is friction, not safety
+            if tc["name"] == "computer_close_app" and computers.device_of(tm):
+                continue  # in its own chat they asked (or tapped Close); like opening an app, it's light. Project teammates ask.
             if tc["name"].startswith("computer_") and not tc["args"].get("sudo") and await _runs_freely(ctx, tm):
                 continue  # the user turned off "ask before commands" for this computer's chat
             tool_name, title, draft = T.approval_view(tc["name"], tc["args"])

@@ -8,7 +8,6 @@ import base64
 import io
 import logging
 import re
-import zipfile
 from typing import Any
 
 from . import config, db, llm
@@ -44,13 +43,8 @@ async def upload(owner_id: str, name: str, data: bytes) -> dict[str, Any]:
 def _pdf(data: bytes) -> str:
     from pypdf import PdfReader
 
-    return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(data)).pages)
-
-
-def _docx(data: bytes) -> str:
-    xml = zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml").decode("utf-8", "ignore")
-    xml = re.sub(r"</w:p>", "\n", xml)
-    return re.sub(r"<[^>]+>", "", xml)
+    pages = PdfReader(io.BytesIO(data)).pages
+    return "\n\n".join(f"--- page {i} of {len(pages)} ---\n{p.extract_text() or ''}" for i, p in enumerate(pages, 1))
 
 
 async def _image(data: bytes, mime: str, name: str) -> str:
@@ -76,8 +70,12 @@ async def _one(owner_id: str, a: dict[str, Any]) -> str:
             return f"### {name} (image)\n{body.strip() or 'No description available.'}"
         if mime == "application/pdf" or name.lower().endswith(".pdf"):
             text = await asyncio.to_thread(_pdf, data)
-        elif name.lower().endswith(".docx"):
-            text = await asyncio.to_thread(_docx, data)
+        elif name.lower().endswith((".docx", ".xlsx", ".xlsm", ".pptx")):
+            from . import documents
+            ext = name.lower().rsplit(".", 1)[1]
+            text = await asyncio.to_thread({"docx": documents.read_docx, "pptx": documents.read_pptx}.get(ext, documents.read_xlsx), data)
+        elif name.lower().endswith((".doc", ".xls", ".ppt")):
+            return f"### {name}\n(An old Office format I can't read; ask them to save it as .{name.lower().rsplit('.', 1)[1]}x.)"
         elif mime.startswith("text/") or TEXT_EXT.search(name):
             text = data.decode("utf-8", "replace")
         else:

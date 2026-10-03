@@ -5,13 +5,13 @@ import { View } from 'react-native'
 
 import { api } from '@/lib/api'
 import { radius, useTheme } from '@/theme'
-import { Chip, Divider, ListRow, Sheet, Skeleton, Squircle, Text } from '@/ui'
+import { Button, Chip, Divider, ListRow, Sheet, Skeleton, Squircle, Text, confirm, haptic, toast } from '@/ui'
 
 interface Live {
   stats: { disk?: number; mem?: number; load?: number; battery?: number; charging?: boolean }
   mem_total: number
   cpu_total: number
-  apps: { name: string; mem: number; cpu: number; procs: number }[]
+  apps: { name: string; mem: number; cpu: number; procs: number; closable?: boolean }[]
 }
 
 const ACTIONS = [
@@ -50,6 +50,18 @@ export function ComputerInfo({ open, onClose, id, name, onCommand }: {
     { label: 'CPU', value: live ? `${Math.round(live.cpu_total)}%` : '–', sub: 'right now' },
   ]
   const top = live?.apps[0]?.mem || 1
+  const [closing, setClosing] = useState<string | null>(null)
+  const close = async (app: string) => {
+    if (!await confirm({ title: `Close ${app}?`, body: 'All its windows close. Anything unsaved in it may be lost.', confirmLabel: 'Close', destructive: true })) return
+    setClosing(app)
+    try {
+      const { result } = await api<{ result: string }>(`/computers/${id}/apps/close`, { method: 'POST', json: { name: app } })
+      haptic.success()
+      toast({ title: result })
+    } catch (e) {
+      toast({ title: `Unable to close ${app}`, body: (e as Error).message, tone: 'error' })
+    } finally { setClosing(null) }
+  }
 
   return (
     <Sheet open={open} onClose={onClose} accessibilityLabel={`${name} details`}>
@@ -74,10 +86,11 @@ export function ComputerInfo({ open, onClose, id, name, onCommand }: {
           <Text variant="label" color="ink2">Memory by app</Text>
           {!live ? [0, 1, 2, 3].map((i) => <Skeleton key={i} height={28} />) : live.apps.slice(0, 8).map((a) => (
             <View key={a.name} style={{ gap: 4 }} accessible accessibilityLabel={`${a.name}, ${gb(a.mem)}, CPU ${a.cpu}%`}>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{a.name}</Text>
                 {a.cpu >= 1 && <Text variant="footnote" color="ink3" tabular>CPU {Math.round(a.cpu)}%</Text>}
                 <Text variant="label" tabular style={{ minWidth: 64, textAlign: 'right' }}>{gb(a.mem)}</Text>
+                {a.closable && <Button label="Close" variant="soft" size="sm" loading={closing === a.name} onPress={() => close(a.name)} />}
               </View>
               <View style={{ height: 5, borderRadius: 3, backgroundColor: c.panel2 }}>
                 <View style={{ width: `${(a.mem / top) * 100}%`, height: '100%', borderRadius: 3, backgroundColor: c.tube }} />
