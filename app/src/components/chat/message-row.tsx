@@ -213,7 +213,8 @@ function Reply({ text, first, last, highlighted, head, tail }: {
     return (
       <Bubble side="left" first={first} last={last} highlighted={highlighted}>
         {head}
-        <Markdown value={stripCues(text)} mentions={handles} />
+        {/* The parts, not the raw text: a drawing that can't be drawn was left out of them. */}
+        <Markdown value={parts.map((p) => p.text).join('\n\n')} mentions={handles} />
         {tail}
       </Bubble>
     )

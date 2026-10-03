@@ -1,7 +1,7 @@
 // Draws a teammate's ```openui block (OpenUI Lang, openui.com) with native components. OpenUI's own React Renderer
 // wraps everything in DOM <div>s, so we use its parser (lang-core) and map the parsed tree here: one function per
 // component in spec.ts. Parsing is permissive and works on a half-streamed block, so the card fills in as it arrives.
-import { createLibrary, createParser, type ElementNode } from '@openuidev/lang-core'
+import { type ElementNode } from '@openuidev/lang-core'
 import { Component, createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { Linking, ScrollView, View } from 'react-native'
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg'
@@ -9,23 +9,19 @@ import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Rect, Stop, Text as S
 import { fonts, radius, useTheme, type Palette } from '@/theme'
 import { Button, Chip, Markdown, Squircle, Surface, Text, haptic } from '@/ui'
 
-import { SPECS } from './spec'
+import { parse, repair } from './lang'
 
-const parser = createParser(createLibrary({ components: SPECS, root: 'Card' }).toJSONSchema(), 'Card')
+export { drawable } from './lang'
+
 
 type Tone = 'neutral' | 'good' | 'bad' | 'warn' | 'accent' | undefined
 type Props = Record<string, unknown>
 
 const Ctx = createContext<{ streaming: boolean; onChoose?: (text: string) => void }>({ streaming: false })
 
-/** Whether a block parses into something drawable (a reply whose drawing doesn't is shown without it). */
-export function drawable(source: string) {
-  try { return !!parser.parse(source).root } catch { return false }
-}
-
 /** A teammate's drawing. `source` is the block's body (without the fence); `streaming` while it is still arriving. */
 export function GenUI({ source, streaming, onChoose }: { source: string; streaming: boolean; onChoose?: (text: string) => void }) {
-  const root = useMemo(() => { try { return parser.parse(source).root } catch { return null } }, [source])
+  const root = useMemo(() => parse(streaming ? source : repair(source)), [source, streaming])
   if (!root) return null
   return (
     <Ctx.Provider value={{ streaming, onChoose }}>
