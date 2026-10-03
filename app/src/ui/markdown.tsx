@@ -119,8 +119,16 @@ class TubeRenderer extends Renderer {
     return <Table key={this.getKey()} header={header} rows={rows} c={this.c} />
   }
   codespan(text: string): ReactNode {
-    // Upright mono on a panel2 wash; thin spaces stand in for padding (inline Text can't pad). No lineHeight of its
-    // own: on Android a nested span's line height stretches its background into tall boxes over the next lines.
+    // Short code (a command, a package) is a chip: a small inline view with rounded corners, shorter than the line so
+    // chips on neighbouring lines keep apart. Android can't pad or round a text span. Long code stays a text span on
+    // a wash so it can still wrap.
+    if (text.length <= 28) {
+      return (
+        <View key={this.getKey()} style={{ backgroundColor: this.c.panel3, borderRadius: 5, paddingHorizontal: 5, transform: [{ translateY: 3 }] }}>
+          <RNText style={{ fontFamily: typeScale.mono.fontFamily, fontSize: 13, lineHeight: 18, color: this.c.ink }}>{text}</RNText>
+        </View>
+      )
+    }
     return (
       <RNText key={this.getKey()} style={{ fontFamily: typeScale.mono.fontFamily, fontSize: 13.5, fontStyle: 'normal', fontWeight: 'normal', color: this.c.ink, backgroundColor: this.c.panel2 }}>
         {`\u2009${text}\u2009`}
