@@ -94,3 +94,13 @@ async def test_a_linked_computer_gets_its_own_chat_with_full_access(env):
     assert (await computers.row(OWNER, made["id"]))["teammate_id"] == tm["id"]
     await computers.remove(OWNER, made["id"])
     assert fdb.rows("teammates") == []  # its chat goes with it
+
+
+async def test_computers_linked_before_chats_get_one(env):
+    from app import memory
+    fdb, _ = env
+    await memory.store.aput(("computers", OWNER), "old", {"id": "old", "name": "Laptop", "os": "Linux", "token": "x"}, index=False)
+    listed = await computers.listing(OWNER)
+    assert listed[0]["teammate_id"] == fdb.rows("teammates")[0]["id"]
+    await computers.listing(OWNER)
+    assert len(fdb.rows("teammates")) == 1  # once

@@ -235,8 +235,12 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
 
 
 async def listing(owner_id: str) -> list[dict[str, Any]]:
-    rows = await memory.store.asearch(_ns(owner_id), limit=20)
-    return [_public(r.value) for r in rows]
+    rows = [r.value for r in await memory.store.asearch(_ns(owner_id), limit=20)]
+    for r in rows:
+        if not r.get("teammate_id"):  # linked before computers had their own chat
+            r["teammate_id"] = await _teammate(owner_id, r["id"], r["name"], r.get("os") or "")
+            await memory.store.aput(_ns(owner_id), r["id"], r, index=False)
+    return [_public(r) for r in rows]
 
 
 async def remove(owner_id: str, cid: str) -> None:
@@ -309,8 +313,12 @@ def result(cid: str, job_id: str, ok: bool, out: Any) -> None:
 
 async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) -> Any:
     """Run one job on the computer and wait for its answer."""
-    if time.time() - (_seen.get(cid) or {}).get("at", 0) > ONLINE_S:
+    seen = _seen.get(cid) or {}
+    if time.time() - seen.get("at", 0) > ONLINE_S:
         raise RuntimeError("The computer is offline (the Tubelight runner isn't running there).")
+    if args.get("full") and (seen.get("version") or "0") < "3":  # older runners ignore `full` and stay sandboxed
+        raise RuntimeError("This computer runs an older Tubelight that can't give its chat full access. Download the "
+                           f"new one on it from {config.PUBLIC_URL}/desktop and install it (the link and shared folders stay).")
     job = {"id": str(uuid.uuid4()), "op": op, "args": args}
     fut = asyncio.get_running_loop().create_future()
     _waiting[job["id"]] = (cid, fut)

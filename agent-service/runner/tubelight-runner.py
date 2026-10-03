@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "2"
+VERSION = "3"  # 3: full access from the computer's own chat
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
