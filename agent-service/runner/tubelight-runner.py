@@ -23,6 +23,7 @@ import io
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -35,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "3"  # 3: full access from the computer's own chat
+VERSION = "5"  # 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -64,6 +65,38 @@ def note(**fields) -> None:
         STATE.write_text(json.dumps({**old, **fields, "jobs": _jobs[-20:]}))
     except Exception:
         pass
+
+
+# Updates: newer runner files land in ~/.local/share/tubelight (no sudo needed); whichever copy is newest runs.
+UPDATES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tubelight"
+PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py")
+
+
+def version_of(text: str) -> int:
+    m = re.search(r'^VERSION = "(\d+)"', text, re.M)
+    return int(m[1]) if m else 0
+
+
+def hand_off() -> None:
+    """Run the downloaded copy instead of this one if it's newer (the .deb's files in /opt can't be updated)."""
+    mine, newer = Path(__file__).resolve(), UPDATES / "tubelight-runner.py"
+    if newer.exists() and newer.resolve() != mine and version_of(newer.read_text()) > int(VERSION.split()[0]):
+        os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
+
+
+def update(c: dict) -> bool:
+    """Fetch the server's runner; if it's newer, keep it in UPDATES. True when there's a newer one to switch to."""
+    try:
+        files = {name: fetch(c, name) for name in PARTS}
+    except Exception:
+        return False
+    if version_of(files["tubelight-runner.py"].decode(errors="replace")) <= int(VERSION.split()[0]):
+        return False
+    UPDATES.mkdir(parents=True, exist_ok=True)
+    for name, data in files.items():
+        (UPDATES / name).write_bytes(data)
+    (UPDATES / "server.txt").write_text(c["url"])
+    return True
 
 
 def save(c: dict) -> None:
@@ -154,9 +187,12 @@ def run_as_user(a: dict) -> str:
     """Full access: the command runs as this user, in their real environment (opens apps, sees every file)."""
     timeout = max(1, min(int(a.get("timeout") or 120), 600))
     cwd = anywhere(a.get("cwd") or "~")
+    # Admin commands: the password typed on the phone goes to sudo on stdin (never argv, never logged), once.
+    argv = ["sudo", "-S", "-k", "-p", "", "bash", "-lc", a["cmd"]] if a.get("sudo") else ["bash", "-lc", a["cmd"]]
+    feed = {"input": a.get("password", "") + "\n"} if a.get("sudo") else {"stdin": subprocess.DEVNULL}
     try:
-        r = subprocess.run(["bash", "-lc", a["cmd"]], cwd=cwd if cwd.is_dir() else Path.home(), capture_output=True,
-                           text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+        r = subprocess.run(argv, cwd=cwd if cwd.is_dir() else Path.home(), capture_output=True,
+                           text=True, errors="replace", timeout=timeout, **feed)
         out = (r.stdout + r.stderr).strip() + f"\n[exit code {r.returncode}]"
     except subprocess.TimeoutExpired as e:
         out = f"{(e.stdout or b'').decode(errors='replace') if isinstance(e.stdout, bytes) else e.stdout or ''}\n[timed out after {timeout}s]"
@@ -335,10 +371,16 @@ def run() -> None:
     wait, first = 2, True
     me = Path(__file__).resolve()
     born = me.stat().st_mtime
+    checked = 0.0
     while True:
         if me.stat().st_mtime != born:  # updated (a new .deb): start over on the new code
             print("Updated; restarting.", flush=True)
             os.execv(sys.executable, [sys.executable, str(me), "run"])
+        if time.time() - checked > 6 * 3600 and load().get("url"):
+            checked = time.time()
+            if update(load()):
+                print("Downloaded a newer runner; switching to it.", flush=True)
+                os.execv(sys.executable, [sys.executable, str(UPDATES / "tubelight-runner.py"), "run"])
         c = load()  # linking, sharing and pausing (from the window or the CLI) apply without a restart
         if not c.get("token") or c.get("paused"):
             note(online=False, paused=bool(c.get("paused")))
@@ -419,6 +461,7 @@ def gui() -> None:
 
 
 def main() -> None:
+    hand_off()
     a = sys.argv[1:]
     cmd = a[0] if a else "status"
     c = load()

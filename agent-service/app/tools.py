@@ -172,10 +172,11 @@ def title(name: str, args: dict[str, Any]) -> str:
     """Short human sentence for an approval card, e.g. 'Send email to jane@acme.com'."""
     if name == "git_push":
         return f"Push commits to branch {args.get('branch', '?')}"
-    if name == "computer_run":
-        return f"Run on your computer: {args.get('cmd', '?')}"[:140]
+    if name == "computer_run":  # the command itself shows below the title on the card
+        what = str(args.get("title") or "").strip().rstrip(".") or "Run a command"
+        return f"{what[:1].upper()}{what[1:]}{' (admin)' if args.get('sudo') else ''}"[:80]
     if name == "computer_write":
-        return f"Write {args.get('path', '?')} on your computer"[:140]
+        return f"Write {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]}"[:80]
     _, action = _phrase(name)
     s = (action or name).capitalize()
     to = args.get("recipient_email") or args.get("to") or args.get("recipient")
@@ -505,9 +506,16 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def computer_write(path: str, content: str) -> str:
             return await computers.call(dev, "fs_write", {"path": path, "content": content, "full": True})
 
-        async def computer_run(cmd: str, cwd: str = "~", timeout_s: int = 120) -> str:
+        async def computer_run(cmd: str, title: str = "", sudo: bool = False, cwd: str = "~", timeout_s: int = 120) -> str:
             t = max(1, min(timeout_s, 600))
-            return await computers.call(dev, "shell", {"cmd": cmd, "cwd": cwd, "timeout": t, "full": True}, t + 30)
+            job = {"cmd": cmd, "cwd": cwd, "timeout": t, "full": True}
+            if sudo:
+                password = computers.take_password(ctx.owner_id, cmd)
+                if not password:
+                    return ("Not run: this admin command needs the user's password, typed on its approval card in the "
+                            "app (approving from a notification can't carry it). Ask them to approve it there.")
+                job |= {"sudo": True, "password": password}
+            return await computers.call(dev, "shell", job, t + 30)
 
         tools += [
             StructuredTool.from_function(coroutine=computer_list, name="computer_list",
@@ -517,8 +525,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             StructuredTool.from_function(coroutine=computer_write, name="computer_write",
                 description="Create or overwrite a file on this computer (any path)."),
             StructuredTool.from_function(coroutine=computer_run, name="computer_run",
-                description="Run a bash command on this computer as the user (cwd default ~). No sudo. Output is "
-                            "trimmed to ~8k chars; do several steps in one command."),
+                description="Run a bash command on this computer as the user (cwd default ~). title: what it does in "
+                            "2-6 words, shown on the approval card ('Remove old installers'). For admin commands (apt, "
+                            "system files, services) set sudo=true and leave 'sudo' out of cmd: the user types their "
+                            "password on the card. Output is trimmed to ~8k chars; do several steps in one command."),
         ]
     elif c and c["cowork"] and c["folders"] and not helper:
         cid = c["id"]

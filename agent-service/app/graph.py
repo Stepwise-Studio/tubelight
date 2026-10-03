@@ -548,7 +548,7 @@ def make_gate(ctx: RunCtx):
                 continue
             if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
                 continue
-            if tc["name"].startswith("computer_") and await _runs_freely(ctx, tm):
+            if tc["name"].startswith("computer_") and not tc["args"].get("sudo") and await _runs_freely(ctx, tm):
                 continue  # the user turned off "ask before commands" for this computer's chat
             tool_name, title, draft = T.approval_view(tc["name"], tc["args"])
             approval = await db.insert("approvals", {

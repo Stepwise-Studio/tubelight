@@ -245,6 +245,8 @@ class Decision(BaseModel):
     args: dict[str, Any] | None = None
     note: str | None = None
     answer: str | None = None
+    # An admin command's password (computers.py): handed to the computer once, never stored, logged or shown to a model.
+    secret: str | None = Field(None, max_length=256, repr=False)
 
 
 @app.post("/approvals/{approval_id}")
@@ -266,6 +268,10 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
         toolkit = approval["draft"].get("toolkit", "")
         if toolkit not in await connectors.ready(user["id"]):
             raise HTTPException(409, f"{approval['draft'].get('name', toolkit)} isn't connected yet. Finish signing in, then try again.")
+    if body.action == "approve" and approval["tool_name"] == "computer_run" and (approval.get("draft") or {}).get("sudo"):
+        if not body.secret:
+            raise HTTPException(400, "This command needs your computer's password. Type it on the card, then approve.")
+        computers.stash_password(user["id"], (body.args or approval["draft"]).get("cmd", ""), body.secret)
     status = "approved" if body.action in ("approve", "answer", "connected") else "rejected"
     await db.update("approvals", {"id": f"eq.{approval_id}"}, {
         "status": status, "final_args": body.args if body.action == "approve" else None,

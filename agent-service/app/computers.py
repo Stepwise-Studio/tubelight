@@ -288,6 +288,25 @@ async def for_run(owner_id: str) -> dict[str, Any] | None:
     return {**max(online, key=lambda c: c["last_seen"] or 0), **await prefs(owner_id)}
 
 
+# ------------------------------------------------------------------ admin (sudo) passwords
+# Typed on an approval card, kept here (memory only) until that approved command runs, then handed to the computer
+# with the job and forgotten. ponytail: one process; keyed by owner + exact command, 2 minutes.
+_passwords: dict[tuple[str, str], tuple[str, float]] = {}
+
+
+def stash_password(owner_id: str, cmd: str, secret: str) -> None:
+    now = time.time()
+    for k, (_, exp) in list(_passwords.items()):
+        if exp < now:
+            _passwords.pop(k, None)
+    _passwords[(owner_id, cmd)] = (secret, now + 120)
+
+
+def take_password(owner_id: str, cmd: str) -> str | None:
+    secret, exp = _passwords.pop((owner_id, cmd), (None, 0.0))
+    return secret if exp >= time.time() else None
+
+
 # ------------------------------------------------------------------ the runner's side
 async def poll(cid: str, info: dict[str, Any]) -> dict[str, Any] | None:
     _seen[cid] = {"at": time.time(), "folders": [str(f) for f in info.get("folders") or []][:20],
@@ -316,7 +335,8 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
     seen = _seen.get(cid) or {}
     if time.time() - seen.get("at", 0) > ONLINE_S:
         raise RuntimeError("The computer is offline (the Tubelight runner isn't running there).")
-    if args.get("full") and (seen.get("version") or "0") < "3":  # older runners ignore `full` and stay sandboxed
+    version = int(seen.get("version") or 0) if str(seen.get("version") or "0").isdigit() else 0
+    if (args.get("full") and version < 3) or (args.get("sudo") and version < 4):  # older runners can't do it
         raise RuntimeError("This computer runs an older Tubelight that can't give its chat full access. Download the "
                            f"new one on it from {config.PUBLIC_URL}/desktop and install it (the link and shared folders stay).")
     job = {"id": str(uuid.uuid4()), "op": op, "args": args}

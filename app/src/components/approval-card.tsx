@@ -18,7 +18,7 @@ const LABELS: Record<string, string> = {
   text: 'Text', content: 'Text', title: 'Title', head: 'From branch', base: 'Into branch', branch: 'Branch',
   owner: 'Owner', repo: 'Repository', diff: 'Changes', message: 'Message', commit_message: 'Commit message',
 }
-const label = (k: string) => LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
+const label = (k: string) => ({ cmd: 'Command', cwd: 'In folder' } as Record<string, string>)[k] ?? LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
 
 function shapeOf(a: Approval): Shape {
   const d = a.draft
@@ -39,6 +39,10 @@ const ORDER: Record<Shape, string[]> = {
 const approveLabel: Record<Shape, string> = { email: 'Approve and send', post: 'Approve and post', code: 'Approve', other: 'Approve' }
 
 function fields(a: Approval, shape: Shape) {
+  // A computer action: just what it does (the title says why; sudo and timeouts are plumbing).
+  if (a.tool_name.startsWith('computer_')) {
+    return ['cmd', 'path', 'content', ...(a.draft.cwd && a.draft.cwd !== '~' ? ['cwd'] : [])].filter((k) => k in a.draft)
+  }
   const keys = Object.keys(a.draft)
   const first = ORDER[shape].filter((k) => keys.includes(k))
   return [...first, ...keys.filter((k) => !first.includes(k))]
@@ -70,6 +74,9 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
   const [rejecting, setRejecting] = useState(false)
   const [note, setNote] = useState('')
   const [justDecided, setJustDecided] = useState(false)
+  // An admin command on a linked computer: their password, sent once with the approval (never stored by the service).
+  const admin = approval.tool_name === 'computer_run' && approval.draft.sudo === true
+  const [password, setPassword] = useState('')
 
   const current = approval.status !== 'pending' ? approval.status : status
   const edited = JSON.stringify(draft) !== JSON.stringify(approval.draft)
@@ -79,7 +86,10 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
     try {
       await api(`/approvals/${approval.id}`, {
         method: 'POST',
-        json: { action, ...(action === 'approve' && edited ? { args: draft } : {}), ...(action === 'reject' && note.trim() ? { note: note.trim() } : {}) },
+        json: {
+          action, ...(action === 'approve' && edited ? { args: draft } : {}), ...(action === 'reject' && note.trim() ? { note: note.trim() } : {}),
+          ...(action === 'approve' && admin ? { secret: password } : {}),
+        },
       })
       if (action === 'approve') haptic.success(); else haptic.warning()
       setJustDecided(true)
@@ -146,7 +156,7 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
               />
             )
           }
-          const isCode = k === 'diff' || (typeof v !== 'string' && typeof v === 'object')
+          const isCode = k === 'diff' || k === 'cmd' || (typeof v !== 'string' && typeof v === 'object')
           return (
             <View key={k} style={{ gap: 3 }}>
               <Text variant="footnote" color="ink3">{label(k)}</Text>
@@ -167,13 +177,17 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
         })}
       </View>
 
+      {admin && (
+        <TextField label="Your computer’s password" hint="For this command only. Tubelight passes it to sudo once and doesn’t keep it."
+          secureTextEntry autoCapitalize="none" autoCorrect={false} textContentType="password" value={password} onChangeText={setPassword} />
+      )}
       {/* Primary action on its own row so three labels never wrap unevenly on a 360pt phone. */}
       <View style={{ gap: 8, marginTop: 2 }}>
         <Button
-          label={edited ? `${approveLabel[shape]} edited` : approveLabel[shape]}
+          label={admin ? 'Approve as admin' : edited ? `${approveLabel[shape]} edited` : approveLabel[shape]}
           fullWidth
           loading={busy === 'approve'}
-          disabled={!!busy}
+          disabled={!!busy || (admin && !password)}
           onPress={() => decide('approve')}
         />
         <View style={{ flexDirection: 'row', gap: 8 }}>

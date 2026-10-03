@@ -33,7 +33,9 @@ async def test_pair_poll_and_answer_a_job(env):
 def test_computer_actions_need_approval_with_plain_titles():
     assert T.classify("computer_run") == "act" and T.classify("computer_write") == "act"
     assert T.classify("computer_read") == "read"
-    assert T.title("computer_run", {"cmd": "npm test"}) == "Run on your computer: npm test"
+    assert T.title("computer_run", {"cmd": "npm test", "title": "run the tests"}) == "Run the tests"
+    assert T.title("computer_run", {"cmd": "apt upgrade", "sudo": True}) == "Run a command (admin)"
+    assert T.title("computer_write", {"path": "/home/a/notes/list.md"}) == "Write list.md"
 
 
 def test_conversation_stats_counts_real_exchanges():
@@ -104,3 +106,10 @@ async def test_computers_linked_before_chats_get_one(env):
     assert listed[0]["teammate_id"] == fdb.rows("teammates")[0]["id"]
     await computers.listing(OWNER)
     assert len(fdb.rows("teammates")) == 1  # once
+
+
+def test_admin_passwords_are_used_once():
+    computers.stash_password(OWNER, "apt update", "pw")
+    assert computers.take_password(OWNER, "apt update") == "pw"
+    assert computers.take_password(OWNER, "apt update") is None
+    assert computers.take_password(OWNER, "rm -rf /") is None
