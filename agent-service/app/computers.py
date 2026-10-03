@@ -593,8 +593,8 @@ SLASH: dict[str, tuple[str, str]] = {
                "CPU load (uptime), memory used/total (free --si), disk used/free (df -h --si /), uptime. One command."),
     "big": ("The largest apps and folders",
             "Find what takes the most space: the 10 largest installed apps (dpkg-query sizes are KiB; include snaps) "
-            "and the 10 largest folders in home (du -sh --si ~/* ~/.[!.]* 2>/dev/null | sort -h | tail -10). "
-            "Two short lists, every row, in GB/MB."),
+            "and the 10 largest folders in home (du -sh --si ~/* ~/.[!.]* 2>/dev/null | sort -rh | head -10). "
+            "Two short lists, largest first, every row, in GB/MB."),
     "clean": ("Free up space safely",
               "Find what can be cleaned safely: the apt cache, old snap revisions, ~/.cache, the Trash, journal logs. "
               "Show a preview with each size first. Then propose cleanup commands one by one (admin where needed). "

@@ -39,6 +39,7 @@ CASES = [
     ("small talk", "hey, how's your day going?", None, set()),
     ("plain question", "What's a good way to say no to a meeting politely?", None, set()),
     ("chart with no data", "Show me a chart of my sleep last week", None, set()),
+    ("a picture isn't a drawing", "Draw me a poster of a cat astronaut", None, set()),
 ]
 
 

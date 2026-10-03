@@ -287,6 +287,10 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      f"{', '.join(c['folders'])}. Look first (computer_list, computer_read); writing a file or running a "
                      "command waits for their approval, so propose one clear step at a time and say what it does.")
     lines.append(genui.PROMPT)
+    if "generate_image" in tool_names:
+        lines.append("Asked for a picture, image, illustration, poster or photo: call generate_image right away with "
+                     "your best prompt (don't ask first or offer it as a choice). An openui block draws data, never "
+                     "pictures, and never say an image is made or attached unless the tool returned.")
     if "run_shell" in tool_names:
         lines.append("You have a code sandbox (run_shell, read_file, write_file) with the project's repo in /workspace. "
                      "Writing a command in your reply does not run it: to check, count, test or build anything, call "
