@@ -1,0 +1,189 @@
+/*
+ * Stepwise design tokens (as used in the Tubelight app), for the web.
+ * Import after Tailwind:  @import "tailwindcss"; @custom-variant dark (&:where(.dark, .dark *)); @import "./tokens.css";
+ * Light on :root, dark on .dark (class-based, like Stepwise UI). Then use Tailwind utilities from the @theme block:
+ *   bg-canvas, bg-panel, bg-panel-2, text-ink, text-ink-3, border-line, text-tube, bg-tube-soft, rounded-card,
+ *   shadow-raised, shadow-float, text-body, text-headline, font-sans, ease-smooth, ease-pop …
+ * Durations are plain variables: duration-[var(--dur-fast)], or transition: … var(--dur-fast) var(--ease-smooth-out).
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces: page → card → well → pressed well. Edges are hairlines. */
+  --canvas: #fafafa;            /* zinc-50 */
+  --panel: #ffffff;
+  --panel-2: #f4f4f5;           /* zinc-100 */
+  --panel-3: #e4e4e7;           /* zinc-200 */
+  --line: rgb(0 0 0 / 0.07);
+  --line-strong: rgb(0 0 0 / 0.12);
+  --edge: rgb(138 138 141 / 0.23);  /* control outlines */
+
+  /* Text */
+  --ink: #18181b;               /* zinc-900 */
+  --ink-2: #52525b;             /* zinc-600 */
+  --ink-3: #71717a;             /* zinc-500 */
+  --ink-4: #a1a1aa;             /* zinc-400: placeholders, disabled */
+
+  /* The one accent: focus, active, live, links. sky-600 on light (sky-500 is under 3:1 as text on white). */
+  --tube: #0284c7;
+  --tube-soft: rgb(14 165 233 / 0.12);
+  --tube-glow: rgb(56 189 248 / 0.45);
+  --on-tube: #ffffff;
+
+  /* Semantic, muted */
+  --success: #1f8a4c;  --success-soft: rgb(31 138 76 / 0.09);
+  --warning: #a86a12;  --warning-soft: rgb(168 106 18 / 0.10);
+  --danger: #d02f4b;   --danger-soft: rgb(208 47 75 / 0.08);
+
+  /* Interaction */
+  --wash: rgb(0 0 0 / 0.05);         /* hover / press overlay */
+  --wash-strong: rgb(0 0 0 / 0.08);
+  --scrim: rgb(9 9 11 / 0.32);       /* behind sheets and dialogs */
+
+  /* Buttons (surface stack: gradient fill + 1px edge + shadow outside + wash) */
+  --solid-from: #3f3f46;  --solid-to: #18181b;  --solid-ink: #ffffff;  --solid-edge: rgb(0 0 0 / 0.5);
+  --soft-from: #fafafa;   --soft-to: rgb(228 228 231 / 0.7);           --soft-edge: rgb(228 228 231 / 0.9);
+  --danger-from: #f43f5e; --danger-to: #e11d48;
+
+  /* Elevation: raised (controls, cards that lift) and float (menus, dialogs, toasts) */
+  --shadow-1: 0 1px 2px -1px rgb(0 0 0 / 0.06), 0 2px 8px -2px rgb(0 0 0 / 0.05);
+  --shadow-2: 0 8px 24px -6px rgb(0 0 0 / 0.14), 0 2px 6px -2px rgb(0 0 0 / 0.06);
+  --image-outline: rgb(0 0 0 / 0.10);  /* 1px inset outline on images */
+
+  /* Stepwise UI component borders */
+  --ui-border: #d4d4d8;
+  --ui-border-subtle: #e4e4e7;
+
+  /* Motion (transitions.dev) */
+  --dur-stagger: 40ms;   /* per-item stagger, cap the sequence near 300ms */
+  --dur-micro: 80ms;     /* intent delays, shake segments */
+  --dur-quick: 150ms;    /* press, hover, text/icon swap, closes of small things */
+  --dur-fast: 250ms;     /* dropdowns, popovers, dialogs open, tabs sliding, accordions */
+  --dur-medium: 350ms;   /* panel/sheet close, toast close */
+  --dur-slow: 400ms;     /* panel/sheet open, skeleton → content reveal */
+  --dur-very-slow: 500ms;/* badge appear, success check */
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);   /* default for surfaces */
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);       /* swaps, reveals */
+  --ease-out: cubic-bezier(0, 0, 0.58, 1);             /* tooltips */
+  --ease-close: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-icon: cubic-bezier(0.2, 0, 0, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);    /* badge pop only */
+  --scale-press: 0.96;  --scale-dialog: 0.96;  --scale-menu: 0.97;  --scale-tooltip: 0.98;
+
+  --font-ui: "Inter Display", "InterDisplay", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --canvas: #09090b;            /* zinc-950 */
+  --panel: #18181b;
+  --panel-2: #222226;
+  --panel-3: #2e2e33;
+  --line: rgb(255 255 255 / 0.07);
+  --line-strong: rgb(255 255 255 / 0.12);
+  --edge: rgb(255 255 255 / 0.10);
+
+  --ink: #f4f4f5;               /* zinc-100 */
+  --ink-2: #a1a1aa;             /* zinc-400 */
+  --ink-3: #71717a;             /* zinc-500 */
+  --ink-4: #52525b;
+
+  --tube: #0ea5e9;              /* sky-500 */
+  --tube-soft: rgb(14 165 233 / 0.14);
+  --tube-glow: rgb(56 189 248 / 0.40);
+
+  --success: #74d19a;  --success-soft: rgb(116 209 154 / 0.10);
+  --warning: #e8b55a;  --warning-soft: rgb(232 181 90 / 0.10);
+  --danger: #f27a8c;   --danger-soft: rgb(242 122 140 / 0.10);
+
+  --wash: rgb(255 255 255 / 0.06);
+  --wash-strong: rgb(255 255 255 / 0.09);
+  --scrim: rgb(0 0 0 / 0.55);
+
+  /* Solid button flips to white on dark */
+  --solid-from: #ffffff;  --solid-to: #e4e4e7;  --solid-ink: #18181b;  --solid-edge: rgb(0 0 0 / 0.12);
+  --soft-from: #27272a;   --soft-to: #18181b;                          --soft-edge: rgb(255 255 255 / 0.08);
+  --danger-from: #e11d48; --danger-to: #be123c;
+
+  --shadow-1: 0 1px 2px -1px rgb(0 0 0 / 0.4), 0 2px 8px -2px rgb(0 0 0 / 0.3);
+  --shadow-2: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+  --image-outline: rgb(255 255 255 / 0.10);
+
+  --ui-border: #3f3f46;
+  --ui-border-subtle: #27272a;
+}
+
+/* Tailwind v4: utilities from the variables above (they switch with .dark automatically). */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-edge: var(--edge);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-tube: var(--tube);
+  --color-tube-soft: var(--tube-soft);
+  --color-on-tube: var(--on-tube);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-wash: var(--wash);
+  --color-scrim: var(--scrim);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+
+  /* Type scale 12 / 13 / 15 / 17 / 20 / 28 / 34 — use with the matching font-weight utility */
+  --text-large-title: 34px;  --text-large-title--line-height: 40px;  --text-large-title--letter-spacing: -0.5px;
+  --text-title: 28px;        --text-title--line-height: 33px;        --text-title--letter-spacing: -0.4px;
+  --text-heading: 20px;      --text-heading--line-height: 25px;      --text-heading--letter-spacing: -0.3px;
+  --text-headline: 17px;     --text-headline--line-height: 22px;     --text-headline--letter-spacing: -0.2px;
+  --text-body: 15px;         --text-body--line-height: 22px;         --text-body--letter-spacing: -0.1px;
+  --text-label: 13px;        --text-label--line-height: 18px;        --text-label--letter-spacing: -0.05px;
+  --text-caption: 13px;      --text-caption--line-height: 18px;
+  --text-footnote: 12px;     --text-footnote--line-height: 16px;
+
+  /* Radii: chip 8 · control/row 12 · card 16 · dialog/image 20 · sheet 28. Nest concentrically. */
+  --radius-chip: 8px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-dialog: 20px;
+  --radius-sheet: 28px;
+
+  --shadow-raised: var(--shadow-1);
+  --shadow-float: var(--shadow-2);
+
+  --ease-smooth: var(--ease-smooth-out);   /* ease-smooth */
+  --ease-pop: var(--ease-bounce);          /* ease-pop (badges only) */
+}
+
+/* Base */
+html { background: var(--canvas); color: var(--ink); font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+body { font-size: 15px; line-height: 22px; letter-spacing: -0.1px; }
+:where(time, .tabular, [data-number]) { font-variant-numeric: tabular-nums; }
+::selection { background: var(--tube-soft); }
+:where(a, button, [role="button"], input, select, textarea):focus-visible {
+  outline: 2px solid var(--tube); outline-offset: 2px; }
+img { outline: 1px solid var(--image-outline); outline-offset: -1px; }
+
+/* Hover only where there is hover; press everywhere. */
+@media (hover: hover) { .wash:hover { background-image: linear-gradient(var(--wash), var(--wash)); } }
+.press { transition: transform var(--dur-quick) var(--ease-smooth-out); }
+.press:active { transform: scale(var(--scale-press)); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
