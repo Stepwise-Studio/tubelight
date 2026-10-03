@@ -59,6 +59,14 @@ const clip = (s: string, n = 48) => (s.length > n ? s.slice(0, n - 1).trimEnd() 
  * A human sentence without the subject: "searched GitHub issues", "handed off to Tess".
  * The row puts the teammate's name in front.
  */
+/** A computer action (agent computers.py tools) in plain words. */
+function computerSentence(name: string, input: Record<string, unknown>) {
+  if (name === 'computer_run') return `ran ${clip(String(input.cmd ?? 'a command'), 40)} on the computer`
+  if (name === 'computer_write') return `wrote ${clip(String(input.path ?? 'a file'))} on the computer`
+  if (name === 'computer_read') return `read ${clip(String(input.path ?? 'a file'))} on the computer`
+  return `looked in ${clip(String(input.path || 'the shared folders'))} on the computer`
+}
+
 export function describe(a: Activity, nameOf: (id: string | null | undefined) => string | undefined): string {
   const input = obj(a.input)
   switch (a.type) {
@@ -66,6 +74,7 @@ export function describe(a: Activity, nameOf: (id: string | null | undefined) =>
       if (a.name === 'COMPOSIO_SEARCH_TOOLS') return 'looked for the right app tool'
       if (a.name === 'COMPOSIO_GET_TOOL_SCHEMAS') return 'read how an app tool works'
       if (a.name === 'recall') return 'searched its memory'
+      if (a.name.startsWith('computer_')) return computerSentence(a.name, input)
       const tools = Array.isArray(input.tools) ? input.tools : []
       const s = toolSentence(innerSlug(a))
       return tools.length > 1 ? `${s} and ${tools.length - 1} more` : s
@@ -81,10 +90,12 @@ export function describe(a: Activity, nameOf: (id: string | null | undefined) =>
     case 'memory_write': return `remembered “${clip(String(input.text ?? ''), 60)}”`
     case 'handoff': return `handed off to ${nameOf(input.to as string) ?? '@' + (a.name.split('->')[1] ?? 'a teammate')}`
     case 'approval_request': {
+      if (a.name.startsWith('computer_')) return `asked to ${computerSentence(a.name, input).replace(/^(ran|wrote)/, (v) => (v === 'ran' ? 'run' : 'write'))}`
       const { verb, rest, app } = splitSlug(a.name)
       return a.name.includes('_') ? `asked to ${verb} ${rest ? `${rest} on ${app}` : app}` : `asked to run ${a.name}`
     }
     case 'approval_decision': {
+      if (a.name.startsWith('computer_')) return `${input.action === 'reject' ? 'was told no' : 'got the go-ahead'} on the computer`
       const { verb, rest, app } = splitSlug(a.name)
       return `${input.action === 'reject' ? 'was told no' : 'got the go-ahead'} to ${verb} ${rest ? `${rest} on ${app}` : app}`
     }
