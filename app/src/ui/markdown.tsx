@@ -124,7 +124,7 @@ class TubeRenderer extends Renderer {
     // a wash so it can still wrap.
     if (text.length <= 28) {
       return (
-        <View key={this.getKey()} style={{ backgroundColor: this.c.panel3, borderRadius: 5, paddingHorizontal: 5, transform: [{ translateY: 3 }] }}>
+        <View key={this.getKey()} style={{ backgroundColor: this.c.panel3, borderRadius: 5, paddingHorizontal: 5, transform: [{ translateY: 5 }] }}>
           <RNText style={{ fontFamily: typeScale.mono.fontFamily, fontSize: 13, lineHeight: 18, color: this.c.ink }}>{text}</RNText>
         </View>
       )
