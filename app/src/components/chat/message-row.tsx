@@ -12,13 +12,14 @@ import { GenUI, drawable, drawing } from '@/components/genui/genui'
 import { openAutomation, openAutomationOfRun } from '@/lib/automations'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { appToken, mentionParts } from '@/lib/mentions'
+import { phoneLabel, runPhoneAction, type PhoneAction } from '@/lib/phone'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import {
-  Collapse, Icon, IconButton, ListRow, Markdown, Notice, Press, Sheet, Skeleton, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
+  Chip, Collapse, Icon, IconButton, ListRow, Markdown, Notice, Press, Sheet, Skeleton, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
   showEmojiPicker, showMenu, toast, useFlip, warmEmojis,
 } from '@/ui'
 
@@ -386,6 +387,15 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
           </Pressable>
         )}
         {pictures.map((a) => <Pad key={a.path}><Picture a={a} /></Pad>)}
+        {Array.isArray(m.meta.phone_actions) && (
+          <Pad>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+              {(m.meta.phone_actions as PhoneAction[]).map((a, i) => (
+                <Chip key={i} label={phoneLabel(a)} size="sm" accessibilityLabel={`${phoneLabel(a)}: do it again`} onPress={() => { haptic.tap(); runPhoneAction(a) }} />
+              ))}
+            </View>
+          </Pad>
+        )}
         <Pad><Reactions m={m} side="left" /></Pad>
         {calls.length > 0 && <Pad><ToolCalls calls={calls} /></Pad>}
       </TeammateBlock>
@@ -517,13 +527,17 @@ function Picture({ a }: { a: Attachment }) {
   const url = useSignedUrl(a.path)
   const [open, setOpen] = useState(false)
   const w = Math.min(useWindowDimensions().width * 0.78, 340)
-  const ratio = a.width && a.height ? a.width / a.height : 1
+  // Generated images say their size; screenshots and others learn it when they load (a 16:9 screen isn't a square).
+  const [loaded, setLoaded] = useState<number | null>(null)
+  const ratio = a.width && a.height ? a.width / a.height : loaded ?? 1
   return (
     <Pressable onPress={() => url && setOpen(true)} onLongPress={() => url && saveImage(url, a.name)} delayLongPress={350}
       accessibilityRole="imagebutton" accessibilityLabel={a.name} accessibilityHint="Opens it full screen; long press saves it"
       style={{ marginTop: 6 }}>
       <Squircle style={{ width: w, height: w / ratio, borderRadius: 20, overflow: 'hidden', backgroundColor: c.panel2 }}>
-        {url ? <Image source={url} style={{ flex: 1 }} contentFit="cover" transition={motion.duration.fast} /> : <Skeleton width={w} height={w / ratio} radius={0} />}
+        {url ? <Image source={url} style={{ flex: 1 }} contentFit="cover" transition={motion.duration.fast}
+          onLoad={(e) => { if (!a.width && e.source.width && e.source.height) setLoaded(e.source.width / e.source.height) }} />
+          : <Skeleton width={w} height={w / ratio} radius={0} />}
       </Squircle>
       {url && (
         <View style={{ position: 'absolute', right: 8, bottom: 8 }}>

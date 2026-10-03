@@ -21,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, push, reactions, repo, runs, sandbox, usage
+from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, phone, push, reactions, repo, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -939,6 +939,16 @@ async def get_project_computers(project_id: str, user: User = Depends(current_us
 async def put_project_computers(project_id: str, body: ProjectComputers, user: User = Depends(current_user)):
     await owned("projects", project_id, user, "project")
     return {"computers": await computers.set_project_computers(user["id"], project_id, body.computers)}
+
+
+class PhoneNotes(BaseModel):
+    items: list[dict] = Field(default_factory=list, max_length=300)
+
+
+@app.post("/phone/notifications")
+async def phone_notifications(body: PhoneNotes, user: User = Depends(current_user)):
+    """The phone shares its recent notifications (opt-in, Profile → Phone) for teammates to look through."""
+    return {"kept": await phone.save_notes(user["id"], body.items)}
 
 
 class CloseApp(BaseModel):

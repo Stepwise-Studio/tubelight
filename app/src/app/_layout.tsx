@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { SheetsHost } from '@/components/sheets-host'
 import { usePushRouting } from '@/lib/push-routing'
 import { useSession } from '@/lib/session'
+import { useNotificationSync } from '@/lib/phone'
 import { WorkspaceProvider } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
 import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@/ui'
@@ -47,6 +48,7 @@ function Root() {
 
   useEffect(() => { if (ready) SplashScreen.hideAsync().catch(() => {}) }, [ready])
   usePushRouting(signedIn)
+  useNotificationSync(signedIn)
 
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme
   const navTheme = { ...base, colors: { ...base.colors, background: c.canvas, card: c.panel, text: c.ink, border: c.line, primary: c.tube } }

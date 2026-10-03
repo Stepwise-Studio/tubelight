@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, repo, sandbox, usage
+from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, phone, repo, sandbox, usage
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -73,7 +73,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -81,7 +81,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -435,6 +435,33 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         ]
 
     if not helper:
+        async def phone_action(action: str, when: str = "", end: str = "", seconds: int = 0, title: str = "",
+                               text: str = "", number: str = "", to: str = "", place: str = "", url: str = "",
+                               app: str = "") -> str:
+            a = phone.action(action, _when(when) if "T" in when or "-" in when else None, _when(end) if end else None,
+                             when, seconds=seconds, title=title, text=text, number=number, to=to, place=place, url=url, app=app)
+            if isinstance(a, str):
+                return f"Not done: {a}"
+            ctx.phone_actions.setdefault(tm["id"], []).append(a)
+            return ("It happens on their phone as your reply arrives (alarms and timers silently; calls, texts, "
+                    "emails and calendar events open ready for them to confirm). Confirm in a few words.")
+
+        tools.append(StructuredTool.from_function(
+            coroutine=phone_action, name="phone_action",
+            description=(
+                "Do something on their phone right now: alarm (when: HH:MM), timer (seconds), call / text / whatsapp "
+                "(number, text), email (to, title, text), navigate (place), calendar (title, when + end as date-times, "
+                "place), open_app (app name), open_url (url), search (text). For a reminder at a later time use a "
+                "follow-up instead (it pings them then); for their Google Calendar use the calendar app if connected.")))
+        if ctx.phone_notes:
+            async def phone_notifications(query: str = "", app: str = "", hours: int = 12) -> str:
+                return await phone.notes(ctx.owner_id, query, app, hours, zone)
+
+            tools.append(StructuredTool.from_function(
+                coroutine=phone_notifications, name="phone_notifications",
+                description="Notifications that arrived on their phone in the last hours (they turned this on): "
+                            "query: words to match; app: e.g. WhatsApp, Gmail; hours: up to 24."))
+
         async def make_document(kind: str, title: str, content: str) -> str:
             try:
                 name, data = await asyncio.to_thread(documents.make, kind, title, content)
@@ -570,11 +597,12 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             ctx.outgoing.setdefault(tm["id"], []).append(att)
             return f"Attached {got['name']} ({got['size'] / 1e6:.1f} MB) to your reply; it shows in the chat on their phone."
 
-        async def computer_screenshot() -> str:
-            got = await computers.call(dev, "screenshot", {"full": True}, 60)
+        async def computer_screenshot(monitor: str = "") -> str:
+            got = await computers.call(dev, "screenshot", {"full": True, **({"monitor": monitor} if monitor else {})}, 60)
             ctx.outgoing.setdefault(tm["id"], []).append(
                 await files.upload(ctx.owner_id, got["name"], base64.b64decode(got["b64"])))
-            return "The screenshot is attached to your reply. Say one short line; don't describe it unless asked."
+            screens = f" Its screens: {', '.join(got['monitors'])}." if len(got.get("monitors") or []) > 1 else ""
+            return f"{got['name']} is attached to your reply.{screens} Say one short line; don't describe it unless asked."
 
         async def computer_apps() -> str:
             got = await computers.call(dev, "live", {}, 15)
@@ -611,7 +639,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             StructuredTool.from_function(coroutine=computer_send_file, name="computer_send_file",
                 description="Send a file from this computer to the chat, so they can open it on their phone (up to 25 MB)."),
             StructuredTool.from_function(coroutine=computer_screenshot, name="computer_screenshot",
-                description="Capture this computer's whole screen and attach it to your reply (what's open, an error on screen)."),
+                description="Capture this computer's screen and attach it to your reply (what's open, an error on screen). "
+                            "monitor: one screen only, by number (1 = leftmost) or name; empty = all screens in one image. "
+                            "For each monitor separately, call it once per monitor."),
             StructuredTool.from_function(coroutine=computer_apps, name="computer_apps",
                 description="The apps running now with their memory and CPU, and which are safe to close."),
             StructuredTool.from_function(coroutine=computer_close_app, name="computer_close_app",

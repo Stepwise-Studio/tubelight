@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="studio.stepwise.phone" >
+
+    <uses-sdk android:minSdkVersion="24" />
+    <!-- Alarms and timers set straight away (normal permission). -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- "Tubelight needs you" over the lock screen (Android 14+: the user allows it in settings). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Find installed apps by name to open them. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application>
+
+        <!-- Opt-in: the user turns on notification access for Tubelight in settings. -->
+        <service
+            android:name="studio.stepwise.phone.NotificationsService"
+            android:exported="false"
+            android:label="Tubelight"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" >
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

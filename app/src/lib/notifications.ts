@@ -7,6 +7,7 @@ import * as TaskManager from 'expo-task-manager'
 import { Platform } from 'react-native'
 
 import { api } from '@/lib/api'
+import { Phone } from '@/lib/phone'
 
 export const SOUNDS = [
   { id: 'chime', name: 'Chime', about: 'Two rising bell notes' },
@@ -102,7 +103,18 @@ const TASK = 'tubelight-notification-actions'
 
 // Must be defined at startup (imported from the root layout), so a button pressed while the app is closed lands here.
 TaskManager.defineTask<Notifications.NotificationTaskPayload>(TASK, async ({ data }) => {
-  if (!data || !('actionIdentifier' in data)) return
+  if (!data) return
+  if (!('actionIdentifier' in data)) {
+    // A notification arrived while the app was in the background. A decision waiting while the phone is locked rings:
+    // a full-screen alert that opens the assistant panel on it (modules/phone `ring`).
+    const n = (data as { notification?: { request?: { content?: { title?: string; body?: string; data?: unknown; dataString?: string } } } })
+      .notification?.request?.content
+    const d = pushData(n)
+    if ((d.kind === 'approval' || d.kind === 'question') && Phone?.isLocked()) {
+      Phone.ring({ title: n?.title ?? 'Tubelight needs you', body: n?.body ?? '', thread: d.thread_id, reason: d.kind, approval: d.approval_id ?? '' })
+    }
+    return
+  }
   const r = data as unknown as {
     actionIdentifier: string; userText?: string
     notification?: { request?: { identifier?: string; content?: { data?: unknown; dataString?: string } } }

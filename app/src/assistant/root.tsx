@@ -1,13 +1,18 @@
 // The assistant panel's own React root ("assistant", registered in index.ts): drawn by AssistActivity, a see-through
-// window over whatever app is open, when Tubelight is the phone's digital assistant. Voice mode as a bottom panel,
-// talking to the chosen teammate in your DM with them, with all their tools (reminders, automations, apps, computers).
+// window over whatever app is open (or the lock screen), when Tubelight is the phone's digital assistant. Voice mode
+// as a bottom sheet with the chosen teammate, who also sees what was on screen when you summoned it. Opened by a
+// "needs you" alert instead (modules/phone `ring`), it goes to that chat with the decision on top.
+import { useEffect, useState } from 'react'
 import { BackHandler, Linking, Pressable, StyleSheet, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
+import { ApprovalCard } from '@/components/approval-card'
+import { QuestionCard } from '@/components/chat/prompt-cards'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { useAssistantMate } from '@/lib/assistant'
+import { Phone, syncNotifications, usePhoneActions } from '@/lib/phone'
 import { useSession } from '@/lib/session'
 import { useThread } from '@/lib/use-thread'
 import { WorkspaceProvider, useWorkspace } from '@/lib/workspace'
@@ -33,16 +38,7 @@ export function AssistantRoot() {
 function Assistant() {
   const { session, ready } = useSession()
   if (!ready) return null
-  if (!session) {
-    return (
-      <Shade>
-        <Surface radius={24} padding={20} style={{ margin: 16, gap: 12 }}>
-          <Text variant="headline">Sign in to Tubelight first</Text>
-          <Button label="Open Tubelight" onPress={() => { Linking.openURL('tubelight://'); close() }} />
-        </Surface>
-      </Shade>
-    )
-  }
+  if (!session) return <Note title="Sign in to Tubelight first" />
   return (
     <WorkspaceProvider userId={session.user.id}>
       <Talk userId={session.user.id} />
@@ -50,34 +46,67 @@ function Assistant() {
   )
 }
 
+type Screen = { app: string | null; text: string | null; image: string | null }
+
 function Talk({ userId }: { userId: string }) {
   const ws = useWorkspace()
   const { mate } = useAssistantMate(ws.teammates)
-  const threadId = mate ? `dm:${mate.id}` : ''
+  // Why it opened: a "needs you" alert names its chat; summoned by hand, it's your DM with the chosen teammate.
+  const [args] = useState(() => Phone?.launchArgs() ?? {})
+  const threadId = args.thread || (mate ? `dm:${mate.id}` : '')
   const t = useThread(threadId, userId)
-  if (!mate) return ws.loading ? <Shade /> : (
-    <Shade>
-      <Surface radius={24} padding={20} style={{ margin: 16, gap: 12 }}>
-        <Text variant="headline">Make a teammate first</Text>
-        <Button label="Open Tubelight" onPress={() => { Linking.openURL('tubelight://'); close() }} />
-      </Surface>
-    </Shade>
-  )
+  usePhoneActions(t.messages)
+  // What was on screen arrives just after the panel opens (if the assistant settings allow it): wait for it briefly.
+  const [screen, setScreen] = useState<Screen | null | undefined>(args.thread ? null : undefined)
+  useEffect(() => {
+    Phone?.clearRing()
+    syncNotifications().catch(() => {})
+    if (screen !== undefined) return
+    let tries = 0
+    const poll = setInterval(() => {
+      const got = Phone?.screenContext() ?? null
+      if (got || ++tries >= 8) { clearInterval(poll); setScreen(got) }
+    }, 250)
+    return () => clearInterval(poll)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const speaker = args.thread ? ws.threadTeammates(threadId)[0] : mate
+  if (!speaker) return ws.loading ? <Shade /> : <Note title="Make a teammate first" />
+  if (screen === undefined) return <Shade />
   const runs = ws.liveRuns.filter((r) => r.thread_id === threadId)
+  const waiting = t.messages.find((m) => (m.kind === 'approval' || m.kind === 'question') && m.meta?.approval_id
+    && t.approvals[m.meta.approval_id]?.status === 'pending')
+  const approval = waiting?.meta?.approval_id ? t.approvals[waiting.meta.approval_id] : undefined
   return (
     <Shade>
+      {approval && (
+        <View style={{ paddingHorizontal: 12, paddingBottom: 10 }}>
+          {waiting?.kind === 'question' ? <QuestionCard approval={approval} /> : <ApprovalCard approval={approval} teammate={speaker} beam />}
+        </View>
+      )}
       <VoiceMode
-        variant="panel"
-        teammate={mate}
-        title={mate.name}
+        teammate={speaker}
+        title={args.thread ? ws.threadTitle(threadId) : speaker.name}
         threadId={threadId}
         messages={t.messages}
         working={runs.some((r) => r.status === 'running')}
         activity={Object.values(t.statuses).find((st) => st.label)?.label}
+        screen={screen}
         onTask={(text) => t.send(text, [], { voiceTask: true })}
         onType={() => { Linking.openURL(`tubelight://chat/${encodeURIComponent(threadId)}`); close() }}
         onClose={close}
       />
+    </Shade>
+  )
+}
+
+function Note({ title }: { title: string }) {
+  return (
+    <Shade>
+      <Surface radius={24} padding={20} style={{ margin: 16, gap: 12 }}>
+        <Text variant="headline">{title}</Text>
+        <Button label="Open Tubelight" onPress={() => { Linking.openURL('tubelight://'); close() }} />
+      </Surface>
     </Shade>
   )
 }

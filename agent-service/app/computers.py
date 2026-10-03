@@ -339,7 +339,8 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
     version = int(seen.get("version") or 0) if str(seen.get("version") or "0").isdigit() else 0
     needs = [(args.get("full"), 3, "full access from its chat"), (args.get("sudo"), 4, "admin commands"),
              (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs"),
-             (op == "live", 9, "live app usage"), (op in ("quit_app", "screenshot"), 10, "screenshots and closing apps")]
+             (op == "live", 9, "live app usage"), (op in ("quit_app", "screenshot"), 10, "screenshots and closing apps"),
+             (op == "screenshot" and args.get("monitor"), 12, "one monitor's screenshot")]
     missing = next((what for wanted, v, what in needs if wanted and version < v), None)
     if missing:  # it updates itself within 6 hours; restarting Tubelight on it updates it now
         raise RuntimeError(f"Tubelight on this computer is too old for {missing}. It updates itself within a few hours; "

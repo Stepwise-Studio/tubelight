@@ -2,19 +2,21 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 
 import { Composer } from '@/components/chat/composer'
 import { ComputerInfo } from '@/components/chat/computer-info'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
-import { VoiceMode } from '@/components/voice/voice-mode'
+import { VoiceControls, unsavedTurns, useVoiceSession } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
 import { ThreadAvatar } from '@/components/thread-avatar'
 import { api } from '@/lib/api'
 import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
+import { usePhoneActions } from '@/lib/phone'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
@@ -46,6 +48,14 @@ export default function Thread() {
   const missing = isDm && !dmMate && !ws.loading
   useEffect(() => { if (missing) ws.refresh() }, [missing])  // eslint-disable-line react-hooks/exhaustive-deps
   const liveRuns = ws.liveRuns.filter((r) => r.thread_id === threadId)
+  usePhoneActions(t.messages)
+  const [voice, setVoice] = useState(false)
+  const v = useVoiceSession({
+    enabled: voice, threadId, messages: t.messages, working: liveRuns.some((r) => r.status === 'running'),
+    activity: Object.values(t.statuses).find((st) => st.label)?.label, name: dmMate?.name ?? title,
+    onTask: (text) => t.send(text, [], { voiceTask: true }), onEnd: () => setVoice(false),
+  })
+  const insets = useSafeAreaInsets()
   const live = liveRuns.length > 0
 
   // Mark read on open and whenever something new lands while it's open.
@@ -87,7 +97,16 @@ export default function Thread() {
     const a = m.meta?.approval_id ? t.approvals[m.meta.approval_id] : undefined
     return a?.status !== 'expired'
   }
+  // Voice mode is this chat, spoken: what's being said (and turns not saved yet) shows as messages at the bottom.
+  const speaker = dmMate?.id ?? people[0]?.id ?? ''
+  const voiceItems: ChatItem[] = voice ? unsavedTurns(v, t.messages).reverse().map((turn, i, all) => {
+    const key = turn === v.live ? 'voice:live' : `voice:${all.length - i}`
+    return turn.role === 'user'
+      ? { type: 'message' as const, key, m: { id: key, thread_id: threadId, owner_id: '', sender_type: 'user' as const, teammate_id: null, text: turn.text, mentions: [], kind: 'text' as const, meta: { voice: true }, proactive: false, run_id: null, created_at: new Date().toISOString() } as ChatMessage }
+      : { type: 'ghost' as const, key, g: { stream_id: key, run_id: 'voice', teammate_id: speaker, text: turn.text, done: turn !== v.live } }
+  }) : []
   const items: ChatItem[] = [
+    ...voiceItems,
     ...liveItems,
     ...t.messages.filter((m, i) => shown(m, i)).map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]
@@ -114,7 +133,6 @@ export default function Thread() {
 
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [highlight, setHighlight] = useState<string | null>(null)
-  const [voice, setVoice] = useState(false)
   const [showFollowups, setShowFollowups] = useState(false)
   const list = useRef<FlatList<ChatItem>>(null)
   // The composer floats over the chat (which scrolls under its fade): the list keeps its height clear.
@@ -311,7 +329,11 @@ export default function Thread() {
           </Animated.View>
         )}
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
-        <Composer
+        {voice ? (
+          <View style={{ backgroundColor: c.canvas }}>
+            <VoiceControls v={v} name={dmMate?.name ?? title} padBottom={insets.bottom} onEnd={() => setVoice(false)} onType={() => setVoice(false)} />
+          </View>
+        ) : <Composer
           placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team' : 'Message the project'}
           members={isDm ? [] : people}
           live={live}
@@ -321,7 +343,7 @@ export default function Thread() {
           onCancelReply={() => setReplyTo(null)}
           onVoice={() => setVoice(true)}
           commands={computer ? commands ?? [] : undefined}
-        />
+        />}
         </View>
         </View>
       </KeyboardAvoidingView>
@@ -335,18 +357,6 @@ export default function Thread() {
         people={isDm ? (dmMate ? [dmMate] : []) : people}
         onCancel={fu.cancel}
       />
-      {voice && (
-        <VoiceMode
-          teammate={dmMate}
-          title={title}
-          threadId={threadId}
-          messages={t.messages}
-          working={liveRuns.some((r) => r.status === 'running')}
-          activity={Object.values(t.statuses).find((st) => st.label)?.label}
-          onTask={(text) => t.send(text, [], { voiceTask: true })}
-          onClose={() => setVoice(false)}
-        />
-      )}
     </View>
   )
 }

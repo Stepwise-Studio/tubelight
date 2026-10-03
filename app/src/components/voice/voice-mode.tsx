@@ -1,7 +1,6 @@
 import { requestRecordingPermissionsAsync } from 'expo-audio'
-import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { BackHandler, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { BackHandler, ScrollView, View } from 'react-native'
 import Animated, { FadeIn, FadeOut, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, KeyboardIcon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
@@ -11,7 +10,7 @@ import { LIVE_WS, frameText } from '@/lib/live'
 import { plainText } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
-import { fonts, motion, radius, useTheme } from '@/theme'
+import { motion, radius, useTheme } from '@/theme'
 import { Button, IconButton, Squircle, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
 import { VoiceBeam, type VoiceBeamMode } from '@/vendor/voice-glow-native/VoiceBeam'
 
@@ -25,12 +24,12 @@ const plain = plainText
 /** Linear RMS → the raw level voice-glow's driver expects (its base gain 5 × default sensitivity 3.1). */
 const toBeam = (rms: number) => Math.min(1, rms * 15.5)
 
-/** One spoken turn in the transcript. */
-interface Line { role: 'user' | 'teammate'; text: string }
+/** One spoken turn. `saved`: it goes into the chat as a message (a spoken task result doesn't: the reply is there). */
+export interface VoiceTurn { role: 'user' | 'teammate'; text: string; saved: boolean }
 
-export interface VoiceModeProps {
-  teammate?: Teammate
-  title: string
+export interface VoiceSessionOptions {
+  /** The session runs while true. */
+  enabled: boolean
   threadId: string
   /** Thread messages, newest first. */
   messages: ChatMessage[]
@@ -38,34 +37,33 @@ export interface VoiceModeProps {
   working: boolean
   /** What the teammate is doing ("Fetching emails in Gmail"). */
   activity?: string
+  /** Who's talking, for labels. */
+  name: string
   /** Send a task to the teammate as a chat message; resolves to an error message or null. */
   onTask: (text: string) => Promise<string | null>
-  onClose: () => void
-  /** The keyboard button: type instead (default: close back to the chat). */
-  onType?: () => void
-  /** full: the chat's voice mode; panel: the phone-assistant sheet over other apps (src/assistant/root.tsx). */
-  variant?: 'full' | 'panel'
+  /** Voice ended from inside (Back, "Switch to text"). */
+  onEnd: () => void
+  /** What was on the phone's screen when the assistant was summoned (modules/phone), for "what's this?". */
+  screen?: { app: string | null; text: string | null; image: string | null } | null
 }
+
+export type VoiceSession = ReturnType<typeof useVoiceSession>
 
 /**
  * Live voice, like Claude, ChatGPT and Gemini: one streaming conversation with Gemini Live. The mic streams
  * continuously (echo-cancelled), Gemini hears when you stop and answers in about half a second, and talking over it
  * cuts it off at once. Anything needing apps goes to the teammate as a hidden chat message (run_task); Gemini says it's
- * on it and speaks the result when the reply lands. What was said is saved into the chat as it happens.
+ * on it and speaks the result when the reply lands. Each turn is saved into the chat as it ends and shows live
+ * (`live`) while it's said, so the chat reads like texting, the teammate's words appearing as they're spoken.
  */
-export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, onType, variant = 'full' }: VoiceModeProps) {
-  const panel = variant === 'panel'
-  const { c, scheme } = useTheme()
-  const insets = useSafeAreaInsets()
+export function useVoiceSession({ enabled, threadId, messages, working, activity, name, onTask, onEnd, screen }: VoiceSessionOptions) {
   const beamLevel = useSharedValue(0)
   const [phase, setPhase] = useState<Phase>('connecting')
-  // The conversation as it's spoken (Claude-style): finished turns, then the one being spoken now.
-  const [lines, setLines] = useState<Line[]>([])
-  const [live, setLive] = useState<Line | null>(null)
-  const [startedAt] = useState(() => new Date().toISOString())
-  const scroll = useRef<ScrollView>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
+  const [turns, setTurns] = useState<VoiceTurn[]>([])
+  const [live, setLive] = useState<VoiceTurn | null>(null)
+  const [startedAt, setStartedAt] = useState(() => new Date().toISOString())
   // "Better as text": the teammate offered to continue in the chat (code, tables, long lists).
   const [offer, setOffer] = useState<{ id: string; name: string; request: string; reason: string } | null>(null)
 
@@ -77,23 +75,26 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
   const turn = useRef({ user: '', model: '', userSaved: false, result: false })
   const saving = useRef<Promise<void>>(Promise.resolve())
   const pendingResults = useRef(0) // model turns still to come that speak a task result (not saved: the chat has it)
-  const latest = useRef({ messages, working })
-  useEffect(() => { latest.current = { messages, working } })
+  const latest = useRef({ messages, working, onTask, onEnd })
+  useEffect(() => { latest.current = { messages, working, onTask, onEnd } })
 
   const go = (p: Phase) => { phaseRef.current = p; setPhase(p) }
   const idle = () => (tasks.current > 0 ? 'working' : 'listening') as Phase
-
-  const close = () => {
-    ws.current?.close()
+  const stop = () => {
+    const sock = ws.current
     ws.current = null
+    sock?.close()
     LiveAudio.stop()
-    onClose()
   }
 
   // One session per attempt: token from our server (persona locked in), then straight to Gemini.
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     const subs: { remove(): void }[] = []
+    turn.current = { user: '', model: '', userSaved: false, result: false }
+    tasks.current = 0
+    pendingResults.current = 0
     const send = (msg: object) => { if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(msg)) }
 
     // The conversation is saved as it was spoken, in order: your words as soon as your turn ends, the teammate's when
@@ -103,30 +104,30 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
         .then(() => api('/voice/transcript', { method: 'POST', json: { thread_id: threadId, turns: [{ role, text }] } }))
         .then(() => {}, () => {})
     }
-    const show = (role: Line['role'], text: string) => setLines((ls) => [...ls, { role, text }])
+    const keep = (t: VoiceTurn) => setTurns((ts) => [...ts, t])
     const flushUser = () => {
       const t = turn.current
       if (t.userSaved || !t.user.trim()) return
       t.userSaved = true
       post('user', t.user.trim())
-      show('user', t.user.trim())
+      keep({ role: 'user', text: t.user.trim(), saved: true })
       setLive(null)
     }
     const saveTurn = () => {
       const t = turn.current
       turn.current = { user: '', model: '', userSaved: false, result: false }
-      if (!t.userSaved && t.user.trim()) { post('user', t.user.trim()); show('user', t.user.trim()) }
+      if (!t.userSaved && t.user.trim()) { post('user', t.user.trim()); keep({ role: 'user', text: t.user.trim(), saved: true }) }
       if (t.model.trim() && !t.result) post('teammate', t.model.trim())
-      if (t.model.trim()) show('teammate', t.model.trim()) // a spoken task result shows too; the chat has the full reply
+      if (t.model.trim()) keep({ role: 'teammate', text: t.model.trim(), saved: !t.result })
       setLive(null)
     }
 
-    const runTask = async (id: string, name: string, request: string) => {
+    const runTask = async (id: string, fname: string, request: string) => {
       if (cancelled) return
       await saving.current // your words land in the chat before the task does
       const since = new Date().toISOString()
       let result: string
-      const err = await onTask(request)
+      const err = await latest.current.onTask(request)
       if (err) {
         result = `Couldn't pass that on: ${err}`
       } else {
@@ -136,7 +137,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
             const { messages: ms, working: busy } = latest.current
             const fresh = ms.filter((m) => m.created_at > since && m.sender_type !== 'user').reverse()
             const blocking = fresh.find((m) => m.kind === 'approval' || m.kind === 'question' || m.kind === 'connect' || m.kind === 'error')
-            const texts = fresh.filter((m) => m.kind === 'text' && m.text.trim())
+            const texts = fresh.filter((m) => m.kind === 'text' && m.text.trim() && !m.meta?.voice)
             const timedOut = Date.now() - started > TASK_TIMEOUT_MS
             if (!blocking && !(texts.length && !busy) && !timedOut) return
             clearInterval(poll)
@@ -153,13 +154,20 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       }
       tasks.current -= 1
       pendingResults.current += 1
-      send({ toolResponse: { functionResponses: [{ id, name, response: { result, scheduling: 'WHEN_IDLE' } }] } })
+      send({ toolResponse: { functionResponses: [{ id, name: fname, response: { result, scheduling: 'WHEN_IDLE' } }] } })
       if (phaseRef.current === 'working' && tasks.current === 0) go('listening')
     }
 
     const onMessage = (raw: string) => {
       const m = JSON.parse(raw)
       if (m.setupComplete) {
+        if (screen?.text || screen?.image) { // seen, not said: so "what's this?" and "reply to this" work
+          if (screen.text) {
+            send({ clientContent: { turnComplete: false, turns: [{ role: 'user', parts: [{ text:
+              `(Not said aloud. When they called you they were in ${screen.app ?? 'an app'}; its screen shows:\n${screen.text})` }] }] } })
+          }
+          if (screen.image) send({ realtimeInput: { video: { data: screen.image, mimeType: 'image/jpeg' } } })
+        }
         LiveAudio.start().then(() => { if (!cancelled) { go('listening'); haptic.light() } }, (e: Error) => {
           setError(e.message || 'The microphone is unavailable.'); go('error')
         })
@@ -190,7 +198,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       }
       if (sc.inputTranscription?.text) {
         turn.current.user += sc.inputTranscription.text
-        if (phaseRef.current !== 'speaking') setLive({ role: 'user', text: turn.current.user.trim() })
+        if (!turn.current.userSaved) setLive({ role: 'user', text: turn.current.user.trim(), saved: true })
       }
       if (sc.outputTranscription?.text) {
         flushUser()
@@ -199,12 +207,15 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
           turn.current.result = true
           pendingResults.current -= 1
         }
-        setLive({ role: 'teammate', text: turn.current.model.trim() })
+        setLive({ role: 'teammate', text: turn.current.model.trim(), saved: !turn.current.result })
       }
       if (sc.turnComplete) saveTurn()
     }
 
     ;(async () => {
+      // A fresh conversation each time voice starts (or is retried).
+      setTurns([]); setLive(null); setOffer(null); setError(''); go('connecting')
+      setStartedAt(new Date().toISOString())
       const perm = await requestRecordingPermissionsAsync()
       if (!perm.granted) { setError('Tubelight needs the microphone for voice mode.'); go('error'); return }
       let token: string
@@ -237,20 +248,14 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       )
     })()
 
+    const back = BackHandler.addEventListener('hardwareBackPress', () => { latest.current.onEnd(); return true })
     return () => {
       cancelled = true
+      back.remove()
       subs.forEach((s) => s.remove())
-      const sock = ws.current
-      ws.current = null
-      sock?.close()
-      LiveAudio.stop()
+      stop()
     }
-  }, [threadId, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const back = BackHandler.addEventListener('hardwareBackPress', () => { close(); return true })
-    return () => back.remove()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, threadId, attempt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleMute = () => {
     haptic.tap()
@@ -259,20 +264,21 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     go(muting ? 'muted' : idle())
   }
   // Tapping while it talks cuts it off, like talking over it.
-  const tap = () => {
+  const interrupt = () => {
     if (phaseRef.current !== 'speaking') return
     haptic.tap()
     LiveAudio.clear()
     go(idle())
   }
   // Take the offer: the teammate writes the full answer in the chat (your spoken words are already saved there).
-  const toText = async () => {
+  const takeOffer = async () => {
     if (!offer) return
     haptic.tap()
     const { request } = offer
     setOffer(null)
-    close()
-    await onTask(request)
+    stop()
+    latest.current.onEnd()
+    await latest.current.onTask(request)
   }
   const stayInVoice = () => {
     if (!offer) return
@@ -282,9 +288,8 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     } }] } }))
     setOffer(null)
   }
-  const retry = () => { setError(''); setLive(null); go('connecting'); setAttempt((a) => a + 1) }
+  const retry = () => { setAttempt((a) => a + 1) }
 
-  const name = teammate?.name ?? title
   const label = {
     connecting: 'Connecting…',
     listening: 'Listening',
@@ -293,96 +298,122 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     muted: 'Microphone off',
     error: error || 'Something went wrong',
   }[phase]
-  // What came before this call: the chat's last few messages, oldest first.
-  const before = useMemo(() => messages
-    .filter((m) => m.kind === 'text' && !m.local && m.created_at < startedAt && plain(m.text).trim())
-    .slice(0, 6).reverse()
-    .map((m): Line => ({ role: m.sender_type === 'user' ? 'user' : 'teammate', text: plain(m.text).trim() })), [messages, startedAt])
-  const all = [...before, ...lines, ...(live ? [live] : [])]
-  const bg = scheme === 'dark' ? '#000000' : c.canvas
   const beam: VoiceBeamMode = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking'
     : phase === 'working' || phase === 'connecting' ? 'processing' : 'idle'
 
+  return { phase, label, beam, beamLevel, turns, live, startedAt, offer, toggleMute, interrupt, takeOffer, stayInVoice, retry, stop }
+}
+
+/** Turns said this session that the chat doesn't hold yet as messages, then the one being said (oldest first). */
+export function unsavedTurns(v: VoiceSession, messages: ChatMessage[]): VoiceTurn[] {
+  const left = messages.filter((m) => m.created_at >= v.startedAt && m.meta?.voice)
+  const waiting = v.turns.filter((t) => {
+    if (!t.saved) return false // a spoken task result: the teammate's full reply is already in the chat
+    const i = left.findIndex((m) => (m.sender_type === 'user') === (t.role === 'user') && m.text.trim() === t.text)
+    if (i < 0) return true
+    left.splice(i, 1)
+    return false
+  })
+  return [...waiting, ...(v.live ? [v.live] : [])]
+}
+
+/** The bottom of a chat in voice mode: our glow, what's happening, and type / mute / end. */
+export function VoiceControls({ v, name, onType, onEnd, padBottom }: {
+  v: VoiceSession; name: string; onType: () => void; onEnd: () => void; padBottom: number
+}) {
+  const { scheme } = useTheme()
   return (
-    <Animated.View
-      entering={FadeIn.duration(motion.duration.fast)}
-      exiting={FadeOut.duration(motion.duration.quick)}
-      style={panel
-        ? { height: '64%', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', backgroundColor: scheme === 'dark' ? '#000' : c.canvas }
-        : [StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? '#000' : c.canvas, zIndex: 20 }]}
-      accessibilityViewIsModal
-    >
-      <VoiceBeam mode={beam} level={beamLevel} theme={scheme} />
-
-      <View style={{ paddingTop: panel ? 16 : insets.top + 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        {teammate && <TeammateAvatar teammate={teammate} size={28} state={phase === 'working' ? 'working' : 'default'} interactive={false} />}
-        <Text variant="headline" numberOfLines={1}>{title}</Text>
-      </View>
-
-      {/* The transcript: earlier turns dim, the newest bright; tap anywhere to cut the teammate off. */}
-      <View style={{ flex: 1 }}>
-        <ScrollView ref={scroll} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 24, paddingTop: 48, paddingBottom: 24, gap: 22 }}>
-          <Pressable onPress={tap} style={{ gap: 22 }} accessibilityRole="button" accessibilityLabel={label}>
-            {all.map((l, i) => {
-              const recent = i >= all.length - 2
-              return l.role === 'user' ? (
-                <Squircle key={i} style={{ alignSelf: 'flex-end', maxWidth: '86%', borderRadius: radius.lg, backgroundColor: c.panel2, paddingHorizontal: 16, paddingVertical: 12, opacity: recent ? 1 : 0.6 }}>
-                  <Text variant="body" style={{ fontSize: 17, lineHeight: 24 }}>{l.text}</Text>
-                </Squircle>
-              ) : (
-                <Text key={i} style={{ fontFamily: fonts.regular, fontSize: 24, lineHeight: 32, letterSpacing: -0.3, color: recent ? c.ink : c.ink3 }}>{l.text}</Text>
-              )
-            })}
-          </Pressable>
-        </ScrollView>
-        {/* Older lines fade out under the header. */}
-        <Canvas style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 56 }} pointerEvents="none">
-          <Rect x={0} y={0} width={2000} height={56}>
-            <LinearGradient start={vec(0, 0)} end={vec(0, 56)} colors={[bg, `${bg}00`]} />
-          </Rect>
-        </Canvas>
-      </View>
-
-      <View style={{ alignItems: 'center', gap: 12, paddingBottom: insets.bottom + 132, paddingTop: 4 }}>
-        <TextSwap variant="label" color="ink3">{label}</TextSwap>
-        {phase === 'error' && <Button label="Try again" variant="soft" onPress={retry} />}
-      </View>
-
-      {offer && (
-        <Animated.View
-          entering={FadeIn.duration(motion.duration.fast)}
-          exiting={FadeOut.duration(motion.duration.quick)}
-          style={{ position: 'absolute', left: 16, right: 16, bottom: insets.bottom + 120 }}
-        >
+    <View style={{ paddingBottom: padBottom + 20, paddingTop: 28 }}>
+      <VoiceBeam mode={v.beam} level={v.beamLevel} theme={scheme} />
+      {v.offer && (
+        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+          style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
           <Surface radius={24} padding={16} elevated style={{ gap: 12 }}>
             <View style={{ gap: 2 }}>
               <Text variant="headline">Better as text</Text>
-              <Text variant="caption" color="ink3">{offer.reason || `${name} will write it out in the chat so you can read and copy it.`}</Text>
+              <Text variant="caption" color="ink3">{v.offer.reason || `${name} will write it out in the chat so you can read and copy it.`}</Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Button label="Keep talking" variant="outline" onPress={stayInVoice} style={{ flex: 1 }} />
-              <Button label="Switch to text" onPress={toText} style={{ flex: 1 }} />
+              <Button label="Keep talking" variant="outline" onPress={v.stayInVoice} style={{ flex: 1 }} />
+              <Button label="Switch to text" onPress={v.takeOffer} style={{ flex: 1 }} />
             </View>
           </Surface>
         </Animated.View>
       )}
-
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-        <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={onType ? () => { ws.current?.close(); ws.current = null; LiveAudio.stop(); onType() } : close} />
-        <IconButton
-          icon={phase === 'muted' ? MicOff01Icon : Mic01Icon}
-          swapKey={phase === 'muted' ? 'off' : 'on'}
-          variant={phase === 'muted' ? 'solid' : 'soft'}
-          size={56}
-          iconSize={22}
-          round
-          disabled={phase === 'connecting' || phase === 'error'}
-          accessibilityLabel={phase === 'muted' ? 'Turn microphone on' : 'Mute microphone'}
-          onPress={toggleMute}
-        />
-        <IconButton icon={Cancel01Icon} variant="soft" size={56} iconSize={22} round accessibilityLabel="End voice mode" onPress={close} />
+      <View style={{ alignItems: 'center', gap: 14 }}>
+        <TextSwap variant="label" color="ink3">{v.label}</TextSwap>
+        {v.phase === 'error' ? <Button label="Try again" variant="soft" onPress={v.retry} /> : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 24 }}>
+            <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={onType} />
+            <IconButton
+              icon={v.phase === 'muted' ? MicOff01Icon : Mic01Icon}
+              swapKey={v.phase === 'muted' ? 'off' : 'on'}
+              variant={v.phase === 'muted' ? 'solid' : 'soft'}
+              size={56}
+              iconSize={22}
+              round
+              disabled={v.phase === 'connecting'}
+              accessibilityLabel={v.phase === 'muted' ? 'Turn microphone on' : 'Mute microphone'}
+              onPress={v.toggleMute}
+            />
+            <IconButton icon={Cancel01Icon} variant="soft" size={56} iconSize={22} round accessibilityLabel="End voice mode" onPress={onEnd} />
+          </View>
+        )}
       </View>
+    </View>
+  )
+}
+
+export interface VoiceModeProps {
+  teammate?: Teammate
+  title: string
+  threadId: string
+  messages: ChatMessage[]
+  working: boolean
+  activity?: string
+  onTask: (text: string) => Promise<string | null>
+  onClose: () => void
+  /** The keyboard button: type instead (the voice session has stopped by then). */
+  onType: () => void
+  screen?: VoiceSessionOptions['screen']
+}
+
+/**
+ * The phone-assistant sheet over other apps (src/assistant/root.tsx): the chat as bubbles (the last few messages and
+ * what's said now, the teammate's words appearing as they're spoken), with the voice controls below.
+ */
+export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, onType, screen }: VoiceModeProps) {
+  const { c, scheme } = useTheme()
+  const insets = useSafeAreaInsets()
+  const scroll = useRef<ScrollView>(null)
+  const name = teammate?.name ?? title
+  const v = useVoiceSession({ enabled: true, threadId, messages, working, activity, name, onTask, onEnd: onClose, screen })
+  const bubbles = [
+    ...messages.filter((m) => m.kind === 'text' && !m.local && plain(m.text).trim()).slice(0, 8).reverse()
+      .map((m) => ({ mine: m.sender_type === 'user', text: plain(m.text).trim() })),
+    ...unsavedTurns(v, messages).map((t) => ({ mine: t.role === 'user', text: t.text })),
+  ]
+  return (
+    <Animated.View
+      entering={FadeIn.duration(motion.duration.fast)}
+      exiting={FadeOut.duration(motion.duration.quick)}
+      style={{ height: '66%', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', backgroundColor: scheme === 'dark' ? '#000' : c.canvas }}
+      accessibilityViewIsModal
+    >
+      <View style={{ paddingTop: 16, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
+        <Text variant="headline" numberOfLines={1}>{title}</Text>
+      </View>
+      <ScrollView ref={scroll} style={{ flex: 1 }} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
+        onTouchEnd={v.interrupt}>
+        {bubbles.map((b, i) => (
+          <Squircle key={i} style={{ alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: b.mine ? c.tube : c.panel2 }}>
+            <Text variant="body" style={{ color: b.mine ? '#fff' : c.ink }}>{b.text}</Text>
+          </Squircle>
+        ))}
+      </ScrollView>
+      <VoiceControls v={v} name={name} onType={() => { v.stop(); onType() }} onEnd={onClose} padBottom={insets.bottom} />
     </Animated.View>
   )
 }

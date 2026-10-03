@@ -66,6 +66,8 @@ class RunCtx:
     brief: str = ""  # the running summary of this chat (brief.py)
     sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
     outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
+    phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
+    phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
     @property
@@ -522,6 +524,7 @@ def make_teammate(ctx: RunCtx, tm: dict):
                 "text": text, "kind": "text", "proactive": ctx.proactive, "run_id": ctx.run_id,
                 "meta": {"stream_id": stream_id, "tool_calls": ctx.turn_tools.pop(tm["id"], []),
                          **({"attachments": ctx.outgoing.pop(tm["id"])} if ctx.outgoing.get(tm["id"]) else {}),
+                         **({"phone_actions": ctx.phone_actions.pop(tm["id"])} if ctx.phone_actions.get(tm["id"]) else {}),
                          **({"event_type": ctx.event_type} if ctx.event_type else {})},
             })
             # Every reply: while the app is open on screen Android doesn't show it (no foreground handler), so this

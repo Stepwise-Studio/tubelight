@@ -1,0 +1,54 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-20:12
+INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-20:12
+	package
+		INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:11-69
+uses-permission#com.android.alarm.permission.SET_ALARM
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:3:3-76
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:3:20-73
+uses-permission#android.permission.USE_FULL_SCREEN_INTENT
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:5:3-79
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:5:20-76
+queries
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:7:3-12:13
+intent#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:8:5-11:14
+action#android.intent.action.MAIN
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:9:7-59
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:9:15-56
+category#android.intent.category.LAUNCHER
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:7-67
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:17-64
+application
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:13:3-19:17
+service#studio.stepwise.phone.NotificationsService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:15:5-18:15
+	android:label
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:7-32
+	android:exported
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:15:72-96
+	android:permission
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:33-107
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:15:14-71
+intent-filter#action:name:android.service.notification.NotificationListenerService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:7-120
+action#android.service.notification.NotificationListenerService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:22-104
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:30-101
+uses-sdk
+INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml
+INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml

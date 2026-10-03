@@ -5,7 +5,7 @@ import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Linking, Platform, RefreshControl, ScrollView, View } from 'react-native'
+import { ActivityIndicator, AppState, Linking, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
   Brain02Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
@@ -16,6 +16,7 @@ import { NotifyChoices } from '@/components/notify-prefs'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { useAssistantMate } from '@/lib/assistant'
+import { Phone } from '@/lib/phone'
 import { ApiError, api } from '@/lib/api'
 import type { Automation } from '@/lib/automations'
 import { whenLabel } from '@/lib/format'
@@ -139,6 +140,13 @@ function PhoneAssistant() {
   const { mate, choose } = useAssistantMate(ws.teammates)
   const open = () => Linking.sendIntent('android.settings.VOICE_INPUT_SETTINGS')
     .catch(() => Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')).catch(() => Linking.openSettings())
+  // Android settings pages decide these; read them again whenever you come back from one.
+  const read = () => ({ notes: !!Phone?.notificationAccess(), ring: !!Phone?.canRing() })
+  const [access, setAccess] = useState(read)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => { if (st === 'active') setAccess(read()) })
+    return () => sub.remove()
+  }, [])
   if (Platform.OS !== 'android' || !mate) return null
   return (
     <FormSection title="Phone assistant" hint="Hold the side key (or swipe up from a bottom corner) to talk to a teammate over any app, even the lock screen. Pick Tubelight as the digital assistant app, then on Samsung: Settings → Advanced features → Side button → Press and hold → Digital assistant.">
@@ -147,6 +155,16 @@ function PhoneAssistant() {
           options={ws.teammates.map((t) => ({ value: t.id, title: t.name, subtitle: t.role }))} />
         <Divider />
         <ListRow title="Make Tubelight your assistant" subtitle="Opens Android's digital assistant setting" chevron onPress={open} />
+        {Phone && (
+          <>
+            <Divider />
+            <ListRow title="Notifications" subtitle={access.notes ? 'On: teammates can look through the last day’s, when you ask' : 'Off: let teammates look through your notifications when you ask'}
+              accessory={<Chip label={access.notes ? 'On' : 'Off'} color={access.notes ? 'success' : 'idle'} size="sm" dot />} onPress={() => Phone?.openNotificationAccess()} />
+            <Divider />
+            <ListRow title="When a teammate needs you" subtitle={access.ring ? 'Over the lock screen: the decision opens with voice' : 'Allow full-screen alerts so decisions open over the lock screen'}
+              accessory={<Chip label={access.ring ? 'On' : 'Off'} color={access.ring ? 'success' : 'idle'} size="sm" dot />} onPress={() => Phone?.openRingSettings()} />
+          </>
+        )}
       </Surface>
     </FormSection>
   )

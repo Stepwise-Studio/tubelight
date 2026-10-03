@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, api } from '@/lib/api'
+import { syncNotifications } from '@/lib/phone'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, DeltaEvent, DoneEvent, LiveState, Message, StatusEvent } from '@/lib/types'
 
@@ -159,6 +160,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
   }, [threadId, load, upsert])
 
   const post = async (local: ChatMessage, mentions: string[]) => {
+    await syncNotifications().catch(() => {}) // "what did Kishore send me?" needs the phone's latest
     try {
       const res = await api<{ message: Message; run_id: string }>(`/threads/${encodeURIComponent(threadId)}/messages`, {
         method: 'POST',

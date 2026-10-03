@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "11"  # 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "12"  # 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -385,7 +385,59 @@ def screenshot(c: dict, a: dict) -> dict:
     p = Path(urllib.parse.unquote(urllib.parse.urlparse(out["uri"]).path))
     data = p.read_bytes()
     p.unlink(missing_ok=True)  # it went to the phone; don't fill Pictures/Screenshots
-    return {"name": "Screenshot.png", "size": len(data), "b64": base64.b64encode(data).decode()}
+    screens, name = monitors(), "Screenshot.png"
+    want = str(a.get("monitor") or "").strip().lower()
+    if want and len(screens) > 1:
+        pick = next((m for i, m in enumerate(screens, 1) if want in (str(i), m["connector"].lower(), m["name"].lower())
+                     or want in m["name"].lower()), None)
+        if not pick:
+            raise ValueError(f"No monitor {a['monitor']!r}; there are: " + ", ".join(f"{i} {m['name']}" for i, m in enumerate(screens, 1)))
+        data, name = _crop(data, screens, pick), f"Screenshot {pick['name']}.png"
+    return {"name": name, "size": len(data), "b64": base64.b64encode(data).decode(),
+            "monitors": [f"{i} {m['name']}" for i, m in enumerate(screens, 1)]}
+
+
+def monitors() -> list:
+    """The screens as GNOME lays them out, left to right: name, connector and their place on the desktop."""
+    try:
+        from gi.repository import Gio
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        _serial, mons, logical, _props = bus.call_sync(
+            "org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig", "org.gnome.Mutter.DisplayConfig",
+            "GetCurrentState", None, None, 0, 5000, None).unpack()
+    except Exception:
+        return []
+    info = {}
+    for (conn, _v, _p, _s), modes, props in mons:
+        mode = next((m for m in modes if m[6].get("is-current")), None)
+        if mode:
+            info[conn] = (props.get("display-name") or conn, mode[1], mode[2])
+    out = []
+    for x, y, scale, _t, _primary, owners, _props in logical:
+        conn = owners[0][0]
+        if conn in info:
+            label, w, h = info[conn]
+            out.append({"name": label, "connector": conn, "x": x, "y": y, "w": round(w / scale), "h": round(h / scale)})
+    return sorted(out, key=lambda m: (m["x"], m["y"]))
+
+
+def _crop(png: bytes, screens: list, m: dict) -> bytes:
+    """Cut one monitor out of the whole-desktop screenshot (the image may be scaled against the layout)."""
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf, GLib
+    loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+    loader.write(png)
+    loader.close()
+    pix = loader.get_pixbuf()
+    left, top = min(s["x"] for s in screens), min(s["y"] for s in screens)
+    k = pix.get_width() / (max(s["x"] + s["w"] for s in screens) - left)
+    x, y = round((m["x"] - left) * k), round((m["y"] - top) * k)
+    w, h = min(round(m["w"] * k), pix.get_width() - x), min(round(m["h"] * k), pix.get_height() - y)
+    ok, buf = pix.new_subpixbuf(x, y, w, h).save_to_bufferv("png", [], [])
+    if not ok:
+        raise GLib.Error("Couldn't cut that monitor out of the screenshot.")
+    return bytes(buf)
 
 
 def run_as_user(a: dict) -> str:
