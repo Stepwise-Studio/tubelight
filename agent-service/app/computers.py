@@ -338,7 +338,8 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
         raise RuntimeError("The computer is offline (the Tubelight runner isn't running there).")
     version = int(seen.get("version") or 0) if str(seen.get("version") or "0").isdigit() else 0
     needs = [(args.get("full"), 3, "full access from its chat"), (args.get("sudo"), 4, "admin commands"),
-             (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs")]
+             (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs"),
+             (op == "live", 9, "live app usage")]
     missing = next((what for wanted, v, what in needs if wanted and version < v), None)
     if missing:  # it updates itself within 6 hours; restarting Tubelight on it updates it now
         raise RuntimeError(f"Tubelight on this computer is too old for {missing}. It updates itself within a few hours; "
@@ -651,3 +652,24 @@ async def job_done(owner_id: str, cid: str, job: dict[str, Any]) -> None:
                                  "teammate_id": r["teammate_id"], "text": text, "kind": "text", "proactive": True,
                                  "meta": {"job": job.get("id")}})
     await push.notify(owner_id, r["name"], f"{'Finished' if ok else 'Failed'}: {title}", thread, kind="alert", teammate=tm)
+
+
+# ------------------------------------------------------------------ computers lent to projects
+async def project_computers(owner_id: str, project_id: str) -> list[str]:
+    item = await memory.store.aget(("computer_projects", owner_id), project_id)
+    return list((item.value if item else {}).get("computers") or [])
+
+
+async def set_project_computers(owner_id: str, project_id: str, ids: list[str]) -> list[str]:
+    mine = {r["id"] for r in await listing(owner_id)}
+    keep = [i for i in dict.fromkeys(ids) if i in mine][:1]  # ponytail: one computer per project for now
+    await memory.store.aput(("computer_projects", owner_id), project_id, {"computers": keep}, index=False)
+    return keep
+
+
+async def for_project(owner_id: str, project_id: str) -> dict[str, Any] | None:
+    """The computer this project's teammates may use (online or not: its tools say when it's offline)."""
+    ids = await project_computers(owner_id, project_id)
+    if not ids:
+        return None
+    return next((c for c in await listing(owner_id) if c["id"] == ids[0]), None)

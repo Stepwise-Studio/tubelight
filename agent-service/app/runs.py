@@ -40,6 +40,7 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         brief=await brief.get(thread_id),
         docker=docker_ok,
         computer=await computers.for_run(owner_id),
+        project_computer=await computers.for_project(owner_id, project['id']) if project else None,
     )
 
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, files, followups, llm, memory, repo, sandbox, usage
+from . import automations, computers, config, connectors, db, files, followups, images, llm, memory, repo, sandbox, usage
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -72,7 +72,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_start_job": "act",
+    "computer_send_file": "read", "computer_receive": "read", "computer_start_job": "act", "generate_image": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -80,7 +80,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "generate_image": "Drawing an image", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -431,6 +431,18 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "convention, where something lives). Not for chat or task status."),
         ]
 
+    if images.available() and not helper:
+        async def generate_image(prompt: str) -> str:
+            att = await images.generate(ctx.owner_id, prompt)
+            ctx.outgoing.setdefault(tm["id"], []).append({**att, "name": "Generated image.jpg"})
+            return "The image is attached to your reply; they see it in the chat. Say a line about it, don't describe it at length."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=generate_image, name="generate_image",
+            description="Make a picture from a description (illustrations, mockups, posters, photos of things that "
+                        "don't exist). prompt: a detailed visual description in English: subject, style, composition, "
+                        "colours, mood. One image per call; it shows in your reply."))
+
     tools += [
         StructuredTool.from_function(
             coroutine=automate, name="automate",
@@ -499,8 +511,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         ]
 
     c = ctx.computer
-    dev = computers.device_of(tm)
-    if dev and not helper:  # the computer's own chat: full access, as the user
+    # Full access to a computer: in its own chat (the teammate is the computer), or for every teammate in a project the
+    # user lent it to (project settings → Computers).
+    dev = computers.device_of(tm) or (ctx.project_computer or {}).get("id")
+    if dev and not helper:
         async def computer_list(path: str = "~") -> str:
             return await computers.call(dev, "fs_list", {"path": path, "full": True})
 

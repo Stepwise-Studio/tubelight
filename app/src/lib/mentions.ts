@@ -9,6 +9,11 @@ export interface Part { text: string; mention: boolean }
  * `@dev` at the cursor might still become `@devon`). `a@dev` in an email address is not a mention.
  */
 export function mentionParts(text: string, known: Set<string>, atEnd = true): Part[] {
+  // A computer's slash command at the start ("/status") is highlighted like a mention when it's known ("/status").
+  const slash = /^\/[a-z]+/i.exec(text)?.[0]
+  if (slash && known.has(slash.toLowerCase()) && (atEnd || /^\/[a-z]+[\s]/i.test(text))) {
+    return [{ text: slash, mention: true }, ...(text.length > slash.length ? mentionParts(text.slice(slash.length), known, atEnd) : [])]
+  }
   const bits = text.split(/(@[a-z0-9][a-z0-9_-]*)/gi)
   const out: Part[] = []
   bits.forEach((bit, i) => {

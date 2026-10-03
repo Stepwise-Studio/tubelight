@@ -925,6 +925,33 @@ class ComputerPatch(BaseModel):
     ask: bool
 
 
+class ProjectComputers(BaseModel):
+    computers: list[str] = Field(default_factory=list, max_length=5)
+
+
+@app.get("/projects/{project_id}/computers")
+async def get_project_computers(project_id: str, user: User = Depends(current_user)):
+    await owned("projects", project_id, user, "project")
+    return {"computers": await computers.project_computers(user["id"], project_id)}
+
+
+@app.put("/projects/{project_id}/computers")
+async def put_project_computers(project_id: str, body: ProjectComputers, user: User = Depends(current_user)):
+    await owned("projects", project_id, user, "project")
+    return {"computers": await computers.set_project_computers(user["id"], project_id, body.computers)}
+
+
+@app.get("/computers/{computer_id}/live")
+async def computer_live(computer_id: str, user: User = Depends(current_user)):
+    """The computer's info sheet: battery, disk, memory and the apps using memory and CPU now (polled while open)."""
+    if not await computers.row(user["id"], computer_id):
+        raise HTTPException(404, "No such computer.")
+    try:
+        return await computers.call(computer_id, "live", {}, 15)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+
+
 @app.patch("/computers/{computer_id}")
 async def patch_computer(computer_id: str, body: ComputerPatch, user: User = Depends(current_user)):
     await computers.set_ask(user["id"], computer_id, body.ask)

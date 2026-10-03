@@ -59,6 +59,7 @@ class RunCtx:
     event_type: str | None = None
     docker: bool = False
     computer: dict | None = None  # the user's online computer and their choices (computers.for_run)
+    project_computer: dict | None = None  # a computer lent to this project: its teammates get full access to it
     turn_tools: dict[str, list] = field(default_factory=dict)
     apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
     only: list[str] | None = None  # an automation run: just these apps (see scope)
@@ -271,7 +272,16 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "changes something waits for their OK. "
                      "When you show a list or table from command output, include every row it returned, exactly as "
                      "many as they asked for: count them before you answer, and never say 'top 10' over 8 rows.")
-    if "computer_list" in tool_names:
+    if ctx.project_computer and not computers.device_of(tm) and "computer_run" in tool_names:
+        pc = ctx.project_computer
+        lines.append(f"{ctx.user_name} lent this project their computer '{pc['name']}' ({pc.get('os') or 'Linux'}): "
+                     "computer_list / computer_read / computer_write / computer_run work on it with full access, as them "
+                     "(~ is their home folder; looking runs straight away, changes wait for their OK). When they ask you "
+                     f"to build or change something on {pc['name']}, do it there, not in your sandbox: new projects go "
+                     "under ~/Projects unless they say where; installs, scaffolding and builds that take minutes go "
+                     "through computer_start_job (it reports back here). Check what's installed (node, npm, git) "
+                     "before relying on it, and tell them where things ended up.")
+    if "computer_list" in tool_names and not computers.device_of(tm) and not ctx.project_computer:
         c = ctx.computer
         lines.append(f"You can work on {ctx.user_name}'s computer '{c['name']}' ({c['os']}), in the folders they shared: "
                      f"{', '.join(c['folders'])}. Look first (computer_list, computer_read); writing a file or running a "

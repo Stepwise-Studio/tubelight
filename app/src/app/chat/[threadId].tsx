@@ -3,10 +3,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
-import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 
 import { Composer } from '@/components/chat/composer'
-import { ComputerStrip, type ComputerInfo } from '@/components/chat/computer-strip'
+import { ComputerInfo } from '@/components/chat/computer-info'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
@@ -18,7 +18,7 @@ import { useSession } from '@/lib/session'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, TextSwap, elevation, haptic, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, Skeleton, TeammateAvatar, Text, TextSwap, elevation, haptic, toast } from '@/ui'
 
 const GROUP_GAP_MS = 5 * 60_000
 
@@ -38,15 +38,9 @@ export default function Thread() {
   // A linked computer's chat: its slash commands and a live status strip (agent computers.py).
   const computer = dmMate && isComputer(dmMate) ? computerId(dmMate) : null
   const [commands, setCommands] = useState<{ name: string; about: string; arg: boolean }[] | undefined>()
-  const [pc, setPc] = useState<ComputerInfo | null>(null)
+  const [info, setInfo] = useState(false)
   useEffect(() => {
-    if (!computer) return
-    api<{ name: string; about: string; arg: boolean }[]>('/computers/commands').then(setCommands, () => {})
-    const load = () => api<{ computers: (ComputerInfo & { id: string })[] }>('/computers')
-      .then((d) => setPc(d.computers.find((x) => x.id === computer) ?? null), () => {})
-    load()
-    const t = setInterval(load, 30_000)
-    return () => clearInterval(t)
+    if (computer) api<{ name: string; about: string; arg: boolean }[]>('/computers/commands').then(setCommands, () => {})
   }, [computer])
   // A chat made by the service (a linked computer's) can arrive before its teammate is loaded here.
   const missing = isDm && !dmMate && !ws.loading
@@ -160,7 +154,7 @@ export default function Thread() {
     onRetryRun: () => latest.current.retryRun(),
     onDecided: () => { latest.current.t.refreshApprovals(); latest.current.ws.refresh() },
     onReact: (m, emoji) => latest.current.t.react(m, emoji),
-    handles: new Set([...handleKey.split(','), ...(isDm ? [] : ['all', 'everyone'])]),
+    handles: new Set([...handleKey.split(','), ...(isDm ? [] : ['all', 'everyone']), ...(commands ?? []).map((x) => `/${x.name}`)]),
     group: !isDm,
     onSend: async (text) => { const err = await latest.current.t.send(text, []); if (err) toast({ title: 'Message not sent', body: err, tone: 'error' }) },
   }
@@ -185,6 +179,7 @@ export default function Thread() {
     <ScreenHeader
       right={
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {computer && <IconButton icon={InformationCircleIcon} round accessibilityLabel={`About ${title}`} onPress={() => setInfo(true)} />}
           <FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />
         </View>
       }
@@ -261,7 +256,6 @@ export default function Thread() {
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       {header}
-      {computer && <ComputerStrip pc={pc} onCommand={(cmd) => send(cmd, [])} />}
       <ChatActionsContext.Provider value={ctx}>
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         {/* In flow, so it shrinks above the keyboard; the composer is pinned to its bottom (absolute children skip the padding). */}
@@ -332,6 +326,7 @@ export default function Thread() {
         </View>
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
+      {computer && <ComputerInfo open={info} onClose={() => setInfo(false)} id={computer} name={title} onCommand={(cmd) => send(cmd, [])} />}
       <FollowupsSheet
         open={showFollowups}
         onClose={() => setShowFollowups(false)}

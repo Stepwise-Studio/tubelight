@@ -75,7 +75,8 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
   const { connections } = useConnections()
   // A computer's chat has no apps to lend: its menu is slash commands instead.
   const apps = commands ? [] : (connections ?? []).filter((a) => a.connected).map((a) => ({ ...a, token: appToken(a.toolkit) }))
-  const known = new Set([...members.map((m) => m.handle.toLowerCase()), ...(members.length > 1 ? ['all', 'everyone'] : []), ...apps.map((a) => a.token)])
+  const known = new Set([...members.map((m) => m.handle.toLowerCase()), ...(members.length > 1 ? ['all', 'everyone'] : []), ...apps.map((a) => a.token),
+    ...(commands ?? []).map((x) => `/${x.name}`)])
 
   const before = text.slice(0, sel)
   const query = members.length || apps.length ? before.match(MENTION)?.[2]?.toLowerCase() : undefined

@@ -96,6 +96,7 @@ function Settings({ p }: { p: Project }) {
         <Details p={p} />
         <Repository p={p} />
         <Members p={p} members={members} />
+        <Computers p={p} />
         <FormSection title="Memory" hint="Facts every member knows about this project.">
           <MemoryList scope="project" id={p.id} owner={p.name} />
         </FormSection>
@@ -107,6 +108,41 @@ function Settings({ p }: { p: Project }) {
         </FormSection>
       </KeyboardAwareScrollView>
     </View>
+  )
+}
+
+// ------------------------------------------------------------------ computers
+
+// Lend one of your linked computers to the project: its teammates get full access to it (agent: computers.for_project).
+function Computers({ p }: { p: Project }) {
+  const [list, setList] = useState<{ id: string; name: string; online: boolean; full: boolean }[] | null>(null)
+  const [lent, setLent] = useState<string[]>([])
+  useEffect(() => {
+    api<{ computers: { id: string; name: string; online: boolean; full: boolean }[] }>('/computers').then((d) => setList(d.computers), () => setList([]))
+    api<{ computers: string[] }>(`/projects/${p.id}/computers`).then((d) => setLent(d.computers), () => {})
+  }, [p.id])
+  if (!list?.length) return null
+  const lend = async (id: string, on: boolean) => {
+    const before = lent
+    setLent(on ? [id] : [])
+    try {
+      const d = await api<{ computers: string[] }>(`/projects/${p.id}/computers`, { method: 'PUT', json: { computers: on ? [id] : [] } })
+      setLent(d.computers)
+      haptic.success()
+    } catch (e) {
+      setLent(before)
+      toast({ title: 'Unable to change that', body: (e as Error).message, tone: 'error' })
+    }
+  }
+  return (
+    <FormSection title="Computer" hint="Teammates here can work on the computer you lend: read and write files, run commands, start projects. Changes still ask you first unless the computer is set to run freely.">
+      <View style={{ gap: 12 }}>
+        {list.map((m) => (
+          <Toggle key={m.id} value={lent.includes(m.id)} onChange={(v) => lend(m.id, v)} label={m.name}
+            description={!m.full ? 'Full access is off on the computer: turn it on in Tubelight there' : m.online ? 'Online' : 'Offline right now'} />
+        ))}
+      </View>
+    </FormSection>
   )
 }
 

@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSION = "8"  # 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "9"  # 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -259,6 +259,54 @@ def stats() -> dict:
     return out
 
 
+NICE = {"chrome": "Chrome", "chromium": "Chromium", "firefox": "Firefox", "code": "VS Code", "Isolated Web Co": "Firefox",
+        "gnome-shell": "GNOME Shell", "Xwayland": "Xwayland", "java": "Java", "node": "Node.js", "python3": "Python",
+        "docker": "Docker", "dockerd": "Docker", "containerd": "Docker", "Web Content": "Firefox", "WebExtensions": "Firefox",
+        "Privileged Cont": "Firefox", "RDD Process": "Firefox", "Socket Process": "Firefox", "Utility Process": "Firefox",
+        "chatgpt": "ChatGPT", "claude-desktop": "Claude", "nautilus": "Files", "gnome-terminal-": "Terminal", "ptyxis": "Terminal",
+        "baobab": "Disk Usage", "zen": "Zen Browser", "postgres": "PostgreSQL", "next-server": "Next.js", "snapd": "Snap", "claude": "Claude Code"}
+
+
+def _procs() -> dict:
+    page = os.sysconf("SC_PAGE_SIZE")
+    out = {}
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            st = (d / "stat").read_text()
+            comm = st[st.index("(") + 1:st.rindex(")")]
+            if len(comm) >= 15 and comm not in NICE:  # the kernel cuts names at 15 characters: the program's own
+                argv0 = (d / "cmdline").read_bytes().split(b"\0")[0].decode(errors="replace")
+                comm = re.split(r"[ (:]", Path(argv0).name.lstrip(".").removesuffix("-wrapped"))[0] or comm
+            f = st[st.rindex(")") + 2:].split()
+            out[d.name] = (comm, int(f[11]) + int(f[12]), int(f[21]) * page)  # utime+stime, RSS
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+def live(c: dict, a: dict) -> dict:
+    """What the computer's info sheet shows, refreshed every couple of seconds: stats and the apps using memory and CPU."""
+    first, t0 = _procs(), time.monotonic()
+    time.sleep(0.5)
+    second, dt = _procs(), time.monotonic() - t0
+    hz, cpus = os.sysconf("SC_CLK_TCK"), os.cpu_count() or 1
+    apps: dict = {}
+    for pid, (comm, ticks, rss) in second.items():
+        prev = first.get(pid)
+        cpu = (ticks - prev[1]) / hz / dt * 100 / cpus if prev else 0.0
+        name = NICE.get(comm, comm)
+        g = apps.setdefault(name, {"name": name, "mem": 0, "cpu": 0.0, "procs": 0})
+        g["mem"] += rss
+        g["cpu"] += cpu
+        g["procs"] += 1
+    total = int(Path("/proc/meminfo").read_text().split("MemTotal:")[1].split()[0]) * 1024
+    top = sorted(apps.values(), key=lambda g: -g["mem"])[:12]
+    return {"stats": stats(), "mem_total": total, "cpu_total": round(sum(g["cpu"] for g in apps.values()), 1),
+            "apps": [{**g, "cpu": round(g["cpu"], 1)} for g in top]}
+
+
 def run_as_user(a: dict) -> str:
     """Full access: the command runs as this user, in their real environment (opens apps, sees every file)."""
     timeout = max(1, min(int(a.get("timeout") or 120), 600))
@@ -416,7 +464,7 @@ def box_close(c: dict, a: dict) -> str:
     return diff
 
 
-OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start,
+OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close}
 
