@@ -73,6 +73,7 @@ export default function ProfileScreen() {
         <UsageSection />
         <MemorySection />
         <Appearance />
+        <ImageModel />
         <PushSection />
         <WebhookSection profile={profile} onChanged={setProfile} />
         <ServiceStatus key={healthKey} />
@@ -125,6 +126,29 @@ function ProfileSection({ profile, email, onSaved }: { profile: Profile | null; 
       ) : (
         <View style={{ gap: 8 }}><Skeleton width={96} height={12} /><Skeleton height={48} radius={12} /></View>
       )}
+    </FormSection>
+  )
+}
+
+// Which model draws teammates' pictures (agent: images.py). If it fails, FLUX.1 schnell steps in.
+function ImageModel() {
+  const [data, setData] = useState<{ model: string; models: { id: string; name: string; about: string; per_day: number }[] } | null>(null)
+  useEffect(() => { api<NonNullable<typeof data>>('/images/model').then(setData, () => {}) }, [])
+  if (!data) return null
+  const pick = async (model: string) => {
+    const before = data.model
+    setData({ ...data, model })
+    try { await api('/images/model', { method: 'PUT', json: { model } }) } catch (e) {
+      setData({ ...data, model: before })
+      toast({ title: 'Unable to change the image model', body: (e as Error).message, tone: 'error' })
+    }
+  }
+  return (
+    <FormSection title="Images" hint="The model teammates draw pictures with. All run free on Cloudflare’s daily allowance.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ChoiceRow label="Image model" value={data.model} onChange={pick} options={data.models.map((m) => (
+          { value: m.id, title: m.name, subtitle: `${m.about} · about ${m.per_day} a day` }))} />
+      </Surface>
     </FormSection>
   )
 }

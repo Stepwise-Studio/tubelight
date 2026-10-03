@@ -23,6 +23,8 @@ interface UsageItem {
   /** provider: the provider's own numbers; counted: Tubelight counts them (Gemini says nothing). */
   source: 'provider' | 'counted'
   note?: string
+  /** Display name when the id isn't a model id (image models). */
+  name?: string
   out?: boolean
   breakdown?: { name: string; value: number }[]
 }
@@ -96,8 +98,8 @@ function Row({ it, first }: { it: UsageItem; first: boolean }) {
   const { models } = useModels()
   const [open, setOpen] = useState(false)
   const color = COLOR[it.provider] ?? c.tube
-  const name = it.id === 'composio' ? 'Composio tool calls' : it.id === 'database' ? 'Database'
-    : it.id === 'openrouter' ? 'OpenRouter free models' : it.id === 'cloudflare' ? 'Cloudflare Workers AI' : modelName(it.id, models)
+  const name = it.name ?? (it.id === 'composio' ? 'Composio tool calls' : it.id === 'database' ? 'Database'
+    : it.id === 'openrouter' ? 'OpenRouter free models' : it.id === 'cloudflare' ? 'Cloudflare Workers AI' : modelName(it.id, models))
   const sub = it.id.includes(':') ? PROVIDERS[it.provider] ?? it.provider : it.id === 'database' ? 'Supabase' : null
   const share = it.limit ? it.used / it.limit : null
   const out = it.out || (it.limit != null && it.used >= it.limit)

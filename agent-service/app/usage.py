@@ -181,12 +181,12 @@ async def _safe(coro: Any) -> Any:
 _cache: tuple[float, dict[str, Any]] = (0.0, {})
 
 
-async def report(models: list[str]) -> dict[str, Any]:
+async def report(models: list[str], image_model: str = "") -> dict[str, Any]:
     """Everything the Usage screen shows. `models`: the model ids in use (defaults, fallbacks, teammates')."""
     global _cache
     if time.time() - _cache[0] < 30:
         return _cache[1]
-    from . import llm
+    from . import images, llm
 
     now = datetime.now(UTC)
     for p in {"gemini", *llm.PROVIDERS}:
@@ -200,7 +200,7 @@ async def report(models: list[str]) -> dict[str, Any]:
     today = {(p, m): v for (p, m, d), v in _counts.items() if d == day_of(p, now)}
     for mid in [*models, *(f"{p}:{m}" for p, m in today)]:
         p, m = llm.parse(mid)
-        if m == "flux-1-schnell":  # images get their own section
+        if p == "cloudflare" and m in images.MODELS:  # images get their own section
             continue
         m = ALIASES.get(m, m)
         if (p, m) in seen or not llm.key(p):
@@ -224,16 +224,17 @@ async def report(models: list[str]) -> dict[str, Any]:
             item |= {"out": True, "used": max(item["used"], item["limit"] or 0)}
         items.append(item)
     sections = [{"title": "Models", "items": items}]
-    from . import images
     if images.available():
-        made = today.get(("cloudflare", "flux-1-schnell"), {}).get("requests", 0)
-        # What's left of today's neurons buys the rest (the Cloudflare fallback model draws on the same neurons).
-        left = (CF_NEURONS - cf["neurons"]) // images.NEURONS if cf and not cf.get("denied") else None
-        sections.append({"title": "Images", "items": [{
-            "id": "images", "provider": "cloudflare", "used": made, "unit": "images", "period": "today",
-            "limit": made + max(left, 0) if left is not None else CF_NEURONS // images.NEURONS,
-            "resets": next_reset("cloudflare", now), "source": "counted",
-            "note": f"FLUX.1 schnell on Cloudflare, about {images.NEURONS} neurons each from the shared daily neurons."}]})
+        rows = []
+        for key, m in images.MODELS.items():
+            made = today.get(("cloudflare", key), {}).get("requests", 0)
+            # What's left of today's neurons buys the rest (chat fallbacks on Cloudflare draw on the same neurons).
+            left = (CF_NEURONS - cf["neurons"]) // m["neurons"] if cf and not cf.get("denied") else None
+            rows.append({"id": f"images:{key}", "name": m["name"], "provider": "cloudflare", "used": made,
+                         "unit": "images", "period": "today", "source": "counted", "resets": next_reset("cloudflare", now),
+                         "limit": made + max(left, 0) if left is not None else CF_NEURONS // m["neurons"],
+                         "note": f"About {m['neurons']:,} neurons each. {'In use' if key == image_model else ''}".strip()})
+        sections.append({"title": "Images", "items": rows})
 
     pools: list[dict[str, Any]] = []
     if orouter and orouter.get("limit"):

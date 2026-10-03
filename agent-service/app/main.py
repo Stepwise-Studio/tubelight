@@ -21,7 +21,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, events, files, followups, live, llm, memory, push, reactions, repo, runs, sandbox, usage
+from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, push, reactions, repo, runs, sandbox, usage
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1115,7 +1115,27 @@ async def get_usage(user: User = Depends(current_user)):
     tms = await db.select("teammates", {"owner_id": f"eq.{user['id']}", "select": "model"})
     models = [config.DEFAULT_MODEL, config.ROUTER_MODEL, config.KEEPER_MODEL, config.LEARN_MODEL, *llm.fallbacks(),
               *(t["model"] for t in tms if t.get("model"))]
-    return await usage.report(list(dict.fromkeys(models)))
+    return await usage.report(list(dict.fromkeys(models)), await images.choice(user["id"]))
+
+
+class ImageModel(BaseModel):
+    model: str
+
+
+@app.get("/images/model")
+async def get_image_model(user: User = Depends(current_user)):
+    """The image models teammates can draw with (Profile) and the one in use."""
+    return {"model": await images.choice(user["id"]),
+            "models": [{"id": k, "name": m["name"], "about": m["about"], "per_day": usage.CF_NEURONS // m["neurons"]}
+                       for k, m in images.MODELS.items()]}
+
+
+@app.put("/images/model")
+async def put_image_model(body: ImageModel, user: User = Depends(current_user)):
+    try:
+        return {"model": await images.set_choice(user["id"], body.model)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.delete("/automations/{rule_id}")

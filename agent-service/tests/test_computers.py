@@ -155,7 +155,7 @@ async def test_a_computer_lent_to_a_project(env):
     assert await computers.for_project(OWNER, "p1") is None
 
 
-async def test_images_have_their_own_usage_row(env, monkeypatch):
+async def test_images_have_their_own_usage_rows_and_fall_back(env, monkeypatch):
     import httpx
     from app import images, usage
 
@@ -164,9 +164,26 @@ async def test_images_have_their_own_usage_row(env, monkeypatch):
     monkeypatch.setattr(usage, "_safe", none)
     monkeypatch.setattr(usage, "_cache", (0.0, {}))
     monkeypatch.setattr(images, "available", lambda: True)
-    usage.record("cloudflare", "flux-1-schnell", 200, httpx.Headers())
-    out = await usage.report([])
+    assert await images.choice(OWNER) == "flux-1-schnell"
+    await images.set_choice(OWNER, "lucid-origin")
+    tried = []
+
+    async def run(key, prompt):
+        tried.append(key)
+        if key == "lucid-origin":
+            raise RuntimeError("stalled")
+        usage.record("cloudflare", key, 200, httpx.Headers())
+        return b"jpg"
+
+    async def upload(owner, name, data):
+        return {"path": "p", "name": name, "mime": "image/jpeg", "size": len(data)}
+    monkeypatch.setattr(images, "_run", run)
+    monkeypatch.setattr(images.files, "upload", upload)
+    att = await images.generate(OWNER, "a cat")
+    assert tried == ["lucid-origin", "flux-1-schnell"] and att["model"] == "FLUX.1 schnell"
+    out = await usage.report([], "lucid-origin")
     by = {s["title"]: s["items"] for s in out["sections"]}
-    assert not any("flux" in i["id"] for i in by["Models"])
-    row = by["Images"][0]
-    assert row["used"] >= 1 and row["limit"] == 10_000 // images.NEURONS and row["unit"] == "images"
+    assert not any("flux" in i["id"] or "lucid" in i["id"] for i in by["Models"])
+    rows = {r["id"]: r for r in by["Images"]}
+    assert rows["images:flux-1-schnell"]["used"] >= 1 and rows["images:lucid-origin"]["limit"] == 10_000 // 2784
+    assert "In use" in rows["images:lucid-origin"]["note"]
