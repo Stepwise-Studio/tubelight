@@ -98,7 +98,8 @@
             "photo"
           ]
         }
-      ]
+      ],
+      "./plugins/with-assistant"
     ],
     "experiments": {
       "typedRoutes": true,

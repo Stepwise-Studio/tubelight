@@ -5,7 +5,7 @@ import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native'
+import { ActivityIndicator, Linking, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
   Brain02Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
@@ -15,6 +15,7 @@ import { FormSection } from '@/components/form-bits'
 import { NotifyChoices } from '@/components/notify-prefs'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
+import { useAssistantMate } from '@/lib/assistant'
 import { ApiError, api } from '@/lib/api'
 import type { Automation } from '@/lib/automations'
 import { whenLabel } from '@/lib/format'
@@ -22,6 +23,7 @@ import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type T
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 import type { MemoryItem, Profile } from '@/lib/types'
+import { useWorkspace } from '@/lib/workspace'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
   Button, ChoiceRow, Chip, Divider, ListRow, Press, Skeleton, Surface, Text, TextField, Toggle,
@@ -74,6 +76,7 @@ export default function ProfileScreen() {
         <MemorySection />
         <Appearance />
         <ImageModel />
+        <PhoneAssistant />
         <PushSection />
         <WebhookSection profile={profile} onChanged={setProfile} />
         <ServiceStatus key={healthKey} />
@@ -126,6 +129,25 @@ function ProfileSection({ profile, email, onSaved }: { profile: Profile | null; 
       ) : (
         <View style={{ gap: 8 }}><Skeleton width={96} height={12} /><Skeleton height={48} radius={12} /></View>
       )}
+    </FormSection>
+  )
+}
+
+// Tubelight as the phone's digital assistant (plugins/with-assistant.js): who answers, and where Android sets it.
+function PhoneAssistant() {
+  const ws = useWorkspace()
+  const { mate, choose } = useAssistantMate(ws.teammates)
+  const open = () => Linking.sendIntent('android.settings.VOICE_INPUT_SETTINGS')
+    .catch(() => Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')).catch(() => Linking.openSettings())
+  if (Platform.OS !== 'android' || !mate) return null
+  return (
+    <FormSection title="Phone assistant" hint="Hold the side key (or swipe up from a bottom corner) to talk to a teammate over any app, even the lock screen. Pick Tubelight as the digital assistant app, then on Samsung: Settings → Advanced features → Side button → Press and hold → Digital assistant.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ChoiceRow label="Who answers" value={mate.id} onChange={choose}
+          options={ws.teammates.map((t) => ({ value: t.id, title: t.name, subtitle: t.role }))} />
+        <Divider />
+        <ListRow title="Make Tubelight your assistant" subtitle="Opens Android's digital assistant setting" chevron onPress={open} />
+      </Surface>
     </FormSection>
   )
 }

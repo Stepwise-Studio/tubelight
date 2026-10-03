@@ -41,6 +41,10 @@ export interface VoiceModeProps {
   /** Send a task to the teammate as a chat message; resolves to an error message or null. */
   onTask: (text: string) => Promise<string | null>
   onClose: () => void
+  /** The keyboard button: type instead (default: close back to the chat). */
+  onType?: () => void
+  /** full: the chat's voice mode; panel: the phone-assistant sheet over other apps (src/assistant/root.tsx). */
+  variant?: 'full' | 'panel'
 }
 
 /**
@@ -49,7 +53,8 @@ export interface VoiceModeProps {
  * cuts it off at once. Anything needing apps goes to the teammate as a hidden chat message (run_task); Gemini says it's
  * on it and speaks the result when the reply lands. What was said is saved into the chat as it happens.
  */
-export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose }: VoiceModeProps) {
+export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, onType, variant = 'full' }: VoiceModeProps) {
+  const panel = variant === 'panel'
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const beamLevel = useSharedValue(0)
@@ -302,12 +307,14 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
     <Animated.View
       entering={FadeIn.duration(motion.duration.fast)}
       exiting={FadeOut.duration(motion.duration.quick)}
-      style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? '#000' : c.canvas, zIndex: 20 }]}
+      style={panel
+        ? { height: '64%', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', backgroundColor: scheme === 'dark' ? '#000' : c.canvas }
+        : [StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? '#000' : c.canvas, zIndex: 20 }]}
       accessibilityViewIsModal
     >
       <VoiceBeam mode={beam} level={beamLevel} theme={scheme} />
 
-      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+      <View style={{ paddingTop: panel ? 16 : insets.top + 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         {teammate && <TeammateAvatar teammate={teammate} size={28} state={phase === 'working' ? 'working' : 'default'} interactive={false} />}
         <Text variant="headline" numberOfLines={1}>{title}</Text>
       </View>
@@ -362,7 +369,7 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       )}
 
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-        <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={close} />
+        <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={onType ? () => { ws.current?.close(); ws.current = null; LiveAudio.stop(); onType() } : close} />
         <IconButton
           icon={phase === 'muted' ? MicOff01Icon : Mic01Icon}
           swapKey={phase === 'muted' ? 'off' : 'on'}
