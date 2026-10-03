@@ -33,6 +33,9 @@ CASES = [
     ("who talks to whom", "chat_stats gave: Messages per person: Akhil 40, Dev 22, Ivy 15. Who answered whom: Akhil -> Dev 14, "
      "Dev -> Akhil 11, Akhil -> Ivy 9, Ivy -> Dev 4, Dev -> Ivy 3. Visualise our exchanges, me to agents and agent to agent",
      {"Flows"}, {14, 11, 9, 4, 3}),
+    ("pie of model usage", "model_usage gave: Chat requests per model, last 14 days: gemini:gemini-3.8-flash 182, "
+     "gemini:gemini-3.5-flash-lite 96, groq:openai/gpt-oss-120b 41, cloudflare:@cf/openai/gpt-oss-120b 12. "
+     "Get me a pie chart of which models I used most", {"Donut"}, {182, 96, 41, 12}),
     ("small talk", "hey, how's your day going?", None, set()),
     ("plain question", "What's a good way to say no to a meeting politely?", None, set()),
     ("chart with no data", "Show me a chart of my sleep last week", None, set()),

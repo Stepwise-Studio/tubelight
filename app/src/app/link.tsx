@@ -12,7 +12,7 @@ import { ApiError, api } from '@/lib/api'
 import { useTheme } from '@/theme'
 import { Button, Icon, Skeleton, SuccessCheck, Text, ThinkingIndicator, haptic } from '@/ui'
 
-interface Req { name: string; os: string; state: 'waiting' | 'scanned' | 'linked' | 'taken'; id: string | null }
+interface Req { name: string; os: string; state: 'waiting' | 'scanned' | 'linked' | 'taken'; id: string | null; teammate_id?: string | null }
 
 export default function LinkScreen() {
   const { c } = useTheme()
@@ -75,8 +75,12 @@ export default function LinkScreen() {
   ) : (
     <>
       <View style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8 }}><SuccessCheck size={22} /><Text variant="headline">{name} is linked</Text></View>
-      <Text variant="body" color="ink2" align="center">Share a folder in Tubelight on the computer (the + next to Shared folders), then ask a teammate to work in it.</Text>
-      <Button label="Done" onPress={() => router.replace('/computers')} fullWidth />
+      <Text variant="body" color="ink2" align="center">It has its own chat now: ask it to find files, run commands or set things up there. Each change waits for your OK.</Text>
+      {req.teammate_id && (
+        <Button label={`Chat with ${name}`} fullWidth
+          onPress={() => router.replace({ pathname: '/chat/[threadId]', params: { threadId: `dm:${req.teammate_id}` } })} />
+      )}
+      <Button label="Done" variant={req.teammate_id ? 'ghost' : 'solid'} onPress={() => router.replace('/computers')} fullWidth />
     </>
   )
 

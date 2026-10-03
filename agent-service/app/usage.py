@@ -104,6 +104,19 @@ async def _load(day: str) -> None:
         log.warning("usage load failed: %s", e)
 
 
+async def history(days: int = 14, now: datetime | None = None) -> dict[str, dict[str, int]]:
+    """Chat requests per model per day for the last `days` days (oldest first), as counted by llm._Transport."""
+    now = now or datetime.now(UTC)
+    out: dict[str, dict[str, int]] = {}
+    for back in range(days, -1, -1):  # one extra: each provider counts days in its own zone (Gemini: Pacific)
+        d = (now - timedelta(days=back)).strftime("%Y-%m-%d")
+        await _load(d)
+        row = {f"{p}:{m}": c["requests"] for (p, m, day), c in _counts.items() if day == d and c["requests"]}
+        if row:
+            out[d] = row
+    return out
+
+
 # ------------------------------------------------------------------ what the providers say
 async def _openrouter(c: httpx.AsyncClient) -> dict[str, Any] | None:
     if not config.OPENROUTER_API_KEY:

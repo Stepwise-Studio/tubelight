@@ -18,6 +18,8 @@ import { Button, IconButton, ListRow, RadioRow, Sheet, Skeleton, Surface, Text, 
 interface Computer {
   id: string; name: string; os: string | null; online: boolean; last_seen: number | null
   folders: string[]; docker: boolean; shell: boolean; version: string | null
+  /** Its own chat (a teammate standing for the computer), full access when the computer allows it. */
+  teammate_id: string | null; ask: boolean; full: boolean
 }
 type CodeOn = 'server' | 'computer' | 'auto'
 interface Data { computers: Computer[]; code_on: CodeOn; cowork: boolean }
@@ -90,7 +92,7 @@ export default function ComputersScreen() {
         )}
       </ScrollView>
       <LinkSheet open={linking} known={list.map((m) => m.id)} onClose={() => { setLinking(false); load() }} />
-      <ComputerSheet m={open} onClose={() => setOpen(null)} onRemoved={() => { setOpen(null); load() }} />
+      <ComputerSheet key={open?.id ?? 'none'} m={open} onClose={() => setOpen(null)} onRemoved={() => { setOpen(null); load() }} />
     </View>
   )
 }
@@ -184,8 +186,9 @@ function LinkSheet({ open, known, onClose }: { open: boolean; known: string[]; o
 }
 
 function ComputerSheet({ m, onClose, onRemoved }: { m: Computer | null; onClose: () => void; onRemoved: () => void }) {
+  const [ask, setAsk] = useState(m?.ask ?? true)  // keyed by computer, so it starts from that one's setting
   const remove = async () => {
-    if (!m || !(await confirm({ title: `Remove ${m.name}?`, body: 'Teammates lose access right away. Link it again with a new code.', confirmLabel: 'Remove', destructive: true }))) return
+    if (!m || !(await confirm({ title: `Remove ${m.name}?`, body: 'Teammates lose access right away, and its chat is deleted. Link it again with a new code.', confirmLabel: 'Remove', destructive: true }))) return
     try {
       await api(`/computers/${m.id}`, { method: 'DELETE' })
       onRemoved()
@@ -193,15 +196,38 @@ function ComputerSheet({ m, onClose, onRemoved }: { m: Computer | null; onClose:
       toast({ title: 'Unable to remove it', body: (e as Error).message, tone: 'error' })
     }
   }
+  const changeAsk = async (v: boolean) => {
+    setAsk(v)
+    try {
+      await api(`/computers/${m!.id}`, { method: 'PATCH', json: { ask: v } })
+    } catch (e) {
+      setAsk(!v)
+      toast({ title: 'Unable to save that', body: (e as Error).message, tone: 'error' })
+    }
+  }
   return (
     <Sheet open={!!m} onClose={onClose} title={m?.name ?? ''}>
       {m && (
         <View style={{ paddingHorizontal: 20, paddingBottom: 24, gap: 14 }}>
-          <Text variant="caption" color="ink3">{[m.online ? 'Online' : 'Offline', m.os, m.docker ? 'Docker for sandboxes' : 'No Docker (no sandboxes)', m.shell ? null : 'Commands need bubblewrap'].filter(Boolean).join(' · ')}</Text>
-          <Text variant="label">Shared folders</Text>
+          <Text variant="caption" color="ink3">{[m.online ? 'Online' : 'Offline', m.os, m.docker ? 'Docker for sandboxes' : 'No Docker (no sandboxes)'].filter(Boolean).join(' · ')}</Text>
+          {m.teammate_id && (
+            <>
+              <Button label={`Chat with ${m.name}`} icon={LaptopIcon} fullWidth
+                onPress={() => { onClose(); router.push({ pathname: '/chat/[threadId]', params: { threadId: `dm:${m.teammate_id}` } }) }} />
+              <Text variant="footnote" color="ink3">
+                {m.online && !m.full ? 'Full access is off on the computer, so its chat can’t do anything there. Turn it on in Tubelight on the computer.'
+                  : 'Its chat has full access: any file, any command, as you.'}
+              </Text>
+              <Surface padding={14}>
+                <Toggle value={ask} onChange={changeAsk} label="Ask before each change"
+                  description={ask ? 'Commands and file changes wait for your approval.' : 'Its chat runs commands and changes files without asking.'} />
+              </Surface>
+            </>
+          )}
+          <Text variant="label">Shared with other teammates</Text>
           {m.folders.length ? m.folders.map((f) => <Text key={f} variant="mono" selectable>{f}</Text>)
-            : <Text variant="body" color="ink2">{m.online ? 'Nothing shared yet.' : 'Shown while it’s online.'}</Text>}
-          <Text variant="footnote" color="ink3">Share or stop sharing folders in Tubelight on the computer (or with `{RUNNER.split(' ')[1]} allow` there).</Text>
+            : <Text variant="body" color="ink2">{m.online ? 'No folders shared.' : 'Shown while it’s online.'}</Text>}
+          <Text variant="footnote" color="ink3">Share folders in Tubelight on the computer (the + next to Shared folders).</Text>
           <Button label="Remove this computer" variant="destructive" onPress={remove} />
         </View>
       )}

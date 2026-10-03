@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, followups, llm, memory, repo, sandbox
+from . import automations, computers, config, connectors, db, followups, llm, memory, repo, sandbox, usage
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -65,7 +65,7 @@ def builder(tm: dict) -> bool:
 
 
 INTERNAL = {
-    "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "follow_up": "read", "spawn_helper": "read",
+    "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
@@ -257,6 +257,23 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         rows = list(reversed(await db.select("messages", params)))
         return conversation_stats(rows, ctx.user_name, ctx.members, zone)
 
+    async def model_usage(days: int = 14) -> str:
+        days = max(1, min(days, 60))
+        hist = await usage.history(days)
+        if not hist:
+            return "No model requests counted in that time."
+        total: dict[str, int] = {}
+        for row in hist.values():
+            for m, n in row.items():
+                total[m] = total.get(m, 0) + n
+        top = sorted(total.items(), key=lambda kv: -kv[1])
+        return "\n".join([
+            f"Chat requests per model, last {days} days (counted by Tubelight; every teammate reply, router and "
+            "keeper call is one request): " + ", ".join(f"{m} {n}" for m, n in top),
+            "Per day: " + "; ".join(f"{d}: " + ", ".join(f"{m} {n}" for m, n in sorted(r.items(), key=lambda kv: -kv[1]))
+                                    for d, r in hist.items()),
+        ])
+
     def _when(s: str | None) -> datetime | None:
         # Their wall-clock time: an offset the model tacks on ("Z") is dropped, not honoured.
         d = datetime.fromisoformat(s.strip().rstrip("Z")) if s else None
@@ -431,6 +448,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             description="Real numbers about this chat: messages per person, who answered whom, who @mentioned whom, "
                         "messages per day. days: only the last N days (0 = all). Use it to chart the conversation."),
         StructuredTool.from_function(
+            coroutine=model_usage, name="model_usage",
+            description="Real numbers on which AI models the user's teammates have been using: requests per model, "
+                        "in total and per day, for the last N days (default 14). Use it for any question or chart "
+                        "about their model or AI usage."),
+        StructuredTool.from_function(
             coroutine=search_chat, name="search_chat",
             description="Search this chat's full history for earlier messages (exact wording, what was said this "
                         "morning or days ago), by keywords. The brief summarises; this finds the words."),
@@ -472,7 +494,33 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         ]
 
     c = ctx.computer
-    if c and c["cowork"] and c["folders"] and not helper:
+    dev = computers.device_of(tm)
+    if dev and not helper:  # the computer's own chat: full access, as the user
+        async def computer_list(path: str = "~") -> str:
+            return await computers.call(dev, "fs_list", {"path": path, "full": True})
+
+        async def computer_read(path: str) -> str:
+            return await computers.call(dev, "fs_read", {"path": path, "full": True})
+
+        async def computer_write(path: str, content: str) -> str:
+            return await computers.call(dev, "fs_write", {"path": path, "content": content, "full": True})
+
+        async def computer_run(cmd: str, cwd: str = "~", timeout_s: int = 120) -> str:
+            t = max(1, min(timeout_s, 600))
+            return await computers.call(dev, "shell", {"cmd": cmd, "cwd": cwd, "timeout": t, "full": True}, t + 30)
+
+        tools += [
+            StructuredTool.from_function(coroutine=computer_list, name="computer_list",
+                description="List a folder on this computer (any path; ~ is home)."),
+            StructuredTool.from_function(coroutine=computer_read, name="computer_read",
+                description="Read a text file on this computer (any path)."),
+            StructuredTool.from_function(coroutine=computer_write, name="computer_write",
+                description="Create or overwrite a file on this computer (any path)."),
+            StructuredTool.from_function(coroutine=computer_run, name="computer_run",
+                description="Run a bash command on this computer as the user (cwd default ~). No sudo. Output is "
+                            "trimmed to ~8k chars; do several steps in one command."),
+        ]
+    elif c and c["cowork"] and c["folders"] and not helper:
         cid = c["id"]
 
         async def computer_list(path: str = "") -> str:
@@ -488,7 +536,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             t = max(1, min(timeout_s, 600))
             return await computers.call(cid, "shell", {"cmd": cmd, "cwd": cwd, "timeout": t}, t + 30)
 
-        where = f"the user's computer '{c['name']}'"
+        where = f"the user's own computer '{c['name']}' (their real files, not your sandbox)"
         tools += [
             StructuredTool.from_function(coroutine=computer_list, name="computer_list",
                 description=f"List a folder on {where} (only its shared folders; no path = the shared folders)."),
@@ -522,7 +570,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
         tools += [
             StructuredTool.from_function(coroutine=run_shell, name="run_shell",
-                description="Run a bash command in your sandbox: a throwaway Linux box (Node 22, Python 3, git) "
+                description="Run a bash command in your sandbox: a throwaway Linux box (Node 22, Python 3, git; not the "
+                            "user's own computer, which only the computer_* tools reach) "
                             f"{'on the user' + chr(39) + 's computer ' if ctx.box_on_computer else ''}"
                             "with the project's repo in /workspace (cwd). It can reach the web (npm, pip) but not the "
                             "user's home network. Output is truncated to ~8k chars. git push is not allowed here."),

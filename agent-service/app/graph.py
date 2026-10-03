@@ -412,6 +412,12 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
                      response_metadata=acc.response_metadata, usage_metadata=acc.usage_metadata)
 
 
+async def _runs_freely(ctx: RunCtx, tm: dict) -> bool:
+    dev = computers.device_of(tm)
+    r = await computers.row(ctx.owner_id, dev) if dev else None
+    return bool(r) and r.get("ask", True) is False
+
+
 def _ids(ctx: RunCtx, tm: dict) -> dict:
     # event_type lets the app label a streaming reply the way its saved message will be (no swap when it lands).
     return {"run_id": ctx.run_id, "teammate_id": tm["id"], **({"event_type": ctx.event_type} if ctx.event_type else {})}
@@ -540,6 +546,8 @@ def make_gate(ctx: RunCtx):
                 continue
             if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
                 continue
+            if tc["name"].startswith("computer_") and await _runs_freely(ctx, tm):
+                continue  # the user turned off "ask before commands" for this computer's chat
             tool_name, title, draft = T.approval_view(tc["name"], tc["args"])
             approval = await db.insert("approvals", {
                 "owner_id": ctx.owner_id, "thread_id": ctx.thread_id, "teammate_id": tm["id"], "run_id": ctx.run_id,

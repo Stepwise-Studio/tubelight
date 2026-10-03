@@ -96,6 +96,19 @@ def folders(c: dict) -> list[Path]:
     return [Path(f) for f in c.get("folders", []) if Path(f).is_dir()]
 
 
+def full(c: dict, a: dict) -> bool:
+    """Its own chat in the app asks for full access; this computer allows it unless switched off here."""
+    if not a.get("full"):
+        return False
+    if not c.get("full_access", True):
+        raise PermissionError("Full access is off on this computer (Tubelight window → Full access from its chat).")
+    return True
+
+
+def anywhere(path: str) -> Path:
+    return Path(os.path.realpath(os.path.expanduser(path or "~")))
+
+
 def inside(c: dict, path: str) -> Path:
     """The real path, if it's inside a shared folder (relative paths start at the first one)."""
     shared = folders(c)
@@ -109,9 +122,9 @@ def inside(c: dict, path: str) -> Path:
 
 
 def fs_list(c: dict, a: dict) -> str:
-    if not a.get("path"):
+    if not a.get("path") and not full(c, a):
         return "Shared folders:\n" + "\n".join(str(f) for f in folders(c))
-    d = inside(c, a["path"])
+    d = anywhere(a.get("path", "")) if full(c, a) else inside(c, a["path"])
     if not d.is_dir():
         return f"Not a folder: {d}"
     rows = []
@@ -121,7 +134,7 @@ def fs_list(c: dict, a: dict) -> str:
 
 
 def fs_read(c: dict, a: dict) -> str:
-    p = inside(c, a["path"])
+    p = anywhere(a["path"]) if full(c, a) else inside(c, a["path"])
     if not p.is_file():
         return f"No such file: {p}"
     data = p.read_bytes()[:400_000]
@@ -131,13 +144,28 @@ def fs_read(c: dict, a: dict) -> str:
 
 
 def fs_write(c: dict, a: dict) -> str:
-    p = inside(c, a["path"])
+    p = anywhere(a["path"]) if full(c, a) else inside(c, a["path"])
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(a.get("content", ""))
     return f"Wrote {len(a.get('content', ''))} chars to {p}"
 
 
+def run_as_user(a: dict) -> str:
+    """Full access: the command runs as this user, in their real environment (opens apps, sees every file)."""
+    timeout = max(1, min(int(a.get("timeout") or 120), 600))
+    cwd = anywhere(a.get("cwd") or "~")
+    try:
+        r = subprocess.run(["bash", "-lc", a["cmd"]], cwd=cwd if cwd.is_dir() else Path.home(), capture_output=True,
+                           text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+        out = (r.stdout + r.stderr).strip() + f"\n[exit code {r.returncode}]"
+    except subprocess.TimeoutExpired as e:
+        out = f"{(e.stdout or b'').decode(errors='replace') if isinstance(e.stdout, bytes) else e.stdout or ''}\n[timed out after {timeout}s]"
+    return truncate(out.strip())
+
+
 def shell(c: dict, a: dict) -> str:
+    if full(c, a):
+        return run_as_user(a)
     if not shutil.which("bwrap"):
         raise RuntimeError("Commands need bubblewrap on this computer (e.g. sudo apt install bubblewrap).")
     cwd = inside(c, a.get("cwd") or "")
@@ -312,6 +340,7 @@ def run() -> None:
             time.sleep(3)
             continue
         info = {"folders": [str(f) for f in folders(c)], "docker": docker, "shell": bool(shutil.which("bwrap")),
+                "full": c.get("full_access", True),
                 "version": VERSION, "os": f"{platform.system()} {platform.release()}", **({"wait": 0} if first else {})}
         try:
             status, job = api(c, "/runner/poll", info, timeout=60)

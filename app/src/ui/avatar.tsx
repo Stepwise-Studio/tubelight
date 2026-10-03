@@ -4,9 +4,12 @@ import { Skia } from '@shopify/react-native-skia'
 import { memo } from 'react'
 import { Image, PixelRatio, Pressable, View } from 'react-native'
 import { SvgXml } from 'react-native-svg'
+import { LaptopIcon } from '@hugeicons/core-free-icons'
 
 import type { Teammate } from '@/lib/types'
 import { useTheme } from '@/theme'
+
+import { Icon } from './icon'
 
 export type AvatarState = 'default' | 'working' | 'sleeping'
 
@@ -73,7 +76,8 @@ export interface TeammateAvatarProps {
 export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40, state = 'default', onPress }: TeammateAvatarProps) {
   const { c } = useTheme()
   const working = state === 'working'
-  const png = facePng(faceSeed(teammate), teammate.color, size)
+  const device = teammate.avatar_shape.startsWith('device:')  // a linked computer's own chat (agent computers.py)
+  const png = device ? null : facePng(faceSeed(teammate), teammate.color, size)
   const face = (
     <View
       style={{ width: size, height: size, opacity: state === 'sleeping' ? 0.5 : 1 }}
@@ -81,7 +85,11 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
       accessibilityRole={onPress ? 'button' : 'image'}
       accessibilityLabel={working ? `${teammate.name}, working` : teammate.name}
     >
-      {png ? (
+      {device ? (
+        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.panel3, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={LaptopIcon} size={Math.round(size * 0.52)} color="ink2" />
+        </View>
+      ) : png ? (
         <Image source={{ uri: png }} style={{ width: size, height: size }} fadeDuration={0} />
       ) : (
         <SvgXml xml={faceSvg(faceSeed(teammate), teammate.color)} width={size} height={size} />

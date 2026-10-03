@@ -77,7 +77,7 @@ def _face_key(tm: dict[str, Any]) -> tuple[str, str]:
 def face(tm: dict[str, Any] | None) -> str | None:
     """The teammate's face as a PNG URL on this service (/faces, a cached copy of DiceBear's PNG): DiceBear's CDN
     often stalls from a phone, and the phone gives up on an image after 8 s."""
-    if not tm:
+    if not tm or (tm.get("avatar_shape") or "").startswith("device:"):  # a computer's chat has no face
         return None
     seed, color = _face_key(tm)
     return f"{config.PUBLIC_URL}/faces/{quote(seed, safe='')}.png?c={color}"

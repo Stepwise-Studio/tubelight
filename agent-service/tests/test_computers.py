@@ -6,7 +6,7 @@ from app import computers, tools as T
 from tests.conftest import OWNER
 
 
-async def test_pair_poll_and_answer_a_job():
+async def test_pair_poll_and_answer_a_job(env):
     code = computers.pair_code(OWNER)["code"]
     claimed = await computers.claim(code.lower(), "laptop", "Linux")
     assert await computers.by_token(claimed["token"]) == (OWNER, claimed["id"])
@@ -48,7 +48,7 @@ def test_conversation_stats_counts_real_exchanges():
     assert "Who @mentioned whom: Akhil -> Dev 1, Dev -> Ivy 1" in out
 
 
-async def test_qr_link_needs_the_phone_and_the_computer():
+async def test_qr_link_needs_the_phone_and_the_computer(env):
     req = computers.hello("laptop", "Linux")
     rid = req["request"]
     assert req["link"] == f"tubelight://link?r={rid}"
@@ -64,10 +64,33 @@ async def test_qr_link_needs_the_phone_and_the_computer():
     computers.scan(rid, OWNER, "me@x.com")
     made = await computers.confirm(rid, True)
     assert await computers.by_token(made["token"]) == (OWNER, made["id"])
-    assert computers.request_info(rid, OWNER)["state"] == "linked"
+    info = computers.request_info(rid, OWNER)
+    assert info["state"] == "linked" and info["teammate_id"]
     await computers.remove(OWNER, made["id"])
 
 
 def test_desktop_package_is_a_deb():
     name, data = computers.desktop_deb()
     assert name.endswith("_all.deb") and data.startswith(b"!<arch>\ndebian-binary")
+
+
+async def test_model_usage_history_counts_per_day(env):
+    import httpx
+    from app import usage
+    usage.record("gemini", "gemini-3.8-flash", 200, httpx.Headers())
+    usage.record("gemini", "gemini-3.8-flash", 200, httpx.Headers())
+    usage.record("groq", "openai/gpt-oss-120b", 200, httpx.Headers())
+    hist = await usage.history(1)
+    total = lambda m: sum(row.get(m, 0) for row in hist.values())  # noqa: E731
+    assert total("gemini:gemini-3.8-flash") >= 2 and total("groq:openai/gpt-oss-120b") >= 1
+
+
+async def test_a_linked_computer_gets_its_own_chat_with_full_access(env):
+    fdb, _ = env
+    code = computers.pair_code(OWNER)["code"]
+    made = await computers.claim(code, "Neverland", "Linux")
+    tm = fdb.rows("teammates")[0]
+    assert tm["name"] == "Neverland" and tm["handle"] == "neverland" and computers.device_of(tm) == made["id"]
+    assert (await computers.row(OWNER, made["id"]))["teammate_id"] == tm["id"]
+    await computers.remove(OWNER, made["id"])
+    assert fdb.rows("teammates") == []  # its chat goes with it

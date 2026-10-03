@@ -161,7 +161,7 @@ class Window(Adw.ApplicationWindow):
         except ValueError:
             st = {}
         online = bool(st.get("online")) and time.time() - st.get("seen", 0) < 90
-        key = json.dumps([c.get("folders"), c.get("paused"), online, st.get("error"), (st.get("jobs") or [])[-8:]])
+        key = json.dumps([c.get("folders"), c.get("paused"), c.get("full_access", True), online, st.get("error"), (st.get("jobs") or [])[-8:]])
         if key != self.home_key:
             self.home_key = key
             self.home.set_child(self._home_page(c, st, online))
@@ -182,10 +182,14 @@ class Window(Adw.ApplicationWindow):
                               subtitle="Off: they can’t read or run anything here")
         reach.connect("notify::active", lambda sw, _p: self._set(paused=not sw.get_active()))
         g.add(reach)
+        whole = Adw.SwitchRow(title="Full access from its chat", active=c.get("full_access", True),
+                              subtitle="Its chat in the app can open any file and run any command as you, after you approve")
+        whole.connect("notify::active", lambda sw, _p: self._set(full_access=sw.get_active()))
+        g.add(whole)
         page.add(g)
 
         f = Adw.PreferencesGroup(title="Shared folders",
-                                 description="Teammates can read these. Every change and command waits for your OK on your phone.")
+                                 description="Other teammates can read these (Cowork). Every change and command waits for your OK on your phone.")
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Share a folder", valign=CENTER)
         add.add_css_class("flat")
         add.connect("clicked", self._add_folder)

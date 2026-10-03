@@ -909,6 +909,16 @@ async def patch_computer_prefs(body: ComputerPrefs, user: User = Depends(current
     return await computers.set_prefs(user["id"], body.code_on, body.cowork)
 
 
+class ComputerPatch(BaseModel):
+    ask: bool
+
+
+@app.patch("/computers/{computer_id}")
+async def patch_computer(computer_id: str, body: ComputerPatch, user: User = Depends(current_user)):
+    await computers.set_ask(user["id"], computer_id, body.ask)
+    return {"ok": True}
+
+
 @app.delete("/computers/{computer_id}")
 async def delete_computer(computer_id: str, user: User = Depends(current_user)):
     await computers.remove(user["id"], computer_id)

@@ -18,6 +18,11 @@ type Props = Record<string, unknown>
 
 const Ctx = createContext<{ streaming: boolean; onChoose?: (text: string) => void }>({ streaming: false })
 
+/** Whether a block parses into something drawable (a reply whose drawing doesn't is shown without it). */
+export function drawable(source: string) {
+  try { return !!parser.parse(source).root } catch { return false }
+}
+
 /** A teammate's drawing. `source` is the block's body (without the fence); `streaming` while it is still arriving. */
 export function GenUI({ source, streaming, onChoose }: { source: string; streaming: boolean; onChoose?: (text: string) => void }) {
   const root = useMemo(() => { try { return parser.parse(source).root } catch { return null } }, [source])
@@ -34,6 +39,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   last: ReactNode = null
   static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(e: Error) { console.warn('[genui] drawing failed:', e.message) }
   componentDidUpdate(prev: { children: ReactNode }) { if (this.state.failed && prev.children !== this.props.children) this.setState({ failed: false }) }
   render() {
     if (this.state.failed) return this.last
@@ -63,9 +69,11 @@ const toneColor = (c: Palette, t: Tone) =>
 
 /** A value with its unit (a symbol like ₹ goes first). `compact` (axes, bar tops) shortens thousands to "k". */
 function fmt(v: number, unit?: string, compact = false) {
-  const n = compact && Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : v.toLocaleString('en-IN', { maximumFractionDigits: 1 })
+  // By hand: Hermes on Android has no full Intl, and a throw here takes the whole drawing down.
+  const n = compact && Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k`
+    : `${+v.toFixed(1)}`.replace(/^(-?\d+)/, (int) => int.replace(/\B(?=(\d{3})+(?!\d))/g, ','))
   if (!unit) return n
-  return /^[^\w\s%]$/u.test(unit) ? `${unit}${n}` : `${n}${unit}`
+  return /^[^\w\s%]$/u.test(unit) ? `${unit}${n}` : /^\p{L}{3,}/u.test(unit) ? `${n} ${unit}` : `${n}${unit}`
 }
 
 /** A nice upper bound for an axis (1, 2, 2.5 or 5 × 10ⁿ). */

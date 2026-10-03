@@ -116,7 +116,8 @@ def _live(rid: str) -> dict[str, Any]:
 def request_info(rid: str, owner_id: str | None = None) -> dict[str, Any]:
     r = _live(rid)
     mine = r.get("owner") in (None, owner_id)
-    return {"name": r["name"], "os": r["os"], "state": r["state"] if mine else "taken", "id": r.get("id") if mine else None}
+    return {"name": r["name"], "os": r["os"], "state": r["state"] if mine else "taken", "id": r.get("id") if mine else None,
+            "teammate_id": r.get("teammate_id") if mine else None}
 
 
 def scan(rid: str, owner_id: str, email: str) -> dict[str, Any]:
@@ -155,15 +156,65 @@ async def confirm(rid: str, approve: bool) -> dict[str, Any]:
         _bump(rid)
         return {"state": "waiting"}
     made = await _create(r["owner"], r["name"], r["os"])
-    r.update(state="linked", id=made["id"])
+    r.update(state="linked", id=made["id"], teammate_id=(await row(r["owner"], made["id"]) or {}).get("teammate_id"))
     _bump(rid)
     return {"state": "linked", **made}
 
 
+OPERATOR = """You are {name}, {owner}'s own {os} computer, talking with them from their phone. Through your tools you
+have full access to this computer as {owner}'s user account: any file, any folder, any command (the shell is bash; ~ is
+their home folder).
+
+How you work:
+- Look before you act: list folders and read files to find things, check what's installed, then do the task.
+- Do the whole job in as few commands as you can (each command or file change waits for their OK unless they turned
+  that off), and say in one line what each one does before you run it.
+- Never delete, overwrite or move anything you didn't create without saying exactly what will be lost. No sudo: if a
+  task needs it, tell them the command to run themselves.
+- Report what actually happened from the command output. If something failed, say so and what you'd try next.
+- Keep replies short: they read them on a phone."""
+
+
+async def _teammate(owner_id: str, cid: str, name: str, os_name: str) -> str:
+    """The computer's own chat: a teammate whose avatar_shape `device:<id>` ties it to this computer."""
+    from . import db
+
+    taken = {t["handle"] for t in await db.select("teammates", {"owner_id": f"eq.{owner_id}", "select": "handle"})}
+    base = re.sub(r"[^a-z0-9_-]", "", name.lower().replace(" ", "-"))[:20] or "computer"
+    handle = next(h for h in [base, *(f"{base[:18]}-{i}" for i in range(2, 99))] if h not in taken)
+    profile = await db.one("profiles", {"id": f"eq.{owner_id}"})
+    owner = (profile or {}).get("display_name") or "the user"
+    row = await db.insert("teammates", {
+        "owner_id": owner_id, "name": name, "handle": handle, "role": "Your computer",
+        "bio": f"Your {os_name or 'computer'}, linked with Tubelight. Ask it to find files, run commands or set things up there.",
+        "system_prompt": OPERATOR.format(name=name, owner=owner, os=os_name or ""), "model": config.DEFAULT_MODEL,
+        "allowed_toolkits": [], "avatar_shape": f"device:{cid}", "color": "#64748b",
+    })
+    return row["id"]
+
+
+def device_of(tm: dict[str, Any]) -> str | None:
+    """The computer a teammate stands for (its own chat), if it is one."""
+    shape = tm.get("avatar_shape") or ""
+    return shape.removeprefix("device:") if shape.startswith("device:") else None
+
+
+async def row(owner_id: str, cid: str) -> dict[str, Any] | None:
+    item = await memory.store.aget(_ns(owner_id), cid)
+    return item.value if item else None
+
+
+async def set_ask(owner_id: str, cid: str, ask: bool) -> None:
+    r = await row(owner_id, cid)
+    if r:
+        await memory.store.aput(_ns(owner_id), cid, {**r, "ask": ask}, index=False)
+
+
 async def _create(owner_id: str, name: str, os_name: str) -> dict[str, str]:
     cid, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
-    row = {"id": cid, "name": name[:60] or "Computer", "os": os_name[:40], "token": _hash(token),
-           "created_at": time.time()}
+    name = name[:60] or "Computer"
+    row = {"id": cid, "name": name, "os": os_name[:40], "token": _hash(token), "created_at": time.time(),
+           "teammate_id": await _teammate(owner_id, cid, name, os_name[:40])}
     await memory.store.aput(_ns(owner_id), cid, row, index=False)
     await memory.store.aput(("computer_tokens",), _hash(token), {"owner": owner_id, "id": cid}, index=False)
     return {"id": cid, "token": token}
@@ -179,7 +230,8 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     online = time.time() - seen.get("at", 0) < ONLINE_S
     return {"id": row["id"], "name": row["name"], "os": seen.get("os") or row.get("os"), "online": online,
             "last_seen": seen.get("at"), "folders": seen.get("folders") or [], "docker": bool(seen.get("docker")),
-            "shell": bool(seen.get("shell")), "version": seen.get("version")}
+            "shell": bool(seen.get("shell")), "full": bool(seen.get("full")), "version": seen.get("version"),
+            "teammate_id": row.get("teammate_id"), "ask": row.get("ask", True)}
 
 
 async def listing(owner_id: str) -> list[dict[str, Any]]:
@@ -192,6 +244,9 @@ async def remove(owner_id: str, cid: str) -> None:
     if item:
         await memory.store.adelete(("computer_tokens",), item.value["token"])
         await memory.store.adelete(_ns(owner_id), cid)
+        if item.value.get("teammate_id"):  # its chat goes with it
+            from . import db
+            await db.delete("teammates", {"id": f"eq.{item.value['teammate_id']}", "owner_id": f"eq.{owner_id}"})
     _seen.pop(cid, None)
     q = _queues.pop(cid, None)
     while q and not q.empty():
@@ -232,7 +287,7 @@ async def for_run(owner_id: str) -> dict[str, Any] | None:
 # ------------------------------------------------------------------ the runner's side
 async def poll(cid: str, info: dict[str, Any]) -> dict[str, Any] | None:
     _seen[cid] = {"at": time.time(), "folders": [str(f) for f in info.get("folders") or []][:20],
-                  "docker": bool(info.get("docker")), "shell": bool(info.get("shell")),
+                  "docker": bool(info.get("docker")), "shell": bool(info.get("shell")), "full": bool(info.get("full")),
                   "version": str(info.get("version") or "")[:20], "os": str(info.get("os") or "")[:40]}
     wait = max(0.0, min(float(info.get("wait", POLL_S)), POLL_S))  # 0 on the runner's first poll: online at once
     try:

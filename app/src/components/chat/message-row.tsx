@@ -8,7 +8,7 @@ import {
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
-import { GenUI, drawing } from '@/components/genui/genui'
+import { GenUI, drawable, drawing } from '@/components/genui/genui'
 import { openAutomation, openAutomationOfRun } from '@/lib/automations'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { appToken, mentionParts } from '@/lib/mentions'
@@ -165,7 +165,7 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
  * it at the block's full scroll width first, the text beside it wraps a letter per line, and the bubble ends up
  * thousands of pixels tall). Bubbles holding them take the full width instead.
  */
-const hasWideBlock = (text: string) => /```|^\s*\|.*\|\s*$\n^\s*\|?\s*:?-{3,}/m.test(text)
+const hasWideBlock = (text: string) => splitWide(stripCues(text)).some((p) => p.wide)
 
 /** Splits a reply into prose and wide blocks (fenced code, tables), in order. */
 export function splitWide(text: string): { wide: boolean; text: string }[] {
@@ -174,7 +174,9 @@ export function splitWide(text: string): { wide: boolean; text: string }[] {
   let mode: 'prose' | 'code' | 'table' = 'prose'
   const flush = () => {
     const t = buf.join('\n').trim()
-    if (t) out.push({ wide: mode !== 'prose', text: t })
+    const d = mode === 'code' ? drawing(t) : null
+    // A finished drawing that doesn't parse is left out, so the reply doesn't go full width around nothing.
+    if (t && !(d && !d.open && !drawable(d.source))) out.push({ wide: mode !== 'prose', text: t })
     buf = []
   }
   for (const line of text.split('\n')) {
