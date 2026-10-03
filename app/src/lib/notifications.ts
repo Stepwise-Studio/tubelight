@@ -36,7 +36,8 @@ export async function setupNotifications() {
     await Notifications.setNotificationChannelAsync(`tl-${s.id}`, {
       name: `Teammates · ${s.name}`,
       importance: silent ? Notifications.AndroidImportance.DEFAULT : Notifications.AndroidImportance.HIGH,
-      sound: silent ? null : s.id === 'classic' ? 'default' : s.id,
+      // 'classic' leaves the sound unset: Android then plays the phone's own notification sound.
+      ...(s.id === 'classic' ? {} : { sound: silent ? null : s.id }),
       enableVibrate: !silent,
       vibrationPattern: silent ? null : [0, 140, 90, 140],
       lightColor: '#0EA5E9',
