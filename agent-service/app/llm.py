@@ -180,8 +180,10 @@ def _text_content(messages: list) -> list:
 GROQ_REQUEST_LIMIT = 7000  # tokens: Groq's free tier allows 8k per minute per model; leave room for the reply
 
 
-def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0, json: bool = False) -> Runnable:
+def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0, json: bool = False,
+               skip: int = 0) -> Runnable:
     """The model (tools bound) followed by the fallback chain for 429s, 5xx, timeouts and provider errors.
+    `skip` drops the first models of the chain (a retry after an empty or cut-off reply goes to the next one).
     Tests monkeypatch this to return a scripted fake."""
     primary = model or config.DEFAULT_MODEL
     # The default model is always the first fallback: it handles tool-heavy requests that smaller free tiers reject.
@@ -200,6 +202,7 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
         ids = [m for m in ids if parse(m)[0] != "groq"] + [m for m in ids if parse(m)[0] == "groq"]
     chain: list[BaseChatModel | Runnable] = []
     ids = ids or [config.DEFAULT_MODEL]
+    ids = ids[min(skip, len(ids) - 1):]
     for i, m in enumerate(ids):
         # A stalled or rate-limited model isn't retried when a fallback can answer: the retry only doubles the wait
         # (a 30 s read timeout twice). The last one in the chain gets one retry.

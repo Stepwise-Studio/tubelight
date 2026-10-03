@@ -445,7 +445,9 @@ def make_teammate(ctx: RunCtx, tm: dict):
             except StreamCut as e:
                 if attempt == 2:
                     raise
-                log.warning("retrying a cut-off reply: %s", e)
+                log.warning("retrying a cut-off reply on the next model: %s", e)
+                # The same model tends to fail the same way (an empty answer to a big tool result): move along.
+                model = llm.chat_model(tm["model"], tools, size=size, skip=attempt + 1)
                 continue
             except openai.APIError as e:
                 # Groq rejects a call to a tool that isn't bound, or with arguments off-schema; a nudge and a
