@@ -143,3 +143,13 @@ async def test_a_finished_job_reports_in_the_computers_chat(env):
     await computers.job_done(OWNER, made["id"], {"id": "j1", "title": "Download the ISO", "exit": 0, "seconds": 300, "tail": "saved"})
     msg = fdb.rows("messages")[-1]
     assert msg["thread_id"].startswith("dm:") and "Finished: **Download the ISO** after 5 min" in msg["text"]
+
+
+async def test_a_computer_lent_to_a_project(env):
+    made = await computers.claim(computers.pair_code(OWNER)["code"], "Neverland", "Linux")
+    assert await computers.for_project(OWNER, "p1") is None
+    assert await computers.set_project_computers(OWNER, "p1", ["someone-elses", made["id"]]) == [made["id"]]
+    assert (await computers.for_project(OWNER, "p1"))["name"] == "Neverland"
+    assert await computers.for_project(OWNER, "p2") is None
+    await computers.set_project_computers(OWNER, "p1", [])
+    assert await computers.for_project(OWNER, "p1") is None
