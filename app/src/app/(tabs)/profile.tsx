@@ -15,7 +15,6 @@ import { FormSection } from '@/components/form-bits'
 import { NotifyChoices } from '@/components/notify-prefs'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
-import { useAssistantMate } from '@/lib/assistant'
 import { Phone } from '@/lib/phone'
 import { ApiError, api } from '@/lib/api'
 import type { Automation } from '@/lib/automations'
@@ -24,10 +23,10 @@ import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type T
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 import type { MemoryItem, Profile } from '@/lib/types'
-import { useWorkspace } from '@/lib/workspace'
+import { isPhone, useWorkspace } from '@/lib/workspace'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
-  Button, ChoiceRow, Chip, Divider, ListRow, Press, Skeleton, Surface, Text, TextField, Toggle,
+  Button, ChoiceRow, Chip, Divider, ListRow, Press, Skeleton, Surface, TeammateAvatar, Text, TextField, Toggle,
   confirm, haptic, toast,
 } from '@/ui'
 
@@ -137,7 +136,7 @@ function ProfileSection({ profile, email, onSaved }: { profile: Profile | null; 
 // Tubelight as the phone's digital assistant (plugins/with-assistant.js): who answers, and where Android sets it.
 function PhoneAssistant() {
   const ws = useWorkspace()
-  const { mate, choose } = useAssistantMate(ws.teammates)
+  const mate = ws.everyone.find(isPhone)
   const open = () => Linking.sendIntent('android.settings.VOICE_INPUT_SETTINGS')
     .catch(() => Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')).catch(() => Linking.openSettings())
   // Android settings pages decide these; read them again whenever you come back from one.
@@ -149,10 +148,10 @@ function PhoneAssistant() {
   }, [])
   if (Platform.OS !== 'android' || !mate) return null
   return (
-    <FormSection title="Phone assistant" hint="Hold the side key (or swipe up from a bottom corner) to talk to a teammate over any app, even the lock screen. Pick Tubelight as the digital assistant app, then on Samsung: Settings → Advanced features → Side button → Press and hold → Digital assistant.">
+    <FormSection title="Phone assistant" hint="Your phone has its own teammate: hold the side key (or swipe up from a bottom corner) to talk to it over any app, even the lock screen. Only it can use the phone; other teammates ask it, and you OK what they ask. Pick Tubelight as the digital assistant app, then on Samsung: Settings → Advanced features → Side button → Press and hold → Digital assistant.">
       <Surface style={{ overflow: 'hidden' }}>
-        <ChoiceRow label="Who answers" value={mate.id} onChange={choose}
-          options={ws.teammates.map((t) => ({ value: t.id, title: t.name, subtitle: t.role }))} />
+        <ListRow title={mate.name} subtitle="Its chat: what it did, and what other teammates asked it" leading={<TeammateAvatar teammate={mate} size={36} interactive={false} />}
+          chevron onPress={() => router.push({ pathname: '/chat/[threadId]', params: { threadId: `dm:${mate.id}` } })} />
         <Divider />
         <ListRow title="Make Tubelight your assistant" subtitle="Opens Android's digital assistant setting" chevron onPress={open} />
         {Phone && (

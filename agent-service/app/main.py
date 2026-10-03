@@ -941,6 +941,17 @@ async def put_project_computers(project_id: str, body: ProjectComputers, user: U
     return {"computers": await computers.set_project_computers(user["id"], project_id, body.computers)}
 
 
+class PhoneRegister(BaseModel):
+    name: str = Field(default="Phone", max_length=60)
+
+
+@app.post("/phone/register")
+async def phone_register(body: PhoneRegister, user: User = Depends(current_user)):
+    """The app on a phone that can do phone actions: its own teammate and chat (made once)."""
+    tm = await phone.ensure(user["id"], body.name)
+    return {"teammate_id": tm["id"], "name": tm["name"]}
+
+
 class PhoneNotes(BaseModel):
     items: list[dict] = Field(default_factory=list, max_length=300)
 

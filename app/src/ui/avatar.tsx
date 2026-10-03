@@ -4,7 +4,7 @@ import { Skia } from '@shopify/react-native-skia'
 import { memo } from 'react'
 import { Image, PixelRatio, Pressable, View } from 'react-native'
 import { SvgXml } from 'react-native-svg'
-import { LaptopIcon } from '@hugeicons/core-free-icons'
+import { LaptopIcon, SmartPhone01Icon } from '@hugeicons/core-free-icons'
 
 import type { Teammate } from '@/lib/types'
 import { useTheme } from '@/theme'
@@ -76,7 +76,9 @@ export interface TeammateAvatarProps {
 export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40, state = 'default', onPress }: TeammateAvatarProps) {
   const { c } = useTheme()
   const working = state === 'working'
-  const device = teammate.avatar_shape.startsWith('device:')  // a linked computer's own chat (agent computers.py)
+  // A linked computer's own chat (agent computers.py) or the phone's (agent phone.py): an icon, not a face.
+  const phone = teammate.avatar_shape === 'phone'
+  const device = phone || teammate.avatar_shape.startsWith('device:')
   const png = device ? null : facePng(faceSeed(teammate), teammate.color, size)
   const face = (
     <View
@@ -87,7 +89,7 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
     >
       {device ? (
         <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: teammate.color || '#64748b', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon icon={LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
+          <Icon icon={phone ? SmartPhone01Icon : LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
         </View>
       ) : png ? (
         <Image source={{ uri: png }} style={{ width: size, height: size }} fadeDuration={0} />

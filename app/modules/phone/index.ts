@@ -12,6 +12,8 @@ export interface Noted { key: string; app: string; title: string; text: string; 
 interface PhoneModule {
   /** Do it now (opens the app that does it, or does it silently for alarms and timers); what happened, in words. */
   act(a: PhoneAction): string
+  /** "Galaxy S21 FE 5G": the phone's name in its settings. */
+  deviceName(): string
   /** What was on screen when the assistant was summoned (once, only if from the last 20 s). */
   screenContext(): { app: string | null; text: string | null; image: string | null } | null
   /** Why the assistant panel was opened (a "needs you" alert): thread, reason… */

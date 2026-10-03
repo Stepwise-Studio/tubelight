@@ -16,7 +16,6 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import { api } from '@/lib/api'
 import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
-import { usePhoneActions } from '@/lib/phone'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
@@ -48,7 +47,6 @@ export default function Thread() {
   const missing = isDm && !dmMate && !ws.loading
   useEffect(() => { if (missing) ws.refresh() }, [missing])  // eslint-disable-line react-hooks/exhaustive-deps
   const liveRuns = ws.liveRuns.filter((r) => r.thread_id === threadId)
-  usePhoneActions(t.messages)
   const [voice, setVoice] = useState(false)
   const v = useVoiceSession({
     enabled: voice, threadId, messages: t.messages, working: liveRuns.some((r) => r.status === 'running'),

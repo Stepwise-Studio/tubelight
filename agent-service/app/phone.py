@@ -1,4 +1,8 @@
-"""The user's phone: actions a teammate's reply carries out there (the app does them as the reply lands: alarms and
+"""The user's phone, as its own teammate (avatar_shape "phone", one per user, its own chat; the phone's assistant panel
+talks to it). It's the only one with the phone: other teammates ask it (`ask_phone`), and what they ask waits for the
+user's OK in the phone's chat.
+
+Actions its reply carries out there (the app does them as the reply lands: alarms and
 timers silently, calls/texts/emails opened ready to send), and the notifications the phone shares (opt-in, the
 last day, synced by the app when it opens) for a teammate to look through."""
 import re
@@ -6,7 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import memory
+from . import config, memory
 
 DAY = 24 * 3600
 KINDS = ("alarm", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url", "search")
@@ -55,6 +59,45 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
     elif kind == "open_url" and not str(f.get("url", "")).startswith(("http://", "https://")):
         return "Give a full https:// link in `url`."
     return a
+
+
+# ------------------------------------------------------------------ the phone's own teammate
+PROMPT = """You are {name}, {owner}'s phone, talking with them in Tubelight (and when they hold the side key: your
+panel opens over whatever they're doing, and you see what was on screen). You are the only one who can do things on
+this phone: set alarms and timers, open apps, get calls, texts, WhatsApp messages and emails ready to send, start
+directions, put events in the calendar and, if they shared them, look through their notifications. For a reminder at a
+later time, set a follow-up. Other teammates ask you for things on the phone: say what they asked and why, and
+remember that anything you do for them waits for {owner}'s OK.
+Keep replies to a line or two: they're usually glancing at the phone."""
+
+
+def is_phone(tm: dict[str, Any]) -> bool:
+    return tm.get("avatar_shape") == "phone"
+
+
+async def mate(owner_id: str) -> dict[str, Any] | None:
+    """The user's phone teammate, if their phone has registered one."""
+    from . import db
+    return await db.one("teammates", {"owner_id": f"eq.{owner_id}", "avatar_shape": "eq.phone"})
+
+
+async def ensure(owner_id: str, name: str) -> dict[str, Any]:
+    """The phone's teammate, made the first time the app runs on a phone that can do phone actions."""
+    from . import db
+    if have := await mate(owner_id):
+        return have
+    name = re.sub(r"\s+", " ", name).strip()[:40] or "Phone"
+    taken = {t["handle"] for t in await db.select("teammates", {"owner_id": f"eq.{owner_id}", "select": "handle"})}
+    base = re.sub(r"[^a-z0-9_-]", "", name.lower().replace(" ", "-"))[:20] or "phone"
+    handle = next(h for h in [base, *(f"{base[:18]}-{i}" for i in range(2, 99))] if h not in taken)
+    profile = await db.one("profiles", {"id": f"eq.{owner_id}"})
+    owner = (profile or {}).get("display_name") or "the user"
+    return await db.insert("teammates", {
+        "owner_id": owner_id, "name": name, "handle": handle, "role": "Your phone",
+        "bio": "Your phone's assistant. Hold the side key to talk to it over any app; other teammates go through it for anything on the phone.",
+        "system_prompt": PROMPT.format(name=name, owner=owner), "model": config.DEFAULT_MODEL,
+        "allowed_toolkits": [], "avatar_shape": "phone", "color": "#64748b",
+    })
 
 
 # ------------------------------------------------------------------ notifications

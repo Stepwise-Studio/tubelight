@@ -31,6 +31,8 @@ class PhoneModule : Module() {
     Name("Phone")
 
     Function("act") { a: Map<String, Any?> -> act(a) }
+    // The name the phone goes by (Settings → About phone), for its teammate: "Galaxy S21 FE 5G".
+    Function("deviceName") { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL }
     Function("screenContext") { ScreenContext.take() }
     Function("launchArgs") {
       val ex = appContext.currentActivity?.intent?.extras

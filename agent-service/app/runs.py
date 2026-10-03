@@ -42,6 +42,7 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         computer=await computers.for_run(owner_id),
         project_computer=await computers.for_project(owner_id, project['id']) if project else None,
         phone_notes=await phone.has_notes(owner_id),
+        phone_mate=await phone.mate(owner_id),
     )
 
 

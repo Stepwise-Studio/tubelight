@@ -63,6 +63,12 @@ export function usePhoneActions(messages: ChatMessage[]) {
   }, [messages])
 }
 
+/** Made once per phone (agent phone.ensure): the phone's own teammate and chat. */
+export async function registerPhone() {
+  if (!Phone) return null
+  return api<{ teammate_id: string; name: string }>('/phone/register', { method: 'POST', json: { name: Phone.deviceName() } })
+}
+
 const SYNCED = 'tubelight.phone.notesSynced'
 
 /** New notifications since the last sync go to the server (only with notification access on). */

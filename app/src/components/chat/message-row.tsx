@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download04Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -541,7 +541,7 @@ function Picture({ a }: { a: Attachment }) {
       </Squircle>
       {url && (
         <View style={{ position: 'absolute', right: 8, bottom: 8 }}>
-          <IconButton icon={Download04Icon} variant="soft" round size={36} iconSize={18} accessibilityLabel="Save to photos" onPress={() => saveImage(url, a.name)} />
+          <IconButton icon={Download03Icon} variant="soft" round size={36} iconSize={18} accessibilityLabel="Save to photos" onPress={() => saveImage(url, a.name)} />
         </View>
       )}
       <ImageViewer url={open ? url ?? null : null} name={a.name} onClose={() => setOpen(false)} />
@@ -571,7 +571,7 @@ function FileChip({ a }: { a: Attachment }) {
         <Text variant="footnote" color="ink3">{[ext, formatSize(a.size)].filter(Boolean).join(' · ')}</Text>
       </View>
       <View style={{ flex: 1 }} />
-      <Icon icon={Download04Icon} size={18} color="ink3" />
+      <Icon icon={Download03Icon} size={18} color="ink3" />
     </Squircle>
     </Pressable>
   )

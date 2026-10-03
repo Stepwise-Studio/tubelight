@@ -68,6 +68,7 @@ class RunCtx:
     outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
     phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
     phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
+    phone_mate: dict | None = None  # the phone's own teammate: the only one with the phone (others: ask_phone)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
     @property
@@ -590,7 +591,9 @@ def make_gate(ctx: RunCtx):
                         continue  # nothing to wait for: the tools node says it's connected, or that no such app exists
                 pending.append(await _prompt(ctx, tm, tc))
                 continue
-            if T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known:
+            # On the phone for another teammate (ask_phone): the user OKs every step, however harmless it looks.
+            asked = ctx.event_type == "phone_request" and tc["name"] in ("phone_action", "phone_notifications")
+            if not asked and (T.classify_call(tc["name"], tc["args"]) != "act" or tc["name"] not in known):
                 continue
             cmd = str(tc["args"].get("cmd", ""))
             if tc["name"] == "computer_run" and not tc["args"].get("sudo") and (computers.read_only(cmd) or computers.light(cmd)):

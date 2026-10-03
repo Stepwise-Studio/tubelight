@@ -28,3 +28,15 @@ async def test_notifications_are_kept_a_day_and_searchable(env):
     out = await phone.notes("u1", "dinner", "", 12, IST)
     assert "Kishore: dinner at 8?" in out and "Invoice" not in out
     assert "Invoice" in await phone.notes("u1", "", "gmail", 12, IST)
+
+
+def test_only_the_phone_uses_the_phone(env):
+    from app import graph, tools
+    phone_tm = {"id": "p1", "name": "Galaxy", "handle": "galaxy", "role": "Your phone", "avatar_shape": "phone", "allowed_toolkits": []}
+    ivy = {"id": "i1", "name": "Ivy", "handle": "ivy", "role": "Chief of staff", "avatar_shape": "face:ivy", "allowed_toolkits": []}
+    names = lambda tm, mate: {t.name for t in tools.build(graph.RunCtx(  # noqa: E731
+        run_id="r", owner_id="u1", thread_id=f"dm:{tm['id']}", members=[tm], phone_mate=mate, phone_notes=True), tm, [])}
+    assert {"phone_action", "phone_notifications"} <= names(phone_tm, phone_tm) and "ask_phone" not in names(phone_tm, phone_tm)
+    assert "ask_phone" in names(ivy, phone_tm) and not {"phone_action", "phone_notifications"} & names(ivy, phone_tm)
+    assert not {"phone_action", "ask_phone"} & names(ivy, None)  # no phone registered: nobody touches it
+    assert tools.title("phone_action", {"action": "alarm", "when": "06:30"}) == "On your phone: Set an alarm for 06:30"

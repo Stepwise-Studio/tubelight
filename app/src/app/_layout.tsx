@@ -12,8 +12,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { SheetsHost } from '@/components/sheets-host'
 import { usePushRouting } from '@/lib/push-routing'
 import { useSession } from '@/lib/session'
-import { useNotificationSync } from '@/lib/phone'
-import { WorkspaceProvider } from '@/lib/workspace'
+import { registerPhone, useNotificationSync, usePhoneActions } from '@/lib/phone'
+import { useThread } from '@/lib/use-thread'
+import { WorkspaceProvider, isPhone, useWorkspace } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
 import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@/ui'
 
@@ -83,6 +84,7 @@ function Root() {
             </Stack.Protected>
           </Stack>
           {signedIn && <SheetsHost />}
+          {signedIn && session && <PhoneHub userId={session.user.id} />}
           <PortalHost />
           <MenuHost />
           <EmojiPickerHost />
@@ -93,4 +95,21 @@ function Root() {
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     </NavThemeProvider>
   )
+}
+
+/** The phone's own teammate: made the first time the app runs on a phone that can do phone actions, and the one place
+ *  its replies' actions run (alarms, apps…) wherever you are in the app. Other teammates ask it (agent ask_phone). */
+function PhoneHub({ userId }: { userId: string }) {
+  const ws = useWorkspace()
+  const mate = ws.everyone.find(isPhone)
+  useEffect(() => {
+    if (ws.loading || mate) return
+    registerPhone().then((r) => { if (r) ws.refresh() }, () => {})
+  }, [ws.loading, mate]) // eslint-disable-line react-hooks/exhaustive-deps
+  return mate ? <PhoneActions threadId={`dm:${mate.id}`} userId={userId} /> : null
+}
+
+function PhoneActions({ threadId, userId }: { threadId: string; userId: string }) {
+  usePhoneActions(useThread(threadId, userId).messages)
+  return null
 }

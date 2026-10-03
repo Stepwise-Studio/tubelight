@@ -73,7 +73,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read", "ask_phone": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -81,7 +81,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -180,6 +180,16 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"{what[:1].upper()}{what[1:]}{' (admin)' if args.get('sudo') else ''}"[:80]
     if name == "computer_start_job":
         return f"Start: {str(args.get('title') or 'a long job').strip().rstrip('.')}"[:80]
+    if name == "phone_action":
+        a, k = args, str(args.get("action", ""))
+        what = {"alarm": f"Set an alarm for {a.get('when')}", "timer": f"Start a {a.get('seconds')} s timer",
+                "call": f"Call {a.get('number')}", "text": f"Text {a.get('number')}", "whatsapp": f"WhatsApp {a.get('number')}",
+                "email": f"Email {a.get('to')}", "navigate": f"Directions to {a.get('place')}",
+                "calendar": f"Add {a.get('title') or 'an event'} to the calendar", "open_app": f"Open {a.get('app')}",
+                "open_url": "Open a link", "search": f"Search {a.get('text')}"}.get(k, f"Phone: {k}")
+        return f"On your phone: {what}"[:80]
+    if name == "phone_notifications":
+        return "Look through your phone's notifications"
     if name == "computer_close_app":
         return f"Close {str(args.get('name') or 'an app')}"[:80]
     if name == "computer_write":
@@ -434,7 +444,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "convention, where something lives). Not for chat or task status."),
         ]
 
-    if not helper:
+    if not helper and phone.is_phone(tm):  # only the phone's own teammate touches the phone
         async def phone_action(action: str, when: str = "", end: str = "", seconds: int = 0, title: str = "",
                                text: str = "", number: str = "", to: str = "", place: str = "", url: str = "",
                                app: str = "") -> str:
@@ -461,7 +471,27 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 coroutine=phone_notifications, name="phone_notifications",
                 description="Notifications that arrived on their phone in the last hours (they turned this on): "
                             "query: words to match; app: e.g. WhatsApp, Gmail; hours: up to 24."))
+    elif not helper and ctx.phone_mate:  # everyone else goes through the phone, and the user OKs it there
+        pm = ctx.phone_mate
 
+        async def ask_phone(request: str) -> str:
+            from . import runs
+            thread = f"dm:{pm['id']}"
+            await db.insert("messages", {"thread_id": thread, "owner_id": ctx.owner_id, "sender_type": "teammate",
+                                         "teammate_id": tm["id"], "text": request[:2000], "kind": "text",
+                                         "meta": {"phone_request": True}})
+            await runs.start(ctx.owner_id, thread, f"{tm['name']} (a teammate, not {ctx.user_name}) asks: {request[:2000]}",
+                             trigger="event", teammate_id=pm["id"], event_type="phone_request")
+            return (f"Asked {pm['name']}, their phone. Nothing happens on the phone until {ctx.user_name} OKs it in "
+                    f"{pm['name']}'s chat: say so.")
+
+        tools.append(StructuredTool.from_function(
+            coroutine=ask_phone, name="ask_phone",
+            description=f"Ask {pm['name']} (their phone, the only one who can use it) to do something on the phone: an "
+                        "alarm, a timer, open an app, get a call/text/WhatsApp/email ready, directions, a calendar "
+                        "entry, look through its notifications. Say exactly what and why; they OK it before it happens."))
+
+    if not helper:
         async def make_document(kind: str, title: str, content: str) -> str:
             try:
                 name, data = await asyncio.to_thread(documents.make, kind, title, content)

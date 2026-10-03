@@ -1,6 +1,6 @@
 // The assistant panel's own React root ("assistant", registered in index.ts): drawn by AssistActivity, a see-through
 // window over whatever app is open (or the lock screen), when Tubelight is the phone's digital assistant. Voice mode
-// as a bottom sheet with the chosen teammate, who also sees what was on screen when you summoned it. Opened by a
+// as a bottom sheet with the phone's own teammate (agent phone.py), who also sees what was on screen when summoned. Opened by a
 // "needs you" alert instead (modules/phone `ring`), it goes to that chat with the decision on top.
 import { useEffect, useState } from 'react'
 import { BackHandler, Linking, Pressable, StyleSheet, View } from 'react-native'
@@ -11,11 +11,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ApprovalCard } from '@/components/approval-card'
 import { QuestionCard } from '@/components/chat/prompt-cards'
 import { VoiceMode } from '@/components/voice/voice-mode'
-import { useAssistantMate } from '@/lib/assistant'
-import { Phone, syncNotifications, usePhoneActions } from '@/lib/phone'
+import { Phone, registerPhone, syncNotifications, usePhoneActions } from '@/lib/phone'
 import { useSession } from '@/lib/session'
 import { useThread } from '@/lib/use-thread'
-import { WorkspaceProvider, useWorkspace } from '@/lib/workspace'
+import { WorkspaceProvider, isPhone, useWorkspace } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
 import { Button, Surface, Text } from '@/ui'
 
@@ -50,14 +49,17 @@ type Screen = { app: string | null; text: string | null; image: string | null }
 
 function Talk({ userId }: { userId: string }) {
   const ws = useWorkspace()
-  const { mate } = useAssistantMate(ws.teammates)
-  // Why it opened: a "needs you" alert names its chat; summoned by hand, it's your DM with the chosen teammate.
+  const mate = ws.everyone.find(isPhone)
+  // Why it opened: a "needs you" alert names its chat; summoned by hand, it's the phone's own chat.
   const [args] = useState(() => Phone?.launchArgs() ?? {})
   const threadId = args.thread || (mate ? `dm:${mate.id}` : '')
   const t = useThread(threadId, userId)
   usePhoneActions(t.messages)
   // What was on screen arrives just after the panel opens (if the assistant settings allow it): wait for it briefly.
   const [screen, setScreen] = useState<Screen | null | undefined>(args.thread ? null : undefined)
+  useEffect(() => {
+    if (!ws.loading && !mate) registerPhone().then((r) => { if (r) ws.refresh() }, () => {})
+  }, [ws.loading, mate]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     Phone?.clearRing()
     syncNotifications().catch(() => {})
@@ -71,7 +73,7 @@ function Talk({ userId }: { userId: string }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const speaker = args.thread ? ws.threadTeammates(threadId)[0] : mate
-  if (!speaker) return ws.loading ? <Shade /> : <Note title="Make a teammate first" />
+  if (!speaker) return <Shade />
   if (screen === undefined) return <Shade />
   const runs = ws.liveRuns.filter((r) => r.thread_id === threadId)
   const waiting = t.messages.find((m) => (m.kind === 'approval' || m.kind === 'question') && m.meta?.approval_id

@@ -40,6 +40,8 @@ const Ctx = createContext<Workspace | null>(null)
 /** A linked computer's own chat stands in as a teammate whose avatar_shape is `device:<computer id>`. */
 export const isComputer = (t: { avatar_shape: string }) => t.avatar_shape.startsWith('device:')
 export const computerId = (t: { avatar_shape: string }) => (isComputer(t) ? t.avatar_shape.slice(7) : null)
+/** The phone's own chat (agent phone.py): the only one that does things on the phone; other teammates ask it. */
+export const isPhone = (t: { avatar_shape: string }) => t.avatar_shape === 'phone'
 
 /** Teammate lookup alone. Changes only when teammates do, so chat rows don't re-render on every message or run update. */
 const TeammatesCtx = createContext<(id: string | null | undefined) => Teammate | undefined>(() => undefined)
@@ -184,7 +186,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const isWorking = (teammateId: string) => liveRuns.some((r) => r.teammate_id === teammateId && r.status === 'running')
   const isThreadLive = (threadId: string) => liveRuns.some((r) => r.thread_id === threadId)
 
-  const crew = teammates.filter((t) => !isComputer(t))
+  const crew = teammates.filter((t) => !isComputer(t) && !isPhone(t))
   return (
     <Ctx value={{
       loading, error, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
