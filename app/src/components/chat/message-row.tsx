@@ -135,9 +135,9 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     case 'question':
     case 'connect': {
       return (
-        <TeammateBlock teammate={t} first={first} paused={pauseAvatar} working={working}>
+        <TeammateBlock teammate={t} first={first} paused={pauseAvatar} working={working} bleed>
           {/* The card carries the whole ask; the row's text only shows until the approval row loads.
-              Cards take the full width (the block hugs its content for bubbles). */}
+              Cards span the chat's full width, like drawings (no reply-side inset). */}
           <View style={{ alignSelf: 'stretch' }}>
           {!approval ? (
             <Bubble side="left" first={first} last={last}><Text color="ink2">{m.text || 'Loading…'}</Text></Bubble>

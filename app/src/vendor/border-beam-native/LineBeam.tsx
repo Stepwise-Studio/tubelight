@@ -270,10 +270,10 @@ export function LineBeam({
 
   // Web parity: the animated bloom filter includes blur(8px); mono-with-static
   // colors gets a base blur(6px); colorful static colors gets no blur.
-  const bloomBlur = staticColors
-    ? variant === 'mono'
-      ? (spec.line.monoBloomExtraBlurPx as number)
-      : 0
+  // Tubelight patch: always blur the bloom. Its light rays are 0.6-2 px wide; unblurred (the web's static-colour
+  // path) they drew as hard hairline streaks across the card instead of the soft glow of the animated version.
+  const bloomBlur = variant === 'mono' && staticColors
+    ? (spec.line.monoBloomExtraBlurPx as number)
     : (spec.line.bloomBlurPx as number);
 
   if (width <= 0 || height <= 0) return null;
