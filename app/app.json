@@ -88,6 +88,16 @@
           "cameraPermission": "Tubelight uses the camera to scan the code that links your computer.",
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Allow Tubelight to save images to your photos.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": [
+            "photo"
+          ]
+        }
       ]
     ],
     "experiments": {

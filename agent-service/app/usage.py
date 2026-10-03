@@ -200,6 +200,8 @@ async def report(models: list[str]) -> dict[str, Any]:
     today = {(p, m): v for (p, m, d), v in _counts.items() if d == day_of(p, now)}
     for mid in [*models, *(f"{p}:{m}" for p, m in today)]:
         p, m = llm.parse(mid)
+        if m == "flux-1-schnell":  # images get their own section
+            continue
         m = ALIASES.get(m, m)
         if (p, m) in seen or not llm.key(p):
             continue
@@ -222,6 +224,16 @@ async def report(models: list[str]) -> dict[str, Any]:
             item |= {"out": True, "used": max(item["used"], item["limit"] or 0)}
         items.append(item)
     sections = [{"title": "Models", "items": items}]
+    from . import images
+    if images.available():
+        made = today.get(("cloudflare", "flux-1-schnell"), {}).get("requests", 0)
+        # What's left of today's neurons buys the rest (the Cloudflare fallback model draws on the same neurons).
+        left = (CF_NEURONS - cf["neurons"]) // images.NEURONS if cf and not cf.get("denied") else None
+        sections.append({"title": "Images", "items": [{
+            "id": "images", "provider": "cloudflare", "used": made, "unit": "images", "period": "today",
+            "limit": made + max(left, 0) if left is not None else CF_NEURONS // images.NEURONS,
+            "resets": next_reset("cloudflare", now), "source": "counted",
+            "note": f"FLUX.1 schnell on Cloudflare, about {images.NEURONS} neurons each from the shared daily neurons."}]})
 
     pools: list[dict[str, Any]] = []
     if orouter and orouter.get("limit"):

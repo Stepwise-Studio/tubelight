@@ -153,3 +153,20 @@ async def test_a_computer_lent_to_a_project(env):
     assert await computers.for_project(OWNER, "p2") is None
     await computers.set_project_computers(OWNER, "p1", [])
     assert await computers.for_project(OWNER, "p1") is None
+
+
+async def test_images_have_their_own_usage_row(env, monkeypatch):
+    import httpx
+    from app import images, usage
+
+    async def none(coro):
+        coro.close()
+    monkeypatch.setattr(usage, "_safe", none)
+    monkeypatch.setattr(usage, "_cache", (0.0, {}))
+    monkeypatch.setattr(images, "available", lambda: True)
+    usage.record("cloudflare", "flux-1-schnell", 200, httpx.Headers())
+    out = await usage.report([])
+    by = {s["title"]: s["items"] for s in out["sections"]}
+    assert not any("flux" in i["id"] for i in by["Models"])
+    row = by["Images"][0]
+    assert row["used"] >= 1 and row["limit"] == 10_000 // images.NEURONS and row["unit"] == "images"

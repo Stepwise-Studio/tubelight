@@ -274,7 +274,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         top = sorted(total.items(), key=lambda kv: -kv[1])
         return "\n".join([
             f"Chat requests per model, last {days} days (counted by Tubelight; every teammate reply, router and "
-            "keeper call is one request): " + ", ".join(f"{m} {n}" for m, n in top),
+            "keeper call is one request; cloudflare:flux-1-schnell counts images generated): " + ", ".join(f"{m} {n}" for m, n in top),
             "Per day: " + "; ".join(f"{d}: " + ", ".join(f"{m} {n}" for m, n in sorted(r.items(), key=lambda kv: -kv[1]))
                                     for d, r in hist.items()),
         ])

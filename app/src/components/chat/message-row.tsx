@@ -1,10 +1,10 @@
 import * as Clipboard from 'expo-clipboard'
 import { Image } from 'expo-image'
 import { Fragment, createContext, memo, useContext, useEffect, useState } from 'react'
-import { Pressable, View, type ViewStyle } from 'react-native'
+import { Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download04Icon, File01Icon, FlashIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -18,11 +18,12 @@ import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
 import { useTeammate } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import {
-  Collapse, Icon, ListRow, Markdown, Notice, Press, Sheet, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
+  Collapse, Icon, IconButton, ListRow, Markdown, Notice, Press, Sheet, Skeleton, Squircle, TeammateAvatar, Text, ThinkingIndicator, elevation, haptic,
   showEmojiPicker, showMenu, useFlip, warmEmojis,
 } from '@/ui'
 
 import { Capsule, type Tone } from './capsule'
+import { ImageViewer, saveImage } from './image-viewer'
 import { ConnectCard, QuestionCard } from './prompt-cards'
 import { SwipeToReply } from './swipe-reply'
 
@@ -370,15 +371,21 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
   const calls = m.meta.tool_calls ?? []
   const wide = hasWideBlock(m.text)
   const Pad = wide ? Inset : Fragment
+  // Pictures a teammate sends (generated images) stand on their own under the reply, not inside its bubble.
+  const pictures = m.meta.attachments?.filter((a) => a.mime.startsWith('image/')) ?? []
+  const files = m.meta.attachments?.filter((a) => !a.mime.startsWith('image/')) ?? []
   return (
     <SwipeToReply onReply={() => onReply(m)}>
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
         {/* A follow-up's capsule above already says why they're speaking up. */}
         {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} runId={m.run_id} /></Pad>}
-        <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply, onReact) }} delayLongPress={350} accessibilityHint="Long press to react, reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
-          <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
-            tail={m.meta.attachments?.length ? <Attachments items={m.meta.attachments} /> : undefined} />
-        </Pressable>
+        {(!!m.text || files.length > 0 || !pictures.length) && (
+          <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply, onReact) }} delayLongPress={350} accessibilityHint="Long press to react, reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
+            <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
+              tail={files.length ? <Attachments items={files} /> : undefined} />
+          </Pressable>
+        )}
+        {pictures.map((a) => <Pad key={a.path}><Picture a={a} /></Pad>)}
         <Pad><Reactions m={m} side="left" /></Pad>
         {calls.length > 0 && <Pad><ToolCalls calls={calls} /></Pad>}
       </TeammateBlock>
@@ -491,12 +498,40 @@ function Attachments({ items }: { items?: Attachment[] }) {
 function ImageThumb({ a, single }: { a: Attachment; single: boolean }) {
   const { c } = useTheme()
   const url = useSignedUrl(a.path)
+  const [open, setOpen] = useState(false)
   const ratio = a.width && a.height ? a.width / a.height : 4 / 3
   const w = single ? 240 : 118
   return (
-    <Squircle style={{ width: w, height: single ? Math.min(w / ratio, 320) : w, borderRadius: 14, overflow: 'hidden', backgroundColor: c.panel3 }}>
-      {url && <Image source={url} style={{ flex: 1 }} contentFit="cover" transition={motion.duration.fast} accessibilityLabel={a.name} />}
-    </Squircle>
+    <Pressable onPress={() => url && setOpen(true)} accessibilityRole="imagebutton" accessibilityLabel={a.name} accessibilityHint="Opens it full screen">
+      <Squircle style={{ width: w, height: single ? Math.min(w / ratio, 320) : w, borderRadius: 14, overflow: 'hidden', backgroundColor: c.panel3 }}>
+        {url && <Image source={url} style={{ flex: 1 }} contentFit="cover" transition={motion.duration.fast} />}
+      </Squircle>
+      <ImageViewer url={open ? url ?? null : null} name={a.name} onClose={() => setOpen(false)} />
+    </Pressable>
+  )
+}
+
+/** A teammate's picture: large, on its own, with a save button on it; tap for full screen. */
+function Picture({ a }: { a: Attachment }) {
+  const { c } = useTheme()
+  const url = useSignedUrl(a.path)
+  const [open, setOpen] = useState(false)
+  const w = Math.min(useWindowDimensions().width * 0.78, 340)
+  const ratio = a.width && a.height ? a.width / a.height : 1
+  return (
+    <Pressable onPress={() => url && setOpen(true)} onLongPress={() => url && saveImage(url, a.name)} delayLongPress={350}
+      accessibilityRole="imagebutton" accessibilityLabel={a.name} accessibilityHint="Opens it full screen; long press saves it"
+      style={{ marginTop: 6 }}>
+      <Squircle style={{ width: w, height: w / ratio, borderRadius: 20, overflow: 'hidden', backgroundColor: c.panel2 }}>
+        {url ? <Image source={url} style={{ flex: 1 }} contentFit="cover" transition={motion.duration.fast} /> : <Skeleton width={w} height={w / ratio} radius={0} />}
+      </Squircle>
+      {url && (
+        <View style={{ position: 'absolute', right: 8, bottom: 8 }}>
+          <IconButton icon={Download04Icon} variant="soft" round size={36} iconSize={18} accessibilityLabel="Save to photos" onPress={() => saveImage(url, a.name)} />
+        </View>
+      )}
+      <ImageViewer url={open ? url ?? null : null} name={a.name} onClose={() => setOpen(false)} />
+    </Pressable>
   )
 }
 

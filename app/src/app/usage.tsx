@@ -35,6 +35,7 @@ const COLOR: Record<string, string> = {
 const HINT: Record<string, string> = {
   Models: 'Free requests a day for each model. When one runs out, teammates switch to the next.',
   'Shared allowances': 'Daily pools that several models draw from.',
+  Images: 'Pictures teammates make for you.',
   Apps: 'Every app action a teammate takes is a tool call.',
   Storage: 'Chats, memory and history.',
 }
