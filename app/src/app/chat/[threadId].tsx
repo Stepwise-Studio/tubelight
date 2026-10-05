@@ -9,7 +9,7 @@ import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-ico
 import { Composer } from '@/components/chat/composer'
 import { ComputerInfo } from '@/components/chat/computer-info'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
-import { VoiceControls, unsavedTurns, useVoiceSession } from '@/components/voice/voice-mode'
+import { VoiceControls, VoiceGlow, unsavedTurns, useVoiceSession } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
 import { ThreadAvatar } from '@/components/thread-avatar'
@@ -328,9 +328,7 @@ export default function Thread() {
         )}
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         {voice ? (
-          <View style={{ backgroundColor: c.canvas }}>
-            <VoiceControls v={v} name={dmMate?.name ?? title} padBottom={insets.bottom} onEnd={() => setVoice(false)} onType={() => setVoice(false)} />
-          </View>
+          <VoiceControls v={v} name={dmMate?.name ?? title} padBottom={insets.bottom} onEnd={() => setVoice(false)} />
         ) : <Composer
           placeholder={isDm ? `Message ${dmMate?.name ?? ''}` : people.length ? 'Message the team' : 'Message the project'}
           members={isDm ? [] : people}
@@ -355,6 +353,7 @@ export default function Thread() {
         people={isDm ? (dmMate ? [dmMate] : []) : people}
         onCancel={fu.cancel}
       />
+      {voice && <VoiceGlow v={v} />}
     </View>
   )
 }

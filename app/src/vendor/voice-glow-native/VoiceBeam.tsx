@@ -7,8 +7,9 @@
  * as-is on the UI thread and every layer is painted into one Skia picture per frame, with the same
  * geometry, palettes, filters (hue-rotate → brightness → saturate), masks and blend order.
  *
- * Tubelight patch: resolved to the `mobile` preset only; `level` is a shared value (0–1) or the demo's
- * synthetic voice while `speaking`; the host is the view this fills (radius 0, so no corner arcs).
+ * Tubelight patch: resolved to the `mobile` preset only; `level` is a shared value (0–1) for listening and
+ * speaking alike (the mic, then the playback); `radius` is the host's corner radius (the phone screen's), which
+ * clips every layer, rounds the edge ring and lets the band ride the corner arcs while gathered, as on the web.
  */
 import {
   BlendMode, BlurStyle, Canvas, ClipOp, ColorChannel, PaintStyle, Picture, Skia, StrokeCap, StrokeJoin, TileMode,
@@ -97,15 +98,6 @@ function tailLift(dist: number, edge: number, lift: number, position: number, cu
   if (dist <= start) return 0
   return lift * Math.pow(Math.min(1, (dist - start) / Math.max(1, edge - start)), Math.max(0.5, curve))
 }
-/** voice-mocks.tsx `demoLevel`: the site's synthetic voice, used while the teammate speaks. */
-function demoLevel(t: number) {
-  'worklet'
-  if (t % 9 > 6.6) return 0
-  const syllable = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 3.1)
-  const word = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 0.55 + 1)
-  const rough = 0.86 + 0.14 * Math.sin(t * 23.7)
-  return Math.min(1, Math.pow(syllable, 1.6) * (0.5 + 0.5 * word) * rough * 1.05)
-}
 
 const CEILING_HALF_WIDTH = 170
 const CEILING_HEIGHT = 64
@@ -169,7 +161,7 @@ function ellipse(canvas: SkCanvas, cx: number, cy: number, rx: number, ry: numbe
 }
 
 interface Frame {
-  W: number; H: number; w: number; h: number; cx: number; mw: number; bh: number
+  W: number; H: number; r: number; w: number; h: number; cx: number; mw: number; bh: number
   x: number[]; l: number[]; glow: number; level: number; eff: number; lift: number; bendA: number
 }
 
@@ -197,10 +189,22 @@ function edgeMask(canvas: SkCanvas, f: Frame, cfg: Config, w: number, h: number,
   ellipse(canvas, f.W / 2 + f.cx * f.w, f.H, rx, ry, colors, pos, [0, 0, f.W, f.H], blend)
 }
 
+/** voiceDriver.ts `cornerLift`: 0 along the straight run, rising along the corner's circle in the last `radius` px. */
+function cornerLift(x: number, cw: number, radius: number) {
+  'worklet'
+  if (radius <= 0) return 0
+  const d = Math.min(x, cw - x)
+  if (d >= radius) return 0
+  if (d <= 0) return radius
+  const dx = radius - d
+  return radius - Math.sqrt(Math.max(0, radius * radius - dx * dx))
+}
+
 function bandPoints(cfg: Config, f: Frame, morph: number) {
   'worklet'
   const cw = f.W
   const ch = f.H
+  const arcR = Math.max(0, Math.min(f.r, cw / 2, ch / 2))
   const centre = cw / 2 + f.cx * f.w
   const half = CEILING_HALF_WIDTH * cfg.rangeWidth * f.w * f.mw
   const apex = Math.min(ch * 0.82 * Math.min(1, cfg.scale), (CEILING_HEIGHT * cfg.rangeHeight * f.h + f.lift) * cfg.bandPosition)
@@ -218,7 +222,7 @@ function bandPoints(cfg: Config, f: Frame, morph: number) {
     const edge = (x < centre ? centre : cw - centre) + over
     const y = bell(t, cfg.bandCurve, cfg.bandSpread, cfg.bandSkew)
       + tailLift(Math.abs(x - centre), edge, tail, cfg.bandTailPosition, cfg.bandTailCurve)
-    pts.push(x, base - apex * y)
+    pts.push(x, base - apex * y - (morph > 0 ? cornerLift(x, cw, arcR) * morph : 0)) // gathered: ride the arc
   }
   return pts
 }
@@ -292,7 +296,7 @@ function drawBand(canvas: SkCanvas, cfg: Config, f: Frame, pts: number[]) {
 }
 
 /** One frame: the driver step, then every layer in the stylesheet's z order. */
-function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: number, ts: number): SkPicture {
+function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: number, ts: number, radius: number): SkPicture {
   'worklet'
   const dt = s.last ? Math.min(0.05, (ts - s.last) / 1000) : 1 / 60
   s.last = ts
@@ -302,7 +306,7 @@ function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: 
   const fadeIn = s.opacity * s.opacity * (3 - 2 * s.opacity)
 
   // raw level: the mic while listening, the site's demo voice while speaking
-  const raw = mode === 1 ? clamp01(mic) : mode === 3 ? demoLevel(tSec) : 0
+  const raw = mode === 1 || mode === 3 ? clamp01(mic) : 0
   const bands = [raw, raw * (0.72 + 0.28 * Math.sin(tSec * 9.1)), raw * (0.6 + 0.4 * Math.sin(tSec * 13.7 + 2))]
   s.level = follow(s.level, shape(raw, cfg.threshold), dt, cfg.attack, cfg.release)
   s.b0 = follow(s.b0, shape(bands[0], cfg.threshold * 0.6), dt, cfg.attack, cfg.release * 1.15)
@@ -350,7 +354,7 @@ function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: 
     x.push(lx * gather)
     l.push((0.6 + 0.7 * sb[LOBES[i].band]) * edgeEnvelope(lx, span))
   }
-  const f: Frame = { W, H, w, h, cx, mw: maskWidth, bh: Math.max(0, lift), x, l, glow, level: s.level, eff, lift, bendA }
+  const f: Frame = { W, H, r: radius, w, h, cx, mw: maskWidth, bh: Math.max(0, lift), x, l, glow, level: s.level, eff, lift, bendA }
 
   s.warp = follow(s.warp, processing ? 0 : 1, dt, WARP_IN_TAU, WARP_OUT_TAU)
   const warpOff = s.warp < WARP_OFF_BELOW
@@ -364,6 +368,9 @@ function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: 
   const bounds = Skia.XYWHRect(0, top, W, H - top)
   const rec = Skia.PictureRecorder()
   const canvas = rec.beginRecording(Skia.XYWHRect(0, 0, W, H))
+  const r = Math.max(0, Math.min(radius, W / 2, H / 2))
+  const rr = (inset: number) => Skia.RRectXY(Skia.XYWHRect(inset, inset, W - 2 * inset, H - 2 * inset), Math.max(0, r - inset), Math.max(0, r - inset))
+  if (r > 0) canvas.clipRRect(rr(0), ClipOp.Intersect, true) // the host's border-radius clips everything, as in CSS
   const gw = cfg.glowWidth
   const gh = cfg.glowHeight
   const opacity = (layer: number) => fadeIn * glow * layer * cfg.strength
@@ -394,7 +401,7 @@ function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: 
     shadow.setStrokeWidth(2)
     shadow.setColor(Float32Array.of(cfg.innerShadow[0], cfg.innerShadow[1], cfg.innerShadow[2], cfg.innerShadow[3]))
     shadow.setMaskFilter(Skia.MaskFilter.MakeBlur(BlurStyle.Normal, (9 * cfg.scale) / 2, true))
-    canvas.drawRect(Skia.XYWHRect(1, 1, W - 2, H - 2), shadow)
+    canvas.drawRRect(rr(1), shadow)
     canvas.restore()
     const mask = Skia.Paint()
     mask.setBlendMode(BlendMode.DstIn)
@@ -442,7 +449,7 @@ function render(s: State, cfg: Config, mode: number, mic: number, W: number, H: 
     ring.setStyle(PaintStyle.Stroke)
     ring.setStrokeWidth(1)
     ring.setColor(Float32Array.of(1, 1, 1, 1))
-    canvas.drawRect(Skia.XYWHRect(0.5, 0.5, W - 1, H - 1), ring)
+    canvas.drawRRect(rr(0.5), ring)
     edgeMask(canvas, f, cfg, 170, 64, 45, 0, BlendMode.DstIn)
     canvas.restore()
     canvas.restore()
@@ -512,10 +519,12 @@ export interface VoiceBeamProps {
   level: SharedValue<number>
   theme: 'dark' | 'light'
   style?: ViewStyle
+  /** The host's corner radius (the phone screen's, for a full-screen host). */
+  radius?: number
 }
 
 /** Fills its parent; draw it under the content, like the web component's layers. */
-export function VoiceBeam({ mode, level, theme, style }: VoiceBeamProps) {
+export function VoiceBeam({ mode, level, theme, style, radius = 0 }: VoiceBeamProps) {
   'use no memo'
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [empty] = useState(() => { const r = Skia.PictureRecorder(); r.beginRecording(Skia.XYWHRect(0, 0, 1, 1)); return r.finishRecordingAsPicture() })
@@ -534,7 +543,7 @@ export function VoiceBeam({ mode, level, theme, style }: VoiceBeamProps) {
     const s = state.value
     // ~60 fps cap, as the web driver's loop
     if (s.last && timestamp - s.last < 1000 / 60 - 2) return
-    picture.value = render(s, cfg, modeValue.value, level.value, W, H, timestamp)
+    picture.value = render(s, cfg, modeValue.value, level.value, W, H, timestamp, radius)
     state.value = s
   })
 

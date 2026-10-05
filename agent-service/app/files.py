@@ -40,6 +40,20 @@ async def upload(owner_id: str, name: str, data: bytes) -> dict[str, Any]:
     return {"path": path, "name": safe, "mime": mime, "size": len(data)}
 
 
+async def signed(owner_id: str, path: str, seconds: int = 600) -> str:
+    """A short-lived link to one of the user's stored files (for a service that fetches it, like Drive's upload)."""
+    if not path.startswith(f"{owner_id}/"):
+        raise PermissionError("attachment outside the user's folder")
+    r = await db.client().post(f"{config.SUPABASE_URL}/storage/v1/object/sign/attachments/{path}", json={"expiresIn": seconds})
+    r.raise_for_status()
+    return f"{config.SUPABASE_URL}/storage/v1{r.json()['signedURL']}"
+
+
+async def remove(owner_id: str, path: str) -> None:
+    if path.startswith(f"{owner_id}/"):
+        await db.client().request("DELETE", f"{config.SUPABASE_URL}/storage/v1/object/attachments/{path}")
+
+
 def _pdf(data: bytes) -> str:
     from pypdf import PdfReader
 

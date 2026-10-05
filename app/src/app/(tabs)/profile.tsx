@@ -140,7 +140,7 @@ function PhoneAssistant() {
   const open = () => Linking.sendIntent('android.settings.VOICE_INPUT_SETTINGS')
     .catch(() => Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')).catch(() => Linking.openSettings())
   // Android settings pages decide these; read them again whenever you come back from one.
-  const read = () => ({ notes: !!Phone?.notificationAccess(), ring: !!Phone?.canRing() })
+  const read = () => ({ notes: !!Phone?.notificationAccess(), ring: !!Phone?.canRing(), usage: !!Phone?.usageAccess() })
   const [access, setAccess] = useState(read)
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => { if (st === 'active') setAccess(read()) })
@@ -159,6 +159,9 @@ function PhoneAssistant() {
             <Divider />
             <ListRow title="Notifications" subtitle={access.notes ? 'On: teammates can look through the last day’s, when you ask' : 'Off: let teammates look through your notifications when you ask'}
               accessory={<Chip label={access.notes ? 'On' : 'Off'} color={access.notes ? 'success' : 'idle'} size="sm" dot />} onPress={() => Phone?.openNotificationAccess()} />
+            <Divider />
+            <ListRow title="What's using storage" subtitle={access.usage ? `On: ${mate.name} can see storage by kind and by app` : `Off: let ${mate.name} see which apps and files take the space`}
+              accessory={<Chip label={access.usage ? 'On' : 'Off'} color={access.usage ? 'success' : 'idle'} size="sm" dot />} onPress={() => Phone?.openUsageAccess()} />
             <Divider />
             <ListRow title="When a teammate needs you" subtitle={access.ring ? 'Over the lock screen: the decision opens with voice' : 'Allow full-screen alerts so decisions open over the lock screen'}
               accessory={<Chip label={access.ring ? 'On' : 'Off'} color={access.ring ? 'success' : 'idle'} size="sm" dot />} onPress={() => Phone?.openRingSettings()} />

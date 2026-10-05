@@ -95,7 +95,6 @@ function Talk({ userId }: { userId: string }) {
         activity={Object.values(t.statuses).find((st) => st.label)?.label}
         screen={screen}
         onTask={(text) => t.send(text, [], { voiceTask: true })}
-        onType={() => { Linking.openURL(`tubelight://chat/${encodeURIComponent(threadId)}`); close() }}
         onClose={close}
       />
     </Shade>

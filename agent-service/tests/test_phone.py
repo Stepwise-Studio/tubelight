@@ -40,3 +40,15 @@ def test_only_the_phone_uses_the_phone(env):
     assert "ask_phone" in names(ivy, phone_tm) and not {"phone_action", "phone_notifications"} & names(ivy, phone_tm)
     assert not {"phone_action", "ask_phone"} & names(ivy, None)  # no phone registered: nobody touches it
     assert tools.title("phone_action", {"action": "alarm", "when": "06:30"}) == "On your phone: Set an alarm for 06:30"
+
+
+async def test_phone_status_reads_like_android(env):
+    assert "hasn't reported" in await phone.status_text("u9", IST)
+    await phone.save_status("u9", {"model": "Shelby", "android": "15", "storage_total": 128e9, "storage_free": 40e9,
+                                   "battery": 72, "charging": True, "memory_total": 8e9, "memory_free": 2.5e9,
+                                   "network": "Wi-Fi", "usage_access": True, "kinds": {"photos": 20e9, "videos": 30e9},
+                                   "apps": [{"name": "WhatsApp", "bytes": 9e9, "cache": 1e9}]})
+    out = await phone.status_text("u9", IST)
+    assert "88.0 GB used of 128.0 GB, 40.0 GB free" in out and "72% and charging" in out
+    assert "videos 30.0 GB, photos 20.0 GB" in out and "WhatsApp 9.0 GB (1.0 GB cache)" in out
+    assert "Say which settings page" in phone.action("settings", None, None, "")

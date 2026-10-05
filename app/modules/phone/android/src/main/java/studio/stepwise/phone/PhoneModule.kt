@@ -1,6 +1,16 @@
 package studio.stepwise.phone
 
+import android.app.AppOpsManager
 import android.app.KeyguardManager
+import android.app.usage.StorageStatsManager
+import android.app.ActivityManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.BatteryManager
+import android.os.Environment
+import android.os.Process
+import android.os.StatFs
+import android.os.storage.StorageManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -60,6 +70,15 @@ class PhoneModule : Module() {
     }
     Function("openNotificationAccess") { start(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
     Function("recentNotifications") { since: Double -> Notes.since(context, since.toLong()) }
+    Function("usageAccess") { usageAccess() }
+    Function("openUsageAccess") { start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+    Function("status") { status() }
+    // The display's own corner radius in dp (Android 12+ reports it), so a glow can hug the screen's rounded edge.
+    Function("screenRadius") {
+      val insets = appContext.currentActivity?.window?.decorView?.rootWindowInsets
+      val px = if (Build.VERSION.SDK_INT >= 31) insets?.getRoundedCorner(android.view.RoundedCorner.POSITION_BOTTOM_LEFT)?.radius ?: 0 else 0
+      px / context.resources.displayMetrics.density
+    }
   }
 
   private fun start(i: Intent) {
@@ -69,6 +88,56 @@ class PhoneModule : Module() {
     } catch (e: ActivityNotFoundException) {
       throw CodedException("No app on this phone can do that.")
     }
+  }
+
+  private fun usageAccess(): Boolean {
+    val ops = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    @Suppress("DEPRECATION")
+    return ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) == AppOpsManager.MODE_ALLOWED
+  }
+
+  /** What Shelby can tell about the phone: storage (and, with usage access, what's taking it), battery, memory,
+   *  network. Read when the app opens or a message goes out, and passed to the server. */
+  private fun status(): Map<String, Any?> {
+    val fs = StatFs(Environment.getDataDirectory().path)
+    val out = mutableMapOf<String, Any?>(
+      "model" to (Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL),
+      "android" to Build.VERSION.RELEASE,
+      "storage_total" to fs.totalBytes.toDouble(), "storage_free" to fs.availableBytes.toDouble(),
+    )
+    val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+    out["battery"] = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    out["charging"] = bm.isCharging
+    val mi = ActivityManager.MemoryInfo().also { (context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) }
+    out["memory_total"] = mi.totalMem.toDouble(); out["memory_free"] = mi.availMem.toDouble()
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+    out["network"] = when {
+      caps == null -> "offline"
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
+      else -> "online"
+    }
+    out["usage_access"] = usageAccess()
+    if (Build.VERSION.SDK_INT >= 26 && usageAccess()) {
+      try {
+        val ssm = context.getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+        val user = Process.myUserHandle()
+        val ext = ssm.queryExternalStatsForUser(StorageManager.UUID_DEFAULT, user)
+        out["kinds"] = mapOf("photos" to ext.imageBytes.toDouble(), "videos" to ext.videoBytes.toDouble(),
+          "audio" to ext.audioBytes.toDouble(), "other files" to (ext.totalBytes - ext.imageBytes - ext.videoBytes - ext.audioBytes - ext.appBytes).toDouble())
+        val pm = context.packageManager
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+          .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }.distinctBy { it.first }
+        out["apps"] = apps.mapNotNull { (pkg, label) ->
+          try {
+            val st = ssm.queryStatsForPackage(StorageManager.UUID_DEFAULT, pkg, user)
+            mapOf("name" to label, "bytes" to (st.appBytes + st.dataBytes + st.cacheBytes).toDouble(), "cache" to st.cacheBytes.toDouble())
+          } catch (_: Exception) { null }
+        }.sortedByDescending { it["bytes"] as Double }.take(15)
+      } catch (_: Exception) {}
+    }
+    return out
   }
 
   private fun str(a: Map<String, Any?>, k: String) = (a[k] as? String)?.trim().orEmpty()
@@ -112,6 +181,21 @@ class PhoneModule : Module() {
         return "Directions opened"
       }
       "open_url" -> { start(Intent(Intent.ACTION_VIEW, Uri.parse(str(a, "url")))); return "Opened" }
+      "settings" -> {
+        val page = str(a, "text").lowercase()
+        start(Intent(when {
+          "storage" in page -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+          "battery" in page -> Intent.ACTION_POWER_USAGE_SUMMARY
+          "wi" in page && "fi" in page -> Settings.ACTION_WIFI_SETTINGS
+          "bluetooth" in page -> Settings.ACTION_BLUETOOTH_SETTINGS
+          "display" in page || "brightness" in page -> Settings.ACTION_DISPLAY_SETTINGS
+          "app" in page -> Settings.ACTION_APPLICATION_SETTINGS
+          "sound" in page || "volume" in page -> Settings.ACTION_SOUND_SETTINGS
+          "location" in page -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+          else -> Settings.ACTION_SETTINGS
+        }))
+        return "Settings opened"
+      }
       "search" -> { start(Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, str(a, "text"))); return "Searched" }
       "calendar" -> {
         start(Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)

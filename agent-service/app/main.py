@@ -952,6 +952,17 @@ async def phone_register(body: PhoneRegister, user: User = Depends(current_user)
     return {"teammate_id": tm["id"], "name": tm["name"]}
 
 
+class PhoneStatus(BaseModel):
+    status: dict = Field(default_factory=dict)
+
+
+@app.post("/phone/status")
+async def phone_status(body: PhoneStatus, user: User = Depends(current_user)):
+    """The phone's storage, battery, memory and network, for its teammate (sent when the app opens or a message goes out)."""
+    await phone.save_status(user["id"], body.status)
+    return {"ok": True}
+
+
 class PhoneNotes(BaseModel):
     items: list[dict] = Field(default_factory=list, max_length=300)
 

@@ -1,13 +1,15 @@
 import { requestRecordingPermissionsAsync } from 'expo-audio'
+import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
 import { useEffect, useRef, useState } from 'react'
 import { BackHandler, ScrollView, View } from 'react-native'
 import Animated, { FadeIn, FadeOut, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Cancel01Icon, KeyboardIcon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
+import { Cancel01Icon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
 
 import { api } from '@/lib/api'
 import { LIVE_WS, frameText } from '@/lib/live'
 import { plainText } from '@/lib/format'
+import { Phone } from '@/lib/phone'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
 import { motion, radius, useTheme } from '@/theme'
@@ -317,14 +319,32 @@ export function unsavedTurns(v: VoiceSession, messages: ChatMessage[]): VoiceTur
   return [...waiting, ...(v.live ? [v.live] : [])]
 }
 
-/** The bottom of a chat in voice mode: our glow, what's happening, and type / mute / end. */
-export function VoiceControls({ v, name, onType, onEnd, padBottom }: {
-  v: VoiceSession; name: string; onType: () => void; onEnd: () => void; padBottom: number
-}) {
+/**
+ * libraries.dev voice-glow, `type="mobile"`: the glow lives on the phone's own bottom edge, hugging its rounded
+ * corners, over whatever is on screen. A layer of its own (full screen, no touches), never boxed into a panel.
+ */
+export function VoiceGlow({ v }: { v: VoiceSession }) {
   const { scheme } = useTheme()
+  const [radius] = useState(() => Phone?.screenRadius() ?? 0)
+  return <VoiceBeam mode={v.beam} level={v.beamLevel} theme={scheme} radius={radius} style={{ zIndex: 30 }} />
+}
+
+/** The bottom of a chat in voice mode: what's happening, mute and end, over a soft fade (the chat shows through). */
+export function VoiceControls({ v, name, onEnd, padBottom }: {
+  v: VoiceSession; name: string; onEnd: () => void; padBottom: number
+}) {
+  const { c } = useTheme()
+  const [size, setSize] = useState({ w: 0, h: 0 })
   return (
-    <View style={{ paddingBottom: padBottom + 20, paddingTop: 28 }}>
-      <VoiceBeam mode={v.beam} level={v.beamLevel} theme={scheme} />
+    <View style={{ paddingBottom: padBottom + 24, paddingTop: 56 }} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      {size.h > 0 && (
+        <Canvas style={{ position: 'absolute', left: 0, top: 0, width: size.w, height: size.h }} pointerEvents="none">
+          <Rect x={0} y={0} width={size.w} height={size.h}>
+            <LinearGradient start={vec(0, 0)} end={vec(0, size.h)} positions={[0, 0.45, 1]}
+              colors={[`${c.canvas}00`, `${c.canvas}cc`, `${c.canvas}f0`]} />
+          </Rect>
+        </Canvas>
+      )}
       {v.offer && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
           style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
@@ -340,23 +360,22 @@ export function VoiceControls({ v, name, onType, onEnd, padBottom }: {
           </Surface>
         </Animated.View>
       )}
-      <View style={{ alignItems: 'center', gap: 14 }}>
-        <TextSwap variant="label" color="ink3">{v.label}</TextSwap>
+      <View style={{ alignItems: 'center', gap: 16 }}>
+        <TextSwap variant="label" color="ink2">{v.label}</TextSwap>
         {v.phase === 'error' ? <Button label="Try again" variant="soft" onPress={v.retry} /> : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 24 }}>
-            <IconButton icon={KeyboardIcon} variant="soft" size={56} iconSize={22} round accessibilityLabel="Type instead" onPress={onType} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 32 }}>
             <IconButton
               icon={v.phase === 'muted' ? MicOff01Icon : Mic01Icon}
               swapKey={v.phase === 'muted' ? 'off' : 'on'}
               variant={v.phase === 'muted' ? 'solid' : 'soft'}
-              size={56}
-              iconSize={22}
+              size={60}
+              iconSize={24}
               round
               disabled={v.phase === 'connecting'}
               accessibilityLabel={v.phase === 'muted' ? 'Turn microphone on' : 'Mute microphone'}
               onPress={v.toggleMute}
             />
-            <IconButton icon={Cancel01Icon} variant="soft" size={56} iconSize={22} round accessibilityLabel="End voice mode" onPress={onEnd} />
+            <IconButton icon={Cancel01Icon} variant="soft" size={60} iconSize={24} round accessibilityLabel="End voice mode" onPress={onEnd} />
           </View>
         )}
       </View>
@@ -373,8 +392,6 @@ export interface VoiceModeProps {
   activity?: string
   onTask: (text: string) => Promise<string | null>
   onClose: () => void
-  /** The keyboard button: type instead (the voice session has stopped by then). */
-  onType: () => void
   screen?: VoiceSessionOptions['screen']
 }
 
@@ -382,7 +399,7 @@ export interface VoiceModeProps {
  * The phone-assistant sheet over other apps (src/assistant/root.tsx): the chat as bubbles (the last few messages and
  * what's said now, the teammate's words appearing as they're spoken), with the voice controls below.
  */
-export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, onType, screen }: VoiceModeProps) {
+export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, screen }: VoiceModeProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const scroll = useRef<ScrollView>(null)
@@ -413,7 +430,8 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
           </Squircle>
         ))}
       </ScrollView>
-      <VoiceControls v={v} name={name} onType={() => { v.stop(); onType() }} onEnd={onClose} padBottom={insets.bottom} />
+      <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} />
+      <VoiceGlow v={v} />
     </Animated.View>
   )
 }

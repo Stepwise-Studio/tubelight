@@ -13,7 +13,8 @@ from typing import Any
 from . import config, memory
 
 DAY = 24 * 3600
-KINDS = ("alarm", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url", "search")
+KINDS = ("alarm", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url", "search",
+         "settings")
 
 
 def _clock(s: str) -> tuple[int, int] | None:
@@ -56,6 +57,8 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
         return "Say where to in `place`."
     elif kind == "open_app" and not f.get("app"):
         return "Say which app in `app`."
+    elif kind == "settings" and not f.get("text"):
+        return "Say which settings page in `text`: storage, battery, wifi, bluetooth, display, apps, sound or location."
     elif kind == "open_url" and not str(f.get("url", "")).startswith(("http://", "https://")):
         return "Give a full https:// link in `url`."
     return a
@@ -67,7 +70,7 @@ panel opens over whatever they're doing, and you see what was on screen). You ar
 this phone: set alarms and timers, open apps, get calls, texts, WhatsApp messages and emails ready to send, start
 directions, put events in the calendar and, if they shared them, look through their notifications. For a reminder at a
 later time, set a follow-up. Other teammates ask you for things on the phone: say what they asked and why, and
-remember that anything you do for them waits for {owner}'s OK.
+remember that anything you do for them waits for {owner}'s OK. Check storage, battery and the like with phone_status.
 Keep replies to a line or two: they're usually glancing at the phone."""
 
 
@@ -98,6 +101,36 @@ async def ensure(owner_id: str, name: str) -> dict[str, Any]:
         "system_prompt": PROMPT.format(name=name, owner=owner), "model": config.DEFAULT_MODEL,
         "allowed_toolkits": [], "avatar_shape": "phone", "color": "#64748b",
     })
+
+
+# ------------------------------------------------------------------ status
+def _gb(b: Any) -> str:
+    b = float(b or 0)
+    return f"{b / 1e9:.1f} GB" if b >= 1e9 else f"{b / 1e6:.0f} MB"
+
+
+async def save_status(owner_id: str, status: dict[str, Any]) -> None:
+    await memory.store.aput(_ns(owner_id), "status", {"status": status, "at": time.time()}, index=False)
+
+
+async def status_text(owner_id: str, zone) -> str:
+    item = await memory.store.aget(_ns(owner_id), "status")
+    if not item:
+        return "The phone hasn't reported its status yet (it does when Tubelight opens)."
+    s, at = item.value["status"], item.value["at"]
+    used = (s.get("storage_total") or 0) - (s.get("storage_free") or 0)
+    lines = [f"As of {datetime.fromtimestamp(at, zone).strftime('%a %H:%M')} ({s.get('model')}, Android {s.get('android')}):",
+             f"Storage: {_gb(used)} used of {_gb(s.get('storage_total'))}, {_gb(s.get('storage_free'))} free (decimal GB, as Android shows).",
+             f"Battery {s.get('battery')}%{' and charging' if s.get('charging') else ''}; memory {_gb(s.get('memory_free'))} free of "
+             f"{_gb(s.get('memory_total'))}; network {s.get('network')}."]
+    if s.get("kinds"):
+        lines.append("By kind: " + ", ".join(f"{k} {_gb(v)}" for k, v in sorted(s["kinds"].items(), key=lambda kv: -kv[1])))
+    if s.get("apps"):
+        lines.append("Biggest apps (app + data + cache): " + ", ".join(
+            f"{a['name']} {_gb(a['bytes'])}" + (f" ({_gb(a['cache'])} cache)" if a.get("cache", 0) > 2e8 else "") for a in s["apps"]))
+    elif not s.get("usage_access"):
+        lines.append("What's taking the space (by kind, by app) needs usage access: Profile → Phone assistant → What's using storage.")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------ notifications

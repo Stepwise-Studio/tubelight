@@ -28,6 +28,7 @@ export function phoneLabel(a: PhoneAction): string {
     case 'open_app': return `Open ${a.app}`
     case 'open_url': return 'Open link'
     case 'search': return `Search “${a.text}”`
+    case 'settings': return `Open ${a.text ?? ''} settings`.replace('  ', ' ')
   }
 }
 
@@ -71,9 +72,12 @@ export async function registerPhone() {
 
 const SYNCED = 'tubelight.phone.notesSynced'
 
-/** New notifications since the last sync go to the server (only with notification access on). */
+/** What the phone's teammate can know about it, passed to the server: its status (storage, battery…) and, with
+ *  notification access, the notifications since the last sync. */
 export async function syncNotifications() {
-  if (!Phone?.notificationAccess()) return
+  if (!Phone) return
+  await api('/phone/status', { method: 'POST', json: { status: Phone.status() } }).catch(() => {})
+  if (!Phone.notificationAccess()) return
   const last = Number((await AsyncStorage.getItem(SYNCED).catch(() => null)) ?? 0)
   const items = Phone.recentNotifications(last)
   if (!items.length) return

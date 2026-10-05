@@ -3,7 +3,7 @@
 import { requireOptionalNativeModule } from 'expo'
 
 export interface PhoneAction {
-  action: 'alarm' | 'timer' | 'call' | 'text' | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app'
+  action: 'alarm' | 'timer' | 'call' | 'text' | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app' | 'settings'
   title?: string; text?: string; number?: string; to?: string; place?: string; url?: string; app?: string
   hour?: number; minute?: number; seconds?: number; start?: number; end?: number
 }
@@ -27,6 +27,13 @@ interface PhoneModule {
   notificationAccess(): boolean
   openNotificationAccess(): void
   recentNotifications(sinceMs: number): Noted[]
+  /** Usage access (Settings → Usage access): lets status() say what's taking the storage. */
+  usageAccess(): boolean
+  openUsageAccess(): void
+  /** Storage, battery, memory, network (and storage by kind and by app, with usage access). */
+  status(): Record<string, unknown>
+  /** The screen's corner radius in dp (0 if the phone doesn't say). */
+  screenRadius(): number
 }
 
 /** null in builds without the module (an older dev client). */
