@@ -19,7 +19,7 @@ import { useSession } from '@/lib/session'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
 import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, Skeleton, TeammateAvatar, Text, TextSwap, elevation, haptic, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Skeleton, TeammateAvatar, Text, TextSwap, TypingDots, elevation, haptic, toast } from '@/ui'
 
 const GROUP_GAP_MS = 5 * 60_000
 
@@ -179,6 +179,8 @@ export default function Thread() {
   // ---- header
   // Follow-ups change when a run ends (a teammate or the keeper set, fired or cancelled one): reload then.
   const running = liveRuns.some((r) => r.status === 'running')
+  // A reply on its way: a run thinking or using tools, or text still streaming in.
+  const busy = running || Object.keys(t.statuses).length > 0 || Object.values(t.ghosts).some((g) => !g.done)
   const fu = useFollowups(threadId, running)
   const working = liveRuns.find((r) => r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
@@ -316,16 +318,6 @@ export default function Thread() {
           />
         )}
         </View>
-        {away && (
-          <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.fast)}
-            style={{ position: 'absolute', right: 16, bottom: composerH + 10 }}>
-            <Press radius={20} onPress={() => { haptic.tap(); toLatest() }} accessibilityLabel={fresh ? 'New messages. Jump to the latest' : 'Jump to the latest'}
-              style={[{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }, elevation(scheme)]}>
-              <Icon icon={ArrowDown01Icon} size={20} color="ink" />
-              {fresh && <View style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: 5, backgroundColor: c.tube }} />}
-            </Press>
-          </Animated.View>
-        )}
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} onLayout={(e) => setComposerH(Math.round(e.nativeEvent.layout.height))}>
         {voice ? (
           <VoiceControls v={v} name={dmMate?.name ?? title} padBottom={insets.bottom} onEnd={() => setVoice(false)} />
@@ -341,6 +333,21 @@ export default function Thread() {
           commands={computer ? commands ?? [] : undefined}
         />}
         </View>
+        {away && (
+          // Drawn after the composer so its fade doesn't wash over it. Centred above the composer; while a reply is on its way (thinking, using tools, writing) the arrow
+          // becomes iMessage's typing dots, so you know something is coming down there.
+          <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.fast)}
+            pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: composerH + 10, alignItems: 'center' }}>
+            <Press radius={20} onPress={() => { haptic.tap(); toLatest() }}
+              accessibilityLabel={busy ? 'A reply is coming. Jump to the latest' : fresh ? 'New messages. Jump to the latest' : 'Jump to the latest'}
+              style={[{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line }, elevation(scheme)]}>
+              <IconSwap swapKey={busy ? 'dots' : 'arrow'}>
+                {busy ? <TypingDots size={5} /> : <Icon icon={ArrowDown01Icon} size={20} color="ink" />}
+              </IconSwap>
+              {fresh && !busy && <View style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: 5, backgroundColor: c.tube }} />}
+            </Press>
+          </Animated.View>
+        )}
         </View>
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
