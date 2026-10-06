@@ -309,10 +309,25 @@ def make_pdf(title: str, markdown: str) -> bytes:
                         pdf.set_x(indent)
                         pdf.set_font("Inter", "", 11)
                         pdf.set_text_color(*INK)
-                        if not j:
+                        runs = _runs(_inline(ch))
+                        box = (not j and n.type == "bullet_list" and runs
+                               and re.match(r"\[( |x|X)\]\s", runs[0].get("text", "")))
+                        if box:  # a checklist item: a real box (ticked for [x]), not "[ ]"
+                            x, y = pdf.get_x(), pdf.get_y()
+                            pdf.set_draw_color(*MUTED)
+                            pdf.set_line_width(0.3)
+                            pdf.rect(x + 0.4, y + 1.2, 3.6, 3.6, round_corners=True, corner_radius=0.7)
+                            if box.group(1) != " ":
+                                pdf.set_draw_color(*ACCENT)
+                                pdf.set_line_width(0.5)
+                                pdf.line(x + 1.1, y + 3.0, x + 1.9, y + 3.9)
+                                pdf.line(x + 1.9, y + 3.9, x + 3.4, y + 1.9)
+                            pdf.cell(6, 6, "")
+                            runs = [{**runs[0], "text": runs[0]["text"][box.end():]}, *runs[1:]]
+                        elif not j:
                             pdf.cell(6, 6, f"{start + i}." if n.type == "ordered_list" else "•")
                         pdf.set_left_margin(indent + 6)
-                        write(_runs(_inline(ch)))
+                        write(runs)
                         pdf.set_left_margin(20)
                         pdf.ln(1)
                     else:
