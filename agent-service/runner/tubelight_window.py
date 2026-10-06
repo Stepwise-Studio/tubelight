@@ -57,6 +57,14 @@ def row(title: str, subtitle: str = "") -> Adw.ActionRow:
     return r
 
 
+def apps_readable(on: bool) -> None:
+    """Browsers and Electron apps only show their windows' contents to accessibility when the desktop asks for it."""
+    try:
+        Gio.Settings.new("org.gnome.desktop.interface").set_boolean("toolkit-accessibility", on)
+    except Exception:
+        pass
+
+
 class Window(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, runner):
         super().__init__(application=app, title="Tubelight", default_width=440, default_height=700)
@@ -210,6 +218,10 @@ class Window(Adw.ApplicationWindow):
                               subtitle="Its chat can capture this screen when you ask (needs full access)")
         shots.connect("notify::active", lambda sw, _p: allow_screenshots(sw.get_active()))
         g.add(shots)
+        use = Adw.SwitchRow(title="Let teammates use your apps", active=c.get("use_apps", False),
+                            subtitle="Its chat can read app windows and click and type in them, for a task you OK on your phone")
+        use.connect("notify::active", lambda sw, _p: self._use_apps(sw.get_active()))
+        g.add(use)
         page.add(g)
 
         f = Adw.PreferencesGroup(title="Shared folders",
@@ -248,6 +260,10 @@ class Window(Adw.ApplicationWindow):
         u.add(out)
         page.add(u)
         return page
+
+    def _use_apps(self, on: bool) -> None:
+        self._set(use_apps=on)
+        apps_readable(on)
 
     def _set(self, **changes) -> None:
         self.r.save({**self.r.load(), **changes})

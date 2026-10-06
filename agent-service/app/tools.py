@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
+from . import computer_use as cu
 from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, phone, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
@@ -74,7 +75,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
@@ -83,7 +84,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -210,6 +211,8 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"Upload {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]} to Google Drive{where}"[:80]
     if name == "computer_close_app":
         return f"Close {str(args.get('name') or 'an app')}"[:80]
+    if name == "computer_use":
+        return f"Use {str(args.get('app') or 'an app')}: {str(args.get('task') or '')}"[:80]
     if name == "computer_write":
         return f"Write {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]}"[:80]
     _, action = _phrase(name)
@@ -804,6 +807,47 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 f"{a['name']} {a['mem'] / 1e9:.1f} GB CPU {a['cpu']:.0f}%{' closable' if a.get('closable') else ''}"
                 for a in got["apps"])
 
+        def _snap(got: dict) -> str:
+            if got.get("snapshot"):
+                ctx.ui_snaps[got["snapshot"]] = got.get("app") or ""
+            return got.get("text", "")
+
+        async def computer_use(app: str, task: str) -> str:
+            got = await computers.call(dev, "ui_launch", {"app": app, "full": True}, 45)
+            computer_use_grant(app, got.get("app") or "")
+            return (f"They OK'd using {got.get('app') or app} for: {task} (for 20 minutes). {cu.head(got)} Work "
+                    "through it with computer_act (computer_subtask for a run of simple steps), then tell them what you did.\n"
+                    + _snap(got))
+
+        def computer_use_grant(*apps: str) -> None:
+            cu.grant(ctx.owner_id, dev, *apps)
+
+        async def computer_look(app: str = "", window: str = "") -> str:
+            if not app:
+                return "Open apps and windows (▶ in front): " + cu.apps_line(await computers.call(dev, "ui_apps", {"full": True}, 20))
+            return _snap(await computers.call(dev, "ui_look", {"app": app, "window": window, "full": True}, 30))
+
+        async def computer_act(snapshot: str, element: str, action: str, value: str = "") -> str:
+            app = ctx.ui_snaps.get(snapshot)
+            if app is None:
+                return "Look at the app first (computer_look) and act on that snapshot's ids."
+            if action.upper() != "READ" and not cu.granted(ctx.owner_id, dev, app):
+                return f"Ask first: call computer_use with app {app!r} and the task; they OK it once."
+            got = await computers.call(dev, "ui_act", {"snapshot": snapshot, "element": element, "action": action,
+                                                       "value": value, "full": True}, 40)
+            return cu.head(got) + "\n" + _snap(got)
+
+        async def computer_keys(keys: list[str], app: str = "") -> str:
+            if not cu.any_granted(ctx.owner_id, dev):
+                return "Ask first: call computer_use with the app and the task; they OK it once."
+            got = await computers.call(dev, "ui_keys", {"keys": keys[:12], "app": app, "full": True}, 30)
+            return f"{cu.head(got)} (in front: {got.get('front') or 'unknown'})\n" + _snap(got)
+
+        async def computer_subtask(app: str, goal: str, inputs: list[str] | None = None, done_when: str = "", max_steps: int = 12) -> str:
+            if not cu.granted(ctx.owner_id, dev, app):
+                return f"Ask first: call computer_use with app {app!r} and the task; they OK it once."
+            return await cu.subtask(dev, app, goal, inputs or [], done_when, max_steps)
+
         async def computer_close_app(name: str, force: bool = False) -> str:
             return await computers.call(dev, "quit_app", {"name": name, "force": force, "full": True}, 30)
 
@@ -843,6 +887,30 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "For each monitor separately, call it once per monitor."),
             StructuredTool.from_function(coroutine=computer_apps, name="computer_apps",
                 description="The apps running now with their memory and CPU, and which are safe to close."),
+            StructuredTool.from_function(coroutine=computer_use, name="computer_use",
+                description="Ask to use an app on this computer for a task (click, type, fill in, go through menus): once per "
+                            "task, they OK it on their phone, then you can act in that app for 20 minutes. Opens the app if "
+                            "it isn't open. app: its name (Firefox, Files, Settings, Calculator...). task: what you'll do, "
+                            "in a line they'll read before saying yes. Answers with the app's screen."),
+            StructuredTool.from_function(coroutine=computer_look, name="computer_look",
+                description="Read an app's window on this computer: every button, field, item and text on screen, each with "
+                            "an id ([e12]) and what can be done to it. app empty: lists the open apps and windows. "
+                            "window: part of a window's title, when it has several."),
+            StructuredTool.from_function(coroutine=computer_act, name="computer_act",
+                description="Do one thing to one element of a snapshot from computer_look/computer_act: action CLICK, "
+                            "TYPE (value: a field's new text; in a document it's written at the cursor), REPLACE (a document's whole text: "
+                            "only when they asked for that), SET_VALUE (sliders, spin boxes), FOCUS, READ (its full "
+                            "text), SCROLL_TO. If the app changed since the snapshot nothing happens and you get the new "
+                            "screen to decide again. Answers with the app's screen after it settles."),
+            StructuredTool.from_function(coroutine=computer_keys, name="computer_keys",
+                description="Press keys in the window in front: chords like \"enter\", \"ctrl+s\", \"ctrl+l\", "
+                            "\"page_down\", \"alt+left\", or \"text:words to type\". Use after FOCUS on a field when "
+                            "a field has no TYPE, or for shortcuts. app: whose screen to answer with."),
+            StructuredTool.from_function(coroutine=computer_subtask, name="computer_subtask",
+                description="Hand a run of simple steps in an app (fill a form, go through settings, find and open an "
+                            "item) to a fast helper that clicks through it and reports DONE, BLOCKED or NEEDS_INPUT with "
+                            "the steps it took. goal: one clear outcome. inputs: every piece of text it may type, exactly. "
+                            "done_when: what the screen shows when it's done. Saves your own steps on long, simple runs."),
             StructuredTool.from_function(coroutine=computer_close_app, name="computer_close_app",
                 description="Close a running app by its name exactly as computer_apps lists it (all its windows and "
                             "processes; unsaved work may be lost). force: kill it at once if it hung."),

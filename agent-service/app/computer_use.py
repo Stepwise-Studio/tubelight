@@ -1,0 +1,126 @@
+"""Computer use: a teammate works in the apps on the user's own computer (runner/tubelight_driver.py does the reading
+and acting there, through Linux accessibility).
+
+- One OK per task, not per click: `computer_use(app, task)` asks once; the user's OK lets that teammate act in that
+  app on that computer for GRANT_S. Looking needs no OK (like a screenshot in the computer's own chat).
+- Every action goes to an element of a snapshot by id; the computer refuses it if the app changed since, and answers
+  with a fresh snapshot, so a click never lands on something nobody saw.
+- `subtask`: a run of simple steps (fill this form, open that menu) handed to a fast, cheap model that picks each
+  action from what's on screen, so the teammate's own model only plans. It may only type text the teammate gave it
+  (`inputs`); it stops with NEEDS_INPUT when a field needs something else.
+"""
+import json
+import logging
+import re
+import time
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from . import computers, config, llm
+
+log = logging.getLogger(__name__)
+GRANT_S = 20 * 60
+_grants: dict[tuple[str, str], dict[str, float]] = {}  # (owner, computer) -> app (lowercase) -> until
+# ponytail: grants and snapshot owners live in this process; a restart asks again, which is the safe direction.
+
+
+def grant(owner_id: str, cid: str, *apps: str) -> None:
+    g = _grants.setdefault((owner_id, cid), {})
+    for a in apps:
+        if a:
+            g[a.strip().lower()] = time.time() + GRANT_S
+
+
+def granted(owner_id: str, cid: str, app: str) -> bool:
+    now, want = time.time(), app.strip().lower()
+    return any(until > now and (a in want or want in a) for a, until in (_grants.get((owner_id, cid)) or {}).items())
+
+
+def any_granted(owner_id: str, cid: str) -> bool:
+    return any(until > time.time() for until in (_grants.get((owner_id, cid)) or {}).values())
+
+
+def head(got: dict[str, Any]) -> str:
+    """The first line of an action's answer: what happened."""
+    return {
+        "done": f"Done: {got.get('did', 'it')}.",
+        "changed": f"Nothing done: {got.get('why')}. This is the app now; decide again.",
+        "stale": f"Nothing done: {got.get('why')}. This is the app now; decide again.",
+        "running": "It was already open.",
+        "opened": "Opened it.",
+    }.get(got.get("status", ""), "")
+
+
+def apps_line(rows: list[dict]) -> str:
+    return "; ".join(f"{a['app']}: " + ", ".join(("▶ " if w["active"] else "") + w["title"] for w in a["windows"]) for a in rows) \
+        or "No app windows are open."
+
+
+SUBTASK = """You operate one app on a Linux computer for a teammate, one action at a time.
+Goal: {goal}
+Done when: {done}
+Text you may type (use exactly these, nothing else): {inputs}
+
+Each element on screen is "[id] role “name” = value (actions)". Find the element by its exact name and copy its id
+from that same line (ids are not in any order). Check the steps so far: each says what really happened; if one
+went wrong, fix it (clear, backspace) before going on. Reply with one JSON object:
+{{"action": "CLICK|TYPE|SET_VALUE|FOCUS|KEYS|DONE|BLOCKED|NEEDS_INPUT", "element": "e12", "value": "...", "keys": ["enter"], "why": "short"}}
+- CLICK, TYPE, SET_VALUE, FOCUS: an element id from the screen below that offers that action.
+- TYPE replaces the field's text with "value", which must be one of the allowed texts.
+- KEYS: chords like "enter", "ctrl+s", "page_down", sent to the window in front.
+- DONE when the goal is reached (check the screen, don't assume); BLOCKED if it can't be done (say why);
+  NEEDS_INPUT if a field needs text you weren't given (name the field in "why").
+Steps so far:
+{steps}
+
+Screen now:
+{screen}"""
+
+
+def _json(text: str) -> dict[str, Any]:
+    m = re.search(r"\{.*\}", text or "", re.S)
+    try:
+        return json.loads(m.group(0)) if m else {}
+    except ValueError:
+        return {}
+
+
+async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: str, max_steps: int) -> str:
+    """The fast-model loop: look, pick an action allowed on what's on screen, act, until done or stuck."""
+    got = await computers.call(cid, "ui_look", {"app": app, "full": True}, 30)
+    snap, screen = got["snapshot"], got["text"]
+    steps: list[str] = []
+    model = llm.chat_model(config.CU_MODEL, json=True)
+    for _ in range(max(1, min(max_steps, 25))):
+        res = await model.ainvoke([
+            SystemMessage("You are a precise UI operator. Answer with JSON only."),
+            HumanMessage(SUBTASK.format(goal=goal, done=done_when or "the goal is visibly reached",
+                                        inputs=json.dumps(inputs or []), steps="\n".join(steps) or "(none yet)", screen=screen)),
+        ])
+        d = _json(res.text)
+        action = str(d.get("action", "")).upper()
+        why = str(d.get("why", ""))[:200]
+        if len(steps) >= 3 and steps[-1] == steps[-2] == steps[-3] and not steps[-1].startswith("keys"):
+            action, why = "BLOCKED", "it kept repeating the same step"
+        if action in ("DONE", "BLOCKED", "NEEDS_INPUT"):
+            return f"{action}: {why}\nSteps: " + ("; ".join(steps) or "none") + f"\n{screen}"
+        try:
+            if action == "KEYS":
+                keys = [str(k) for k in (d.get("keys") or [])][:6]
+                r = await computers.call(cid, "ui_keys", {"keys": keys, "app": app, "full": True}, 30)
+                steps.append(f"keys {', '.join(keys)}")
+            else:
+                value = str(d.get("value") or "")
+                if action == "TYPE" and not any(value and value in i for i in inputs or []):
+                    return (f"NEEDS_INPUT: it wanted to type {value!r}, which isn't in the inputs ({why})\nSteps: "
+                            + ("; ".join(steps) or "none") + f"\n{screen}")
+                r = await computers.call(cid, "ui_act", {"snapshot": snap, "element": str(d.get("element")), "action": action,
+                                                         "value": value, "full": True}, 40)
+                steps.append(f"{action.lower()} {d.get('element')}{' ' + repr(value) if value else ''}: "
+                             + (r.get("did") or r.get("status") or "") + ("" if r.get("status") == "done" else f" ({r.get('why')})"))
+        except Exception as e:  # a wrong id or action: tell the model and go on
+            steps.append(f"{action.lower()} {d.get('element')}: failed ({str(e)[:120]})")
+            continue
+        snap, screen = r.get("snapshot", snap), r.get("text", screen)
+    return f"STOPPED after {max_steps} steps without reaching the goal.\nSteps: " + "; ".join(steps) + f"\n{screen}"

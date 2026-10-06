@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "12"  # 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "13"  # 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -71,7 +71,7 @@ def note(**fields) -> None:
 
 # Updates: newer runner files land in ~/.local/share/tubelight (no sudo needed); whichever copy is newest runs.
 UPDATES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tubelight"
-PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py")
+PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "tubelight_driver.py")
 
 
 def version_of(text: str) -> int:
@@ -397,6 +397,49 @@ def screenshot(c: dict, a: dict) -> dict:
             "monitors": [f"{i} {m['name']}" for i, m in enumerate(screens, 1)]}
 
 
+# ------------------------------------------------------------------ using apps (tubelight_driver: AT-SPI + keys)
+def _driver(c: dict, a: dict):
+    if not full(c, a):
+        raise PermissionError("Using apps needs full access.")
+    if not c.get("use_apps"):
+        raise PermissionError("Using apps is off on this computer. Turn on “Let teammates use your apps” in Tubelight there.")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import tubelight_driver
+    return tubelight_driver
+
+
+def ui_apps(c: dict, a: dict) -> list:
+    return _driver(c, a).apps()
+
+
+def ui_look(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    snap = d.observe(a["app"], a.get("window") or "")
+    return {"snapshot": snap["snapshot"], "app": snap["app"], "text": d.text(snap)}
+
+
+def _with_text(d, r: dict) -> dict:
+    out = {k: v for k, v in r.items() if k not in ("elements",)}
+    if "elements" in r:
+        out["text"] = d.text(r)
+    return out
+
+
+def ui_act(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    return _with_text(d, d.act(a["snapshot"], a["element"], a["action"], str(a.get("value") or "")))
+
+
+def ui_keys(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    return _with_text(d, d.keys(list(a["keys"]), a.get("app") or ""))
+
+
+def ui_launch(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    return _with_text(d, d.launch(a["app"]))
+
+
 def monitors() -> list:
     """The screens as GNOME lays them out, left to right: name, connector and their place on the desktop."""
     try:
@@ -599,6 +642,7 @@ def box_close(c: dict, a: dict) -> str:
 
 OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
        "quit_app": quit_app, "screenshot": screenshot,
+       "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close}
 
@@ -645,7 +689,7 @@ def run() -> None:
             time.sleep(3)
             continue
         info = {"folders": [str(f) for f in folders(c)], "docker": docker, "shell": bool(shutil.which("bwrap")),
-                "full": c.get("full_access", True), "stats": stats(),
+                "full": c.get("full_access", True), "apps": bool(c.get("use_apps")), "stats": stats(),
                 "version": VERSION, "os": f"{platform.system()} {platform.release()}", **({"wait": 0} if first else {})}
         try:
             status, job = api(c, "/runner/poll", info, timeout=60)

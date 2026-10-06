@@ -19,7 +19,7 @@ const LABELS: Record<string, string> = {
   text: 'Text', content: 'Text', title: 'Title', head: 'From branch', base: 'Into branch', branch: 'Branch',
   owner: 'Owner', repo: 'Repository', diff: 'Changes', message: 'Message', commit_message: 'Commit message',
 }
-const label = (k: string) => ({ cmd: 'Command', cwd: 'In folder', folder: 'Drive folder', pattern: 'Files' } as Record<string, string>)[k] ?? LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
+const label = (k: string) => ({ cmd: 'Command', cwd: 'In folder', folder: 'Drive folder', pattern: 'Files', app: 'App', task: 'To do' } as Record<string, string>)[k] ?? LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
 
 function shapeOf(a: Approval): Shape {
   const d = a.draft
@@ -42,7 +42,7 @@ const approveLabel: Record<Shape, string> = { email: 'Approve and send', post: '
 function fields(a: Approval, shape: Shape) {
   // A computer action: just what it does (the title says why; sudo and timeouts are plumbing).
   if (a.tool_name.startsWith('computer_')) {
-    return ['cmd', 'path', 'folder', 'pattern', 'content', ...(a.draft.cwd && a.draft.cwd !== '~' ? ['cwd'] : [])].filter((k) => k in a.draft && a.draft[k] !== '')
+    return ['app', 'task', 'cmd', 'path', 'folder', 'pattern', 'content', ...(a.draft.cwd && a.draft.cwd !== '~' ? ['cwd'] : [])].filter((k) => k in a.draft && a.draft[k] !== '')
   }
   const keys = Object.keys(a.draft)
   const first = ORDER[shape].filter((k) => keys.includes(k))

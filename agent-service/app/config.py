@@ -19,6 +19,7 @@ DEFAULT_MODEL = env("DEFAULT_MODEL", "openrouter:nvidia/nemotron-3-super-120b-a1
 ROUTER_MODEL = env("ROUTER_MODEL", DEFAULT_MODEL)
 LEARN_MODEL = env("LEARN_MODEL", "gemini:gemini-3.5-flash-lite")
 KEEPER_MODEL = env("KEEPER_MODEL", LEARN_MODEL)  # brief + follow-up reconciliation after each reply (brief.py)
+CU_MODEL = env("CU_MODEL", "groq:openai/gpt-oss-120b")  # computer use: the fast helper that clicks through subtasks
 LIVE_MODEL = env("LIVE_MODEL", "gemini-3.8-live")
 DICTATE_MODEL = env("DICTATE_MODEL", "gemini-3.5-transcribe-live")
 COMPOSIO_API_KEY = env("COMPOSIO_API_KEY")

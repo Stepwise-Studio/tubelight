@@ -36,6 +36,7 @@ FILES = {  # what the runner downloads: itself, and what it needs to build sandb
     "tubelight-runner.py": ROOT / "runner" / "tubelight-runner.py",
     "qrcodegen.py": ROOT / "runner" / "qrcodegen.py",
     "tubelight_window.py": ROOT / "runner" / "tubelight_window.py",
+    "tubelight_driver.py": ROOT / "runner" / "tubelight_driver.py",
     "sandbox.Dockerfile": ROOT / "sandbox" / "Dockerfile",
     "squid.conf": ROOT / "deploy" / "squid.conf",
 }
@@ -230,7 +231,7 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     online = time.time() - seen.get("at", 0) < ONLINE_S
     return {"id": row["id"], "name": row["name"], "os": seen.get("os") or row.get("os"), "online": online,
             "last_seen": seen.get("at"), "folders": seen.get("folders") or [], "docker": bool(seen.get("docker")),
-            "shell": bool(seen.get("shell")), "full": bool(seen.get("full")), "version": seen.get("version"),
+            "shell": bool(seen.get("shell")), "full": bool(seen.get("full")), "apps": bool(seen.get("apps")), "version": seen.get("version"),
             "teammate_id": row.get("teammate_id"), "ask": row.get("ask", True), "stats": seen.get("stats") or {}}
 
 
@@ -310,7 +311,7 @@ def take_password(owner_id: str, cmd: str) -> str | None:
 # ------------------------------------------------------------------ the runner's side
 async def poll(cid: str, info: dict[str, Any]) -> dict[str, Any] | None:
     _seen[cid] = {"at": time.time(), "folders": [str(f) for f in info.get("folders") or []][:20],
-                  "docker": bool(info.get("docker")), "shell": bool(info.get("shell")), "full": bool(info.get("full")),
+                  "docker": bool(info.get("docker")), "shell": bool(info.get("shell")), "full": bool(info.get("full")), "apps": bool(info.get("apps")),
                   "stats": {k: v for k, v in (info.get("stats") or {}).items() if k in ("disk", "mem", "load", "battery", "charging")},
                   "version": str(info.get("version") or "")[:20], "os": str(info.get("os") or "")[:40]}
     wait = max(0.0, min(float(info.get("wait", POLL_S)), POLL_S))  # 0 on the runner's first poll: online at once
@@ -340,7 +341,8 @@ async def call(cid: str, op: str, args: dict[str, Any], timeout_s: float = 150) 
     needs = [(args.get("full"), 3, "full access from its chat"), (args.get("sudo"), 4, "admin commands"),
              (op in ("fs_get", "fs_put"), 6, "sending files"), (op == "job_start", 7, "long jobs"),
              (op == "live", 9, "live app usage"), (op in ("quit_app", "screenshot"), 10, "screenshots and closing apps"),
-             (op == "screenshot" and args.get("monitor"), 12, "one monitor's screenshot")]
+             (op == "screenshot" and args.get("monitor"), 12, "one monitor's screenshot"),
+             (op.startswith("ui_"), 13, "using apps")]
     missing = next((what for wanted, v, what in needs if wanted and version < v), None)
     if missing:  # it updates itself within 6 hours; restarting Tubelight on it updates it now
         raise RuntimeError(f"Tubelight on this computer is too old for {missing}. It updates itself within a few hours; "
@@ -459,6 +461,7 @@ def desktop_deb() -> tuple[str, bytes]:
         f"{opt}/tubelight-runner.py": ((runner / "tubelight-runner.py").read_bytes(), 0o755),
         f"{opt}/qrcodegen.py": ((runner / "qrcodegen.py").read_bytes(), 0o644),
         f"{opt}/tubelight_window.py": ((runner / "tubelight_window.py").read_bytes(), 0o644),
+        f"{opt}/tubelight_driver.py": ((runner / "tubelight_driver.py").read_bytes(), 0o644),
         f"{opt}/server.txt": (config.PUBLIC_URL.encode(), 0o644),
         "usr/share/icons/hicolor/256x256/apps/tubelight.png": ((runner / "tubelight.png").read_bytes(), 0o644),
         "usr/share/applications/studio.stepwise.Tubelight.desktop": ((

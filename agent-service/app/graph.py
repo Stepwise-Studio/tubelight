@@ -66,6 +66,7 @@ class RunCtx:
     brief: str = ""  # the running summary of this chat (brief.py)
     sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
     outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
+    ui_snaps: dict[str, str] = field(default_factory=dict)  # computer use: snapshot id -> the app it shows
     phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
     phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
     phone_mate: dict | None = None  # the phone's own teammate: the only one with the phone (others: ask_phone)
@@ -270,7 +271,10 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "computer_send_file sends one to their phone; computer_receive saves what they attached here; "
                      "computer_to_drive puts files or a folder's files into their Google Drive. "
                      "To see the screen use computer_screenshot (never scrot, grim or gnome-screenshot: Wayland blocks "
-                     "them). Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
+                     "them). To work IN an app (click, type, fill forms, menus): computer_look reads its window as elements with ids; "
+                     "computer_use(app, task) asks them once per task; then computer_act on those ids, computer_keys for "
+                     "shortcuts, computer_subtask to hand off a run of simple steps. Prefer this over commands for anything "
+                     "done in an app's window. Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
                      "\"Close <name>\") on the closable ones. To close or quit an app always call computer_close_app with "
                      "its name (it runs at once; never kill, pkill or killall); if the name isn't in your last "
                      "computer_apps list, call computer_apps first to get it exactly.")
