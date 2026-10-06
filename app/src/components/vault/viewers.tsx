@@ -21,6 +21,10 @@ import { Button, Icon, Markdown, Segment, Sheet, Skeleton, Squircle, Text, TextF
 import { localCopy, shareItem } from './actions'
 import { FileTile } from './file-tile'
 
+// Module constants: a list can't take new viewability settings while mounted.
+const SWIPE_SEEN = { itemVisiblePercentThreshold: 60 }
+const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen
+
 export function FileBody({ item, siblings, onIndex, chrome, onTap }: {
   item: Viewable
   /** Photos in the same place, for swiping between them. */
@@ -61,7 +65,7 @@ function Photos({ items, start, onIndex, onTap }: { items: Viewable[]; start: Vi
       showsHorizontalScrollIndicator={false}
       keyExtractor={(r) => r.id}
       onViewableItemsChanged={seen}
-      viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+      viewabilityConfig={SWIPE_SEEN}
       windowSize={3}
       renderItem={({ item }) => (
         <View style={{ width, height }}>
@@ -231,7 +235,7 @@ function Pdf({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: 
         getItemLayout={(_, i) => ({ ...layout[i], index: i })}
         initialScrollIndex={doc.start - 1}
         onViewableItemsChanged={seen}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 40 }}
+        viewabilityConfig={PAGE_SEEN}
         windowSize={5}
         renderItem={({ item: i }) => (
           <View style={{ paddingBottom: 12 }}>

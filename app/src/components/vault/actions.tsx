@@ -24,6 +24,7 @@ export function openItem(item: VaultItem) {
 
 /** The file on the phone (downloaded once into the cache), for sharing, PDFs and saving. */
 export async function localCopy(item: Pick<Viewable, 'id' | 'name' | 'size' | 'src'>) {
+  if (item.src.startsWith('file:')) return new File(item.src) // already on the phone (a file another app opened)
   const dir = Paths.cache
   const file = new File(dir, `vault-${item.id.replace(/[^\w-]+/g, '_').slice(-60)}-${item.name.replace(/[^\w.-]+/g, '_')}`)
   if (file.exists && (!item.size || file.size === item.size)) return file
