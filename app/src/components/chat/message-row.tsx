@@ -4,7 +4,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, File01Icon, FlashIcon,
+  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, FlashIcon, VaultIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -25,6 +25,8 @@ import {
 
 import { Capsule, type Tone } from './capsule'
 import { ImageViewer, saveImage } from './image-viewer'
+import { FileTile } from '@/components/vault/file-tile'
+import { saveAttachment } from '@/lib/vault'
 import { ConnectCard, QuestionCard } from './prompt-cards'
 import { SwipeToReply } from './swipe-reply'
 
@@ -560,12 +562,23 @@ async function openFile(a: Attachment) {
 function FileChip({ a }: { a: Attachment }) {
   const { c } = useTheme()
   const ext = a.name.split('.').pop()?.toUpperCase().slice(0, 4) ?? ''
+  const menu = () => {
+    haptic.light()
+    showMenu({
+      title: a.name,
+      items: [
+        { label: 'Download', icon: Download03Icon, onPress: () => openFile(a) },
+        { label: 'Save to Vault', icon: VaultIcon, onPress: () => saveAttachment({ path: a.path, name: a.name }).then(
+          () => toast({ title: 'Saved to your vault', body: a.name, tone: 'success' }),
+          (e) => toast({ title: 'Unable to save it', body: (e as Error).message, tone: 'error' })) },
+      ],
+    })
+  }
   return (
-    <Pressable onPress={() => openFile(a)} accessibilityRole="button" accessibilityLabel={`${a.name}, ${formatSize(a.size)}`} accessibilityHint="Downloads it">
+    <Pressable onPress={() => openFile(a)} onLongPress={menu} accessibilityRole="button" accessibilityLabel={`${a.name}, ${formatSize(a.size)}`}
+      accessibilityHint="Downloads it. Long-press to save it to your vault.">
     <Squircle style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, backgroundColor: c.wash, padding: 8, paddingRight: 12, minWidth: 180 }}>
-      <Squircle style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.panel, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon icon={File01Icon} size={18} color="ink2" />
-      </Squircle>
+      <FileTile item={a} size={36} />
       <View style={{ flexShrink: 1 }}>
         <Text variant="label" numberOfLines={1}>{a.name}</Text>
         <Text variant="footnote" color="ink3">{[ext, formatSize(a.size)].filter(Boolean).join(' · ')}</Text>

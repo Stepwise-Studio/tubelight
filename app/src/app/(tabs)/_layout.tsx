@@ -14,7 +14,8 @@ export default function TabsLayout() {
       screenLayout={({ children }) => <EdgeScreen height={inset}>{children}</EdgeScreen>}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: c.canvas } }}>
       <Tabs.Screen name="index" options={{ title: 'Inbox' }} />
-      <Tabs.Screen name="approvals" options={{ title: 'Approvals' }} />
+      <Tabs.Screen name="tasks" options={{ title: 'Tasks' }} />
+      <Tabs.Screen name="vault" options={{ title: 'Vault' }} />
       <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>

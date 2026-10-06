@@ -73,6 +73,9 @@ class PhoneModule : Module() {
     Function("usageAccess") { usageAccess() }
     Function("openUsageAccess") { start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
     Function("status") { status() }
+    AsyncFunction("pdfInfo") { path: String -> Pdf.info(path) }
+    AsyncFunction("pdfPage") { path: String, page: Int, width: Int -> Pdf.render(context, path, page, width) }
+    Function("pdfClose") { Pdf.close() }
     // The display's own corner radius in dp (Android 12+ reports it), so a glow can hug the screen's rounded edge.
     Function("screenRadius") {
       val insets = appContext.currentActivity?.window?.decorView?.rootWindowInsets

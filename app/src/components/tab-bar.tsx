@@ -5,7 +5,7 @@ import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
-import { InboxIcon, Stamp01Icon, UserCircleIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons'
+import { CheckListIcon, InboxIcon, UserCircleIcon, VaultIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons'
 
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
@@ -22,10 +22,11 @@ export function useTabBarInset() {
 }
 
 const icons: Record<string, IconSvgElement> = {
-  index: InboxIcon, approvals: Stamp01Icon, activity: WorkHistoryIcon, profile: UserCircleIcon,
+  index: InboxIcon, tasks: CheckListIcon, vault: VaultIcon, activity: WorkHistoryIcon, profile: UserCircleIcon,
 }
 
-/** Floating capsule (Telegram-style): blurred panel, a pill that slides to the active tab, Approvals badge. */
+/** Floating capsule (Telegram-style): blurred panel, a pill that slides to the active tab; Activity carries the
+ * badge for approvals waiting on you. */
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
@@ -60,13 +61,13 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             {state.routes.map((route, i) => {
               const focused = state.index === i
               const label = descriptors[route.key].options.title ?? route.name
-              const count = route.name === 'approvals' ? pendingApprovals.length : 0
+              const count = route.name === 'activity' ? pendingApprovals.length : 0
               return (
                 <Pressable
                   key={route.key}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: focused }}
-                  accessibilityLabel={count ? `${label}, ${count} waiting` : label}
+                  accessibilityLabel={count ? `${label}, ${count} waiting for you` : label}
                   onLayout={(e: LayoutChangeEvent) => {
                     const { x, width } = e.nativeEvent.layout
                     setSlots((s) => { const n = [...s]; n[i] = { x, w: width }; return n })
@@ -76,7 +77,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                     if (!focused && !e.defaultPrevented) { haptic.tap(); navigation.navigate(route.name, route.params) }
                   }}
                   onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
-                  style={{ width: 78, alignItems: 'center', justifyContent: 'center', gap: 2 }}
+                  style={{ width: 66, alignItems: 'center', justifyContent: 'center', gap: 2 }}
                 >
                   <View>
                     <Icon icon={icons[route.name] ?? InboxIcon} size={22} color={focused ? 'tube' : 'ink2'} strokeWidth={focused ? 2 : 1.5} />

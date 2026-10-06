@@ -10,6 +10,7 @@ import { KeyboardProvider } from 'react-native-keyboard-controller'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { SheetsHost } from '@/components/sheets-host'
+import { VaultSheetsHost } from '@/components/vault/actions'
 import { usePushRouting } from '@/lib/push-routing'
 import { useSession } from '@/lib/session'
 import { registerPhone, useNotificationSync, usePhoneActions } from '@/lib/phone'
@@ -20,7 +21,7 @@ import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
-const OWN_EDGE = new Set(['(tabs)', 'chat/[threadId]', 'sign-in'])
+const OWN_EDGE = new Set(['vault/file/[id]', '(tabs)', 'chat/[threadId]', 'sign-in'])
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -81,9 +82,12 @@ function Root() {
               <Stack.Screen name="computers" />
               <Stack.Screen name="scan" options={{ animation: 'fade' }} />
               <Stack.Screen name="link" />
+              <Stack.Screen name="vault/[id]" />
+              <Stack.Screen name="vault/file/[id]" options={{ animation: 'fade_from_bottom' }} />
             </Stack.Protected>
           </Stack>
           {signedIn && <SheetsHost />}
+          {signedIn && <VaultSheetsHost />}
           {signedIn && session && <PhoneHub userId={session.user.id} />}
           <PortalHost />
           <MenuHost />

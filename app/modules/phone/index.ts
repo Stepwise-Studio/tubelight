@@ -34,6 +34,12 @@ interface PhoneModule {
   status(): Record<string, unknown>
   /** The screen's corner radius in dp (0 if the phone doesn't say). */
   screenRadius(): number
+  /** A local PDF (file:// URI): page count and each page's size in points. */
+  pdfInfo(path: string): Promise<{ pages: number; sizes: [number, number][] }>
+  /** One page drawn at `width` px into the cache (JPEG): its file URI and pixel size. */
+  pdfPage(path: string, page: number, width: number): Promise<{ uri: string; width: number; height: number }>
+  /** Close the open PDF. */
+  pdfClose(): void
 }
 
 /** null in builds without the module (an older dev client). */
