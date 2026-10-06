@@ -4,11 +4,10 @@ import { BackHandler, FlatList, Pressable, RefreshControl, TextInput, View, useW
 import Animated, { FadeIn, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, BubbleChatIcon, Cancel01Icon, CheckListIcon, NotificationOff02Icon, Search01Icon, Settings01Icon, UserAdd01Icon, UserGroupIcon,
+  Add01Icon, Cancel01Icon, CheckListIcon, NotificationOff02Icon, Search01Icon, Settings01Icon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
 import { CrewList } from '@/components/crew'
-import { FabMenu } from '@/components/fab-menu'
 import { useChatNotify } from '@/components/notify-prefs'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ThreadAvatar } from '@/components/thread-avatar'
@@ -18,7 +17,7 @@ import type { Thread } from '@/lib/types'
 import { isComputer, useWorkspace, type Preview } from '@/lib/workspace'
 import { motion, type as typeScale, useTheme } from '@/theme'
 import {
-  Button, EmptyState, Icon, IconButton, ListRow, Logo, Press, Segment, Sheet, Skeleton, TeammateAvatar, Text, haptic, showMenu,
+  Button, EmptyState, Icon, IconButton, Logo, Press, Segment, Skeleton, TeammateAvatar, Text, haptic, showMenu,
 } from '@/ui'
 
 /**
@@ -93,7 +92,6 @@ export default function Chats() {
   const { width } = useWindowDimensions()
   const [page, setPage] = useState<Page>('inbox')
   const [query, setQuery] = useState('')
-  const [picker, setPicker] = useState(false)
   const pager = useRef<Animated.ScrollView>(null)
   const progress = useSharedValue(0)
   const onScroll = useAnimatedScrollHandler((e) => { progress.value = e.contentOffset.x / width })
@@ -129,29 +127,6 @@ export default function Chats() {
         <View style={{ width }}><Inbox query={query} /></View>
         <View style={{ width }}><CrewList query={query} /></View>
       </Animated.ScrollView>
-      {ws.teammates.length > 0 && (
-        <FabMenu
-          accessibilityLabel="New chat, project or teammate"
-          items={[
-            { label: 'Message a teammate', icon: BubbleChatIcon, onPress: () => setPicker(true) },
-            { label: 'New project', icon: UserGroupIcon, onPress: () => openSheet('project') },
-            { label: 'New teammate', icon: UserAdd01Icon, onPress: () => openSheet('teammate') },
-          ]}
-        />
-      )}
-      <Sheet open={picker} onClose={() => setPicker(false)} title="Message a teammate">
-        <View style={{ paddingHorizontal: 8 }}>
-          {ws.teammates.map((t) => (
-            <ListRow
-              key={t.id}
-              title={t.name}
-              subtitle={t.role}
-              leading={<TeammateAvatar teammate={t} size={40} interactive={false} state={ws.isWorking(t.id) ? 'working' : 'default'} />}
-              onPress={() => { setPicker(false); openThread(`dm:${t.id}`) }}
-            />
-          ))}
-        </View>
-      </Sheet>
     </View>
   )
 }

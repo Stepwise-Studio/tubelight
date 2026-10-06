@@ -1,20 +1,18 @@
-import { router, useLocalSearchParams } from 'expo-router'
+import { useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
-import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
+import Animated, { FadeIn } from 'react-native-reanimated'
 
 import { ActivityRow } from '@/components/activity-row'
-import { ApprovalCard } from '@/components/approval-card'
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { FILTER_TYPES, matchesFilter, type ActivityFilter } from '@/lib/activity'
 import { dayLabel, sameDay } from '@/lib/format'
 import { supabase } from '@/lib/supabase'
-import type { Activity, Approval, Teammate } from '@/lib/types'
+import type { Activity, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Badge, Button, EmptyState, Icon, Press, Segment, Skeleton, TeammateAvatar, Text, haptic } from '@/ui'
+import { Button, EmptyState, Segment, Skeleton, TeammateAvatar, Text, haptic } from '@/ui'
 
 const PAGE = 40
 
@@ -102,7 +100,6 @@ export default function ActivityTab() {
   const header = (
     <View>
       <TabHeader title="Activity" />
-      <NeedsYou who={who} />
       <Filters teammates={ws.teammates} who={who} setWho={setWho} filter={filter} setFilter={setFilter} />
     </View>
   )
@@ -208,54 +205,6 @@ function Filters({ teammates, who, setWho, filter, setFilter }: {
           <Segment<ActivityFilter> value={filter} onChange={setFilter} options={FILTERS} accessibilityLabel="Filter by type" />
         </View>
       </ScrollView>
-    </View>
-  )
-}
-
-/** Approvals waiting on you, on top of everything they did (decided ones land in the feed below). */
-function NeedsYou({ who }: { who: string | null }) {
-  const ws = useWorkspace()
-  const [all, setAll] = useState(false)
-  const list = ws.pendingApprovals.filter((a) => !who || a.teammate_id === who)
-  if (!list.length) return null
-  const shown = all ? list : list.slice(0, 2)
-  return (
-    <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)} style={{ paddingBottom: 16, gap: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20 }}>
-        <Text variant="overline" color="ink3" accessibilityRole="header">Needs you</Text>
-        <Badge count={list.length} />
-      </View>
-      {shown.map((a) => (
-        <Animated.View key={a.id} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
-          <Waiting approval={a} />
-        </Animated.View>
-      ))}
-      {list.length > 2 && (
-        <View style={{ paddingHorizontal: 16 }}>
-          <Button label={all ? 'Show fewer' : `Show all ${list.length}`} variant="soft" size="sm" fullWidth onPress={() => { haptic.tap(); setAll((v) => !v) }} />
-        </View>
-      )}
-    </Animated.View>
-  )
-}
-
-function Waiting({ approval }: { approval: Approval }) {
-  const ws = useWorkspace()
-  const title = ws.threadTitle(approval.thread_id)
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 6 }}>
-      <Press
-        radius={8}
-        static
-        onPress={() => router.push({ pathname: '/chat/[threadId]', params: { threadId: approval.thread_id } })}
-        accessibilityLabel={`Open ${title}`}
-        outerStyle={{ alignSelf: 'flex-start', marginLeft: -6 }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, minHeight: 32 }}
-      >
-        <Text variant="footnote" color="ink3">{approval.thread_id.startsWith('dm:') ? `Chat with ${title}` : title}</Text>
-        <Icon icon={ArrowRight01Icon} size={14} color="ink3" />
-      </Press>
-      <ApprovalCard approval={approval} teammate={ws.teammate(approval.teammate_id)} onDecided={ws.refresh} />
     </View>
   )
 }

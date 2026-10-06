@@ -1,15 +1,13 @@
 // A to-do, full screen, Linear's way: close, the list it's in (Personal or a project) and send along the top; a big
-// title and notes; and above the keyboard a panel of properties (status, priority, assignee, due date) with a row of
-// writing tools. `new` makes one; an id opens it, saving as you go. Assigning a teammate hands it to them: it lands in
+// title and notes; and above the keyboard a panel of properties (status, priority, assignee, due date). `new` makes one; an id opens it, saving as you go. Assigning a teammate hands it to them: it lands in
 // their chat and they get on with it.
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
-import { Keyboard, ScrollView, TextInput, View, type NativeSyntheticEvent, type TextInputSelectionChangeEventData } from 'react-native'
+import { Keyboard, ScrollView, TextInput, View } from 'react-native'
 import { KeyboardStickyView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  ArrowRight01Icon, ArrowUp02Icon, AtIcon, Calendar03Icon, Cancel01Icon, CheckListIcon, Delete02Icon,
-  LeftToRightListBulletIcon, QuoteDownIcon, SourceCodeIcon, Tick02Icon, UserCircleIcon,
+  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, CheckListIcon, Delete02Icon, Tick02Icon, UserCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 import { DayPicker } from '@/components/tasks/day-picker'
@@ -49,7 +47,6 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
   // A picker gets the whole bottom of the screen: the keyboard goes first.
   const setPicker = (p: Picker) => { if (p) Keyboard.dismiss(); setPickerState(p) }
   const [saving, setSaving] = useState(false)
-  const sel = useRef({ start: 0, end: 0 })
   const titleRef = useRef<TextInput>(null)
   const notesRef = useRef<TextInput>(null)
   const editing = !!todo
@@ -92,18 +89,6 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
     }
   }
 
-  /** The writing tools: start the current line of the notes as a list, a checklist, a quote or code. */
-  const insert = (prefix: string) => {
-    haptic.tap()
-    const at = sel.current.start
-    const lineStart = d.notes.lastIndexOf('\n', at - 1) + 1
-    const notes = prefix === '```'
-      ? `${d.notes.slice(0, at)}${at && d.notes[at - 1] !== '\n' ? '\n' : ''}\`\`\`\n\n\`\`\`${d.notes.slice(at)}`
-      : d.notes.slice(0, lineStart) + prefix + d.notes.slice(lineStart)
-    setD((x) => ({ ...x, notes }))
-    notesRef.current?.focus()
-  }
-
   const project = ws.projects.find((p) => p.id === d.project_id)
   const mate = d.assignee ? ws.teammate(d.assignee) : null
   const due = d.due ? dueLabel(d.due) : null
@@ -127,12 +112,11 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 28, paddingBottom: 220, gap: 10 }}>
-        <TextInput ref={titleRef} value={d.title} onChangeText={(title) => setD((x) => ({ ...x, title }))}
+        <TextInput cursorColor={c.tube} selectionColor={c.tube} selectionHandleColor={c.tube} ref={titleRef} value={d.title} onChangeText={(title) => setD((x) => ({ ...x, title }))}
           placeholder="To-do title" placeholderTextColor={c.ink4} multiline maxLength={300}
           submitBehavior="blurAndSubmit" returnKeyType="next" onSubmitEditing={() => notesRef.current?.focus()}
           style={[type.title, { color: c.ink, padding: 0 }]} accessibilityLabel="Title" />
-        <TextInput ref={notesRef} value={d.notes} onChangeText={(notes) => setD((x) => ({ ...x, notes }))}
-          onSelectionChange={(e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => { sel.current = e.nativeEvent.selection }}
+        <TextInput cursorColor={c.tube} selectionColor={c.tube} selectionHandleColor={c.tube} ref={notesRef} value={d.notes} onChangeText={(notes) => setD((x) => ({ ...x, notes }))}
           placeholder="Add notes…" placeholderTextColor={c.ink4} multiline maxLength={5000}
           style={[type.body, { fontSize: 17, lineHeight: 25, color: c.ink2, padding: 0, minHeight: 120, textAlignVertical: 'top' }]} accessibilityLabel="Notes" />
         {editing && (adder || todo?.thread_id) && (
@@ -158,21 +142,16 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
             <Pill glyph={<Icon icon={Calendar03Icon} size={17} color={due?.overdue ? 'danger' : due?.today ? 'warning' : due ? 'ink2' : 'ink3'} />}
               label={due?.label ?? 'Due date'} quiet={!due} tone={due?.overdue ? 'danger' : undefined} onPress={() => setPicker('due')} a11y="Due date" />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, height: 56, gap: 4 }}>
-            <IconButton icon={AtIcon} iconSize={22} accessibilityLabel="Assign a teammate" onPress={() => setPicker('assignee')} />
-            <IconButton icon={LeftToRightListBulletIcon} iconSize={22} accessibilityLabel="Bulleted list" onPress={() => insert('- ')} />
-            <IconButton icon={CheckListIcon} iconSize={22} accessibilityLabel="Checklist" onPress={() => insert('- [ ] ')} />
-            <IconButton icon={SourceCodeIcon} iconSize={22} accessibilityLabel="Code" onPress={() => insert('```')} />
-            <IconButton icon={QuoteDownIcon} iconSize={22} accessibilityLabel="Quote" onPress={() => insert('> ')} />
-            <View style={{ flex: 1 }} />
-            {editing && (
+          {editing && (
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 14, height: 52, alignItems: 'center' }}>
               <IconButton icon={Delete02Icon} iconSize={21} color={c.ink3} accessibilityLabel="Delete to-do" onPress={async () => {
                 if (!await confirm({ title: 'Delete this to-do?', body: todo!.title, confirmLabel: 'Delete to-do', destructive: true })) return
                 router.back()
                 deleteTodo(todo!.id).catch((e) => toast({ title: 'Unable to delete', body: (e as Error).message, tone: 'error' }))
               }} />
-            )}
-          </View>
+            </View>
+          )}
+          {!editing && <View style={{ height: 12 }} />}
         </View>
       </KeyboardStickyView>
 

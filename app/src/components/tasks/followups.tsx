@@ -147,7 +147,7 @@ export function FollowupSheet({ f, open, onClose }: { f: Followup | null; open: 
           <Icon icon={ArrowRight01Icon} size={16} color="ink3" />
         </Press>
 
-        <TextInput value={what} onChangeText={setWhat} multiline maxLength={500} placeholder="What to do then"
+        <TextInput cursorColor={c.tube} selectionColor={c.tube} selectionHandleColor={c.tube} value={what} onChangeText={setWhat} multiline maxLength={500} placeholder="What to do then"
           placeholderTextColor={c.ink4} accessibilityLabel="What to do then"
           style={[type.headline, { color: c.ink, padding: 0, minHeight: 44 }]} />
 
@@ -167,7 +167,7 @@ export function FollowupSheet({ f, open, onClose }: { f: Followup | null; open: 
         ) : (
           <View style={{ gap: 6 }}>
             <Text variant="label" color="ink3">It happens when</Text>
-            <TextInput value={until} onChangeText={setUntil} maxLength={300} placeholder="the design tweak is done"
+            <TextInput cursorColor={c.tube} selectionColor={c.tube} selectionHandleColor={c.tube} value={until} onChangeText={setUntil} maxLength={300} placeholder="the design tweak is done"
               placeholderTextColor={c.ink4} accessibilityLabel="It happens when"
               style={[type.body, { color: c.ink, borderWidth: 1, borderColor: c.edge, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: c.panel }]} />
             <Text variant="footnote" color="ink3">The chat is watched for it; {owner?.name ?? 'the group'} picks it up then.</Text>
