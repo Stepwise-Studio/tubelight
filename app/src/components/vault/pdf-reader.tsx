@@ -1,7 +1,7 @@
 // The PDF reader: pages drawn by Android itself (PdfRenderer), the way Preview reads.
 // - Zoom: pinch (live, around your fingers) or double-tap; on release the pages are laid out again at that size and
 //   redrawn sharp, so zoomed text is real resolution, and you scroll the zoomed document both ways.
-// - Pages: a sidebar of thumbnails to scroll through and jump from; the page count jumps to a page number.
+// - Pages: a floating tray of thumbnails (its button in the corner) to scroll through and jump from; the page count jumps to a page number.
 // - Search: Android 15+ reads the text layer; every match is highlighted on its page, with next/previous.
 // It opens where you left off.
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -9,20 +9,20 @@ import { Image } from 'expo-image'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewToken } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { SlideInLeft, SlideOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
+import Animated, { FadeInLeft, FadeOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
 import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
 
 import { Phone } from '@/lib/phone'
 import { type Viewable } from '@/lib/vault'
 import { motion, useTheme } from '@/theme'
-import { Button, Icon, IconButton, Sheet, Skeleton, Squircle, Text, TextField, haptic } from '@/ui'
+import { Button, Icon, IconButton, Sheet, Skeleton, Squircle, Text, TextField, elevation, haptic } from '@/ui'
 
 import { localCopy } from './actions'
 
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
 const GAP = 12
 const MAX_ZOOM = 4
-const RAIL = 112 // the page sidebar
+const RAIL = 88 // the page tray's width
 const QUICK = motion.timing(motion.duration.quick) // plain objects, so worklets can use them
 const FAST = motion.timing(motion.duration.fast)
 const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen (a constant: lists can't take new settings)
@@ -34,7 +34,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   onCover: (covered: boolean) => void
   fallback: (note?: string) => React.ReactNode
 }) {
-  const { c } = useTheme()
+  const { c, scheme } = useTheme()
   const { width, height } = useWindowDimensions()
   const [doc, setDoc] = useState<{ uri: string; sizes: [number, number][]; start: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +73,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   }, [page, doc, key])
   const seen = useCallback((v: { viewableItems: ViewToken<number>[] }) => { if (v.viewableItems[0]) setPage((v.viewableItems[0].index ?? 0) + 1) }, [])
 
-  const side = rail ? RAIL : 0 // the page sidebar takes the left; pages fit beside it
+  const side = rail ? RAIL + 12 : 0 // the page tray floats on the left; pages fit beside it
   const base = width - 24 - side // a page's width at zoom 1
   const pw = base * zoom
   const layoutAt = useCallback((z: number) => (doc?.sizes ?? []).reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
@@ -214,23 +214,32 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
         </Animated.View>
       </GestureDetector>
 
-      {/* Pages: thumbnails to scroll through */}
+      {/* Pages: a floating tray of thumbnails, with the tube marking where you are in the document */}
       {rail && (
-        <Animated.View entering={SlideInLeft.duration(motion.duration.fast).easing(motion.ease.smoothOut)} exiting={SlideOutLeft.duration(motion.duration.quick)}
-          style={{ position: 'absolute', left: 0, top: chrome.top, bottom: 0, width: RAIL, backgroundColor: c.canvas, borderRightWidth: 1, borderColor: c.line }}>
-          <Rail uri={doc.uri} sizes={doc.sizes} page={page} bottom={chrome.bottom + 88} onPick={(n) => { haptic.tap(); go(n) }} />
+        <Animated.View entering={FadeInLeft.duration(motion.duration.fast).easing(motion.ease.smoothOut)} exiting={FadeOutLeft.duration(motion.duration.quick)}
+          style={[{ position: 'absolute', left: 12, top: chrome.top + 12, bottom: chrome.bottom + 18 + 44 + 12, width: RAIL, borderRadius: 24 }, elevation(scheme)]}>
+          <Squircle style={{ flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
+            <Rail uri={doc.uri} sizes={doc.sizes} page={page} onPick={(n) => { haptic.tap(); go(n) }} />
+          </Squircle>
         </Animated.View>
       )}
 
-      {/* The toolbar: pages, where you are, search */}
+      {/* Pages, on their own in the corner */}
+      {!finding && (
+        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+          style={{ position: 'absolute', left: 16, bottom: chrome.bottom + 18 }}>
+          <Pressable onPress={() => { haptic.tap(); setRail((r) => !r) }} accessibilityLabel={rail ? 'Hide pages' : 'Show pages'} hitSlop={6}
+            style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: rail ? c.tube : 'rgba(24,24,27,0.9)' }}>
+            <Icon icon={SidebarLeftIcon} size={19} color={rail ? c.onTube : '#fff'} strokeWidth={1.8} />
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {/* Where you are, and search */}
       {!finding && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
           style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
-          <Squircle style={{ borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.9)', flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 4 }}>
-            <Pressable onPress={() => { haptic.tap(); setRail((r) => !r) }} accessibilityLabel={rail ? 'Hide pages' : 'Show pages'} hitSlop={6}
-              style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon icon={SidebarLeftIcon} size={19} color={rail ? c.tube : '#fff'} strokeWidth={1.8} />
-            </Pressable>
+          <Squircle style={{ borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.9)', flexDirection: 'row', alignItems: 'center', height: 44, paddingLeft: 10, paddingRight: 4 }}>
             <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
               style={{ paddingHorizontal: 8, height: 40, justifyContent: 'center' }}>
               <Text variant="label" color="#fff" tabular>{page} / {pages}</Text>
@@ -280,36 +289,52 @@ function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
   )
 }
 
-/** The page sidebar: every page small, the one you're on outlined; it keeps the current page in view. */
-function Rail({ uri, sizes, page, bottom, onPick }: { uri: string; sizes: [number, number][]; page: number; bottom: number; onPick: (n: number) => void }) {
+/** The page tray: every page small and dimmed, the one you're on lit with its number in a tube pill, and along
+ * the edge a little lit tube showing where you are in the whole document (Tubelight's own mark). */
+function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, number][]; page: number; onPick: (n: number) => void }) {
   const { c } = useTheme()
   const ref = useRef<FlatList<number>>(null)
-  const tw = RAIL - 50 // a thumbnail's width
+  const [box, setBox] = useState(0)
+  const tw = RAIL - 32 // a thumbnail's width (the tube runs down the right edge)
   const rows = useMemo(() => sizes.reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
     const prev = out[out.length - 1]
-    out.push({ length: (tw * h) / w + 34, offset: prev ? prev.offset + prev.length : 12 })
+    out.push({ length: (tw * h) / w + 32, offset: prev ? prev.offset + prev.length : 12 })
     return out
   }, []), [sizes, tw])
-  const { height } = useWindowDimensions()
-  const near = (p: number) => Math.max(0, (rows[p - 1]?.offset ?? 0) - height * 0.3)
+  const near = (p: number) => Math.max(0, (rows[p - 1]?.offset ?? 0) - box * 0.35)
   const [start] = useState(() => near(page))
-  useEffect(() => { ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (box) ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page, box]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The tube: its length is one page's share of the track, its place is the page's place in the document.
+  const track = Math.max(0, box - 28)
+  const tube = Math.max(18, Math.min(track, track / sizes.length))
+  const at = sizes.length > 1 ? ((page - 1) / (sizes.length - 1)) * (track - tube) : 0
+  const tubeStyle = useAnimatedStyle(() => ({ transform: [{ translateY: withTiming(at, FAST) }] }), [at])
   return (
-    <FlatList ref={ref} data={sizes.map((_, i) => i)} keyExtractor={(i) => String(i)} contentOffset={{ x: 0, y: start }}
-      getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: bottom }} showsVerticalScrollIndicator={false}
-      renderItem={({ item: i }) => {
-        const on = i === page - 1
-        const h = (tw * sizes[i][1]) / sizes[i][0]
-        return (
-          <Pressable onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} style={{ alignItems: 'center', height: h + 34 }}>
-            <View style={{ padding: 3, borderRadius: 7, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}>
-              <Thumb uri={uri} index={i} width={tw} height={h} />
-            </View>
-            <Text variant="footnote" color={on ? 'tube' : 'ink3'} tabular style={{ marginTop: 3, fontSize: 11 }}>{i + 1}</Text>
-          </Pressable>
-        )
-      }}
-    />
+    <View style={{ flex: 1 }} onLayout={(e) => setBox(e.nativeEvent.layout.height)}>
+      <FlatList ref={ref} data={sizes.map((_, i) => i)} keyExtractor={(i) => String(i)} contentOffset={{ x: 0, y: start }}
+        getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 10 }} showsVerticalScrollIndicator={false}
+        renderItem={({ item: i }) => {
+          const on = i === page - 1
+          const h = (tw * sizes[i][1]) / sizes[i][0]
+          return (
+            <Pressable onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} accessibilityState={{ selected: on }}
+              style={{ width: tw, height: h + 32, alignItems: 'center' }}>
+              <View style={{ opacity: on ? 1 : 0.5, borderRadius: 6, borderWidth: 1, borderColor: on ? c.edge : c.line, overflow: 'hidden' }}>
+                <Thumb uri={uri} index={i} width={tw - 2} height={h - 2} />
+              </View>
+              <View style={{ marginTop: 5, minWidth: 22, height: 18, paddingHorizontal: 6, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : undefined }}>
+                <Text variant="footnote" color={on ? 'tube' : 'ink4'} tabular style={{ fontSize: 11, fontWeight: on ? '600' : '400' }}>{i + 1}</Text>
+              </View>
+            </Pressable>
+          )
+        }}
+      />
+      {track > 0 && (
+        <View pointerEvents="none" style={{ position: 'absolute', right: 8, top: 14, width: 3, height: track, borderRadius: 2, backgroundColor: c.line }}>
+          <Animated.View style={[{ position: 'absolute', left: -0.5, width: 4, height: tube, borderRadius: 2, backgroundColor: c.tube, boxShadow: `0 0 8px ${c.tubeGlow}` }, tubeStyle]} />
+        </View>
+      )}
+    </View>
   )
 }
 
