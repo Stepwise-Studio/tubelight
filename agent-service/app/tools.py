@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
-from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, phone, repo, sandbox, usage
+from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, phone, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -75,6 +75,7 @@ INTERNAL = {
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
     "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "todos": "read", "vault": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -82,7 +83,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -541,6 +542,106 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 "slide, one idea per slide, speaker notes for the detail. Never invent figures, stats or quotes: use "
                 "numbers they gave or a tool found, else a clear placeholder like [X%]. To change a file they attached, read it "
                 "(it's in their message) and make the new version.")))
+
+    if not helper:
+        async def todo_list(action: str, todo: str = "", title: str = "", notes: str | None = None, status: str = "",
+                            priority: int | None = None, due: str | None = None) -> str:
+            mates = await db.select("teammates", {"owner_id": f"eq.{ctx.owner_id}", "select": "id,name"})
+            names = {m["id"]: m["name"] for m in mates}
+            if action == "list":
+                rows = todos.open_and_recent(await todos.listing(ctx.owner_id))
+                return "\n".join(todos.describe(t, names) for t in rows) or "Their to-do list is empty."
+            fields = {k: v for k, v in {"notes": notes, "status": status or None, "priority": priority, "due": due}.items()
+                      if v is not None}
+            try:
+                if action == "add":
+                    t = await todos.add(ctx.owner_id, title, added_by=tm["id"], thread_id=ctx.thread_id, **fields)
+                    await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} added a to-do: {t['title']}", "added")
+                    return f"Added to their to-dos (the Tasks tab): {todos.describe(t, names)}"
+                t = await todos.find(ctx.owner_id, todo) if action in ("update", "delete") else None
+                if action in ("update", "delete") and not t:
+                    return "No single to-do matches that: list them and pass its [id]."
+                if action == "delete":
+                    await todos.remove(ctx.owner_id, t["id"])
+                    await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} removed a to-do: {t['title']}", "removed")
+                    return f"Removed: {t['title']}"
+                if action == "update":
+                    new = await todos.update(ctx.owner_id, t["id"], {**fields, **({"title": title} if title else {})})
+                    if new["status"] == "done" and t["status"] != "done":
+                        await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} completed a to-do: {new['title']}", "done")
+                    return f"Updated: {todos.describe(new, names)}"
+            except ValueError as e:
+                return str(e)
+            return "action is list, add, update or delete."
+
+        async def vault_files(action: str, path: str = "", query: str = "", folder: str = "") -> str:
+            rows = await vault.items(ctx.owner_id)
+            by_id = {r["id"]: r for r in rows}
+
+            def full(r: dict) -> str:
+                parts, at = [], r
+                while at:
+                    parts.append(at["name"])
+                    at = by_id.get(at.get("parent") or "")
+                return "/".join(reversed(parts))
+
+            paths = {full(r).lower(): r for r in rows}
+
+            def line(r: dict) -> str:
+                return f"- {full(r)}/" if r["kind"] == "folder" else f"- {full(r)} ({r['size'] / 1e6:.1f} MB, {r['mime']})"
+
+            if action == "list":
+                at = paths.get(folder.strip("/").lower()) if folder.strip("/") else None
+                if folder.strip("/") and (not at or at["kind"] != "folder"):
+                    return f"No folder {folder} in the vault."
+                kids = sorted((r for r in rows if (r.get("parent") or "") == (at["id"] if at else "")), key=lambda r: (r["kind"] != "folder", r["name"].lower()))
+                return "\n".join(line(r) for r in kids[:80]) or "Nothing there."
+            if action == "search":
+                q = query.lower().strip()
+                hits = [r for p, r in paths.items() if q and q in p]
+                return "\n".join(line(r) for r in hits[:30]) or f"Nothing in the vault matches {query}."
+            if action == "save":
+                folder_row = paths.get(folder.strip("/").lower()) if folder.strip("/") else None
+                parent = folder_row["id"] if folder_row and folder_row["kind"] == "folder" else ""
+                want = path.lower().strip()
+                mine = list(ctx.outgoing.get(tm["id"], []))
+                recent = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "owner_id": f"eq.{ctx.owner_id}",
+                                                      "select": "meta", "order": "created_at.desc", "limit": "60"})
+                atts = mine + [a for m in recent for a in ((m.get("meta") or {}).get("attachments") or [])]
+                hit = next((a for a in atts if want and want in str(a.get("name", "")).lower()), None)
+                if not hit:
+                    return "No file by that name in this chat to save."
+                data = await files._download(ctx.owner_id, hit["path"])
+                row = await vault.add_bytes(ctx.owner_id, hit["name"], data, parent, hit.get("mime") or "")
+                return f"Saved to their vault as {full(row) if row['parent'] else row['name']}."
+            r = paths.get(path.strip("/").lower())
+            if not r or r["kind"] != "file":
+                return f"No file {path} in the vault; search for it first."
+            if action == "read":
+                return await files.text_of(r["name"], r["mime"], await asyncio.to_thread(vault.read_bytes, ctx.owner_id, r["id"]))
+            if action == "attach":
+                if r["size"] > 25e6:
+                    return "That file is over 25 MB; tell them it's in their vault instead."
+                data = await asyncio.to_thread(vault.read_bytes, ctx.owner_id, r["id"])
+                ctx.outgoing.setdefault(tm["id"], []).append(await files.upload(ctx.owner_id, r["name"], data))
+                return f"{r['name']} is attached to your reply."
+            return "action is list, search, read, attach or save."
+
+        tools += [
+            StructuredTool.from_function(
+                coroutine=todo_list, name="todos",
+                description="Their own to-do list (the app's Tasks tab, Linear-style). action: list (open ones and the "
+                            "last week's done) | add (title; optional notes, priority 1 urgent..4 low, due YYYY-MM-DD, "
+                            "status backlog|todo|doing|done) | update (todo: its [id]; any of title, notes, status, "
+                            "priority, due; due '' clears it) | delete. Add one when they ask you to note a task for "
+                            "them; a follow-up is for when YOU will come back."),
+            StructuredTool.from_function(
+                coroutine=vault_files, name="vault",
+                description="Their vault: their own files (photos, PDFs, notes, documents) on their server. action: list "
+                            "(folder: a folder path, or empty for the top) | search (query: part of a name) | read (path: "
+                            "a file's path, gives its text) | attach (path: send them the file in your reply) | save (path: "
+                            "the name of a file attached in this chat or one you just made; folder: where, optional)."),
+        ]
 
     if images.available() and not helper:
         async def generate_image(prompt: str) -> str:

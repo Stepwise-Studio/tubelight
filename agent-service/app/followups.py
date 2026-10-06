@@ -53,6 +53,7 @@ async def note(f: dict[str, Any], event: str, by: str = "") -> None:
         "set": f"Follow-up set {when}: {f['what']}",
         "noted": f"Follow-up noted {when}: {f['what']}",
         "cancelled": f"{by} cancelled a follow-up: {f['what']}",
+        "changed": f"{by} changed a follow-up, now {when}: {f['what']}",
         "dropped": f"Follow-up dropped: {f['what']}",
         "done": f"Follow-up done: {f['what']}",
         "fired": f"Follow-up: {f['what']}",
@@ -102,6 +103,39 @@ async def history(owner_id: str, thread_id: str, limit: int = 20) -> list[dict[s
     items = await memory.store.asearch(DONE, filter={"owner_id": owner_id, "thread_id": thread_id}, limit=500)
     rows = sorted(({"id": i.key, **i.value} for i in items), key=lambda f: f.get("closed") or "", reverse=True)
     return rows[:limit]
+
+
+async def recent(owner_id: str, limit: int = 30) -> list[dict[str, Any]]:
+    """Finished follow-ups across every chat, latest first."""
+    items = await memory.store.asearch(DONE, filter={"owner_id": owner_id}, limit=1000)
+    rows = sorted(({"id": i.key, **i.value} for i in items), key=lambda f: f.get("closed") or "", reverse=True)
+    return rows[:limit]
+
+
+async def edit(key: str, owner_id: str, *, what: str | None = None, at: datetime | None = None,
+               until: str | None = None, check_by: datetime | None = None, by: str = "You") -> dict[str, Any] | None:
+    """The user changes a pending follow-up: its words, its time, or what it waits for (a time replaces a condition and
+    the other way round). The chat gets a capsule, and the owner's prompt lists the new version from then on."""
+    item = await memory.store.aget(NS, key)
+    if not item or item.value.get("owner_id") != owner_id:
+        return None
+    f = dict(item.value)
+    if what is not None:
+        if not what.strip():
+            raise ValueError("Say what the follow-up is for.")
+        f["what"] = what.strip()[:500]
+    if at:
+        if not datetime.now(UTC) < at < datetime.now(UTC) + timedelta(days=60):
+            raise ValueError("Pick a time in the future, within the next 60 days.")
+        f.update(at=_iso(at), until=None, check_by=None, poll_hours=None)
+    elif until is not None:
+        if not until.strip():
+            raise ValueError("Say what it waits for.")
+        f.update(at=None, until=until.strip()[:300], check_by=_iso(check_by))
+    f["claimed"] = None
+    await memory.store.aput(NS, key, f, index=False)
+    await note(f, "changed", by)
+    return {"id": key, **f}
 
 
 async def cancel(key: str, owner_id: str, event: str = "cancelled", by: str = "You") -> bool:

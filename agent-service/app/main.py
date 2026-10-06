@@ -15,13 +15,14 @@ from typing import Any, Literal
 import httpx
 import yaml
 from croniter import croniter
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, phone, push, reactions, repo, runs, sandbox, usage
+from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, phone, push, reactions, repo, runs, sandbox, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -77,7 +78,9 @@ def _dump_stacks() -> None:
 
 app = FastAPI(title="Tubelight agent service", lifespan=lifespan)
 # The home server's uplink is slow: compress anything sizeable (the app catalog shrinks ~5x).
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# Media is already compressed (and video needs plain byte ranges): vault files pass through as they are.
+app.add_middleware(GZipMiddleware, minimum_size=1024, exclude_content_types=(
+    *DEFAULT_EXCLUDED_CONTENT_TYPES, "video/*", "application/pdf", "image/heic", "image/heif"))
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -1207,3 +1210,192 @@ async def run_automation(rule_id: str, user: User = Depends(current_user)):
 async def test_rule(rule_id: str, user: User = Depends(current_user)):
     rule = await owned("event_rules", rule_id, user, "rule")
     return {"ok": True, "event_id": await events.test_rule(rule)}
+
+
+# ------------------------------------------------------------------ tasks: to-dos and every chat's follow-ups
+class TodoIn(BaseModel):
+    title: str
+    notes: str = ""
+    status: str = "todo"
+    priority: int = 0
+    due: str | None = None
+    project_id: str | None = None
+
+
+@app.get("/todos")
+async def list_todos(user: User = Depends(current_user)):
+    return {"todos": await todos.listing(user["id"])}
+
+
+@app.post("/todos")
+async def add_todo(body: TodoIn, user: User = Depends(current_user)):
+    try:
+        return await todos.add(user["id"], body.title, **body.model_dump(exclude={"title"}))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/todos/{todo_id}")
+async def edit_todo(todo_id: str, body: dict[str, Any], user: User = Depends(current_user)):
+    try:
+        t = await todos.update(user["id"], todo_id, body)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    if not t:
+        raise HTTPException(404, "That to-do is gone.")
+    return t
+
+
+@app.delete("/todos/{todo_id}")
+async def delete_todo(todo_id: str, user: User = Depends(current_user)):
+    if not await todos.remove(user["id"], todo_id):
+        raise HTTPException(404, "That to-do is gone.")
+    return {"ok": True}
+
+
+_FOLLOWUP_KEEP = ("id", "thread_id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at",
+                  "created", "status", "closed")
+
+
+@app.get("/followups")
+async def all_followups(user: User = Depends(current_user)):
+    """Every chat's follow-ups: pending (soonest first) and recently finished (latest first)."""
+    return {"pending": [{k: f.get(k) for k in _FOLLOWUP_KEEP} for f in await followups.pending(user["id"])],
+            "done": [{k: f.get(k) for k in _FOLLOWUP_KEEP} for f in await followups.recent(user["id"])]}
+
+
+class FollowupEdit(BaseModel):
+    what: str | None = None
+    at: datetime | None = None
+    until: str | None = None
+    check_by: datetime | None = None
+
+
+@app.patch("/followups/{followup_id}")
+async def edit_followup(followup_id: str, body: FollowupEdit, user: User = Depends(current_user)):
+    """The user changes a follow-up; its chat gets a capsule and its teammate sees the new version."""
+    for d in (body.at, body.check_by):
+        if d and d.tzinfo is None:
+            raise HTTPException(400, "Send times with their offset.")
+    try:
+        f = await followups.edit(followup_id, user["id"], what=body.what, at=body.at, until=body.until, check_by=body.check_by)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not f:
+        raise HTTPException(404, "That follow-up is already gone.")
+    return {k: f.get(k) for k in _FOLLOWUP_KEEP}
+
+
+@app.post("/followups/{followup_id}/now")
+async def followup_now(followup_id: str, user: User = Depends(current_user)):
+    """Do it now: the teammate picks it up in its chat straight away."""
+    f = next((f for f in await followups.pending(user["id"]) if f["id"] == followup_id), None)
+    if not f:
+        raise HTTPException(404, "That follow-up is already gone.")
+    if not await followups.fire(followup_id, "time"):
+        raise HTTPException(409, "It's already being picked up.")
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ vault: the user's files on this server
+@app.get("/vault")
+async def list_vault(user: User = Depends(current_user)):
+    rows = await vault.items(user["id"])
+    return {"items": [vault.public(user["id"], r) for r in rows], "usage": await vault.usage(user["id"])}
+
+
+class VaultFolder(BaseModel):
+    name: str
+    parent: str = ""
+
+
+@app.post("/vault/folders")
+async def add_vault_folder(body: VaultFolder, user: User = Depends(current_user)):
+    try:
+        return vault.public(user["id"], await vault.add_folder(user["id"], body.name, body.parent))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/vault/upload")
+async def upload_to_vault(file: UploadFile, parent: str = Form(""), user: User = Depends(current_user)):
+    tmp = vault.ROOT / user["id"] / f".in-{uuid.uuid4()}"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    try:
+        with tmp.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > vault.MAX_BYTES:
+                    raise HTTPException(413, "Files up to 100 MB for now.")
+                await asyncio.to_thread(out.write, chunk)
+        row = await vault.add_file(user["id"], file.filename or "file", tmp, size, parent, file.content_type or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        tmp.unlink(missing_ok=True)
+    return vault.public(user["id"], row)
+
+
+class VaultSave(BaseModel):
+    path: str
+    name: str
+    parent: str = ""
+
+
+@app.post("/vault/save")
+async def save_to_vault(body: VaultSave, user: User = Depends(current_user)):
+    """A chat attachment (a file a teammate made or you sent) kept in the vault."""
+    try:
+        data = await files._download(user["id"], body.path)
+        return vault.public(user["id"], await vault.add_bytes(user["id"], body.name, data, body.parent))
+    except PermissionError:
+        raise HTTPException(404, "That file is gone.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/vault/{item_id}")
+async def edit_vault_item(item_id: str, body: dict[str, Any], user: User = Depends(current_user)):
+    try:
+        row = await vault.update(user["id"], item_id, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not row:
+        raise HTTPException(404, "That item is gone.")
+    return vault.public(user["id"], row)
+
+
+@app.delete("/vault/{item_id}")
+async def delete_vault_item(item_id: str, user: User = Depends(current_user)):
+    if not await vault.remove(user["id"], item_id):
+        raise HTTPException(404, "That item is gone.")
+    return {"ok": True}
+
+
+@app.get("/vault/{item_id}/preview")
+async def preview_vault_item(item_id: str, user: User = Depends(current_user)):
+    row = await vault.get(user["id"], item_id)
+    if not row or row["kind"] != "file":
+        raise HTTPException(404, "That file is gone.")
+    try:
+        return await asyncio.to_thread(vault.preview, user["id"], item_id, row["name"], row["mime"])
+    except Exception as e:
+        log.warning("vault preview %s failed: %s", item_id, e)
+        return {"type": "error", "message": "This file couldn't be opened."}
+
+
+@app.get("/vault/f/{owner_id}/{item_id}")
+async def vault_file(owner_id: str, item_id: str, k: str = "file", e: int = 0, s: str = "", dl: int = 0):
+    """A file (or its thumbnail) by signed link: no login, so players and image views can load and seek it."""
+    if k not in ("file", "thumb") or not vault.verify(owner_id, item_id, k, e, s):
+        raise HTTPException(403, "This link has expired.")
+    row = await vault.get(owner_id, item_id)
+    path = vault.file_path(owner_id, item_id, ".thumb.jpg" if k == "thumb" else "")
+    if not row or not path.exists():
+        raise HTTPException(404, "That file is gone.")
+    headers = {"Cache-Control": "private, max-age=21600"}
+    if k == "thumb":
+        return FileResponse(path, media_type="image/jpeg", headers=headers)
+    return FileResponse(path, media_type=row["mime"] or "application/octet-stream", headers=headers,
+                        filename=row["name"], content_disposition_type="attachment" if dl else "inline")

@@ -75,28 +75,32 @@ async def _image(data: bytes, mime: str, name: str) -> str:
     return out.text or ""
 
 
+async def text_of(name: str, mime: str, data: bytes) -> str:
+    """A file as text a teammate model can read (images described by the vision model). Raises on unreadable files."""
+    if mime.startswith("image/"):
+        body = await _image(data, mime, name)
+        return f"### {name} (image)\n{body.strip() or 'No description available.'}"
+    if mime == "application/pdf" or name.lower().endswith(".pdf"):
+        text = await asyncio.to_thread(_pdf, data)
+    elif name.lower().endswith((".docx", ".xlsx", ".xlsm", ".pptx")):
+        from . import documents
+        ext = name.lower().rsplit(".", 1)[1]
+        text = await asyncio.to_thread({"docx": documents.read_docx, "pptx": documents.read_pptx}.get(ext, documents.read_xlsx), data)
+    elif name.lower().endswith((".doc", ".xls", ".ppt")):
+        return f"### {name}\n(An old Office format I can't read; ask them to save it as .{name.lower().rsplit('.', 1)[1]}x.)"
+    elif mime.startswith("text/") or TEXT_EXT.search(name):
+        text = data.decode("utf-8", "replace")
+    else:
+        return f"### {name}\n(A {mime or 'binary'} file I can't read as text.)"
+    text = text.strip()
+    clipped = len(text) > MAX_CHARS
+    return f"### {name}\n{text[:MAX_CHARS]}" + ("\n[truncated]" if clipped else "")
+
+
 async def _one(owner_id: str, a: dict[str, Any]) -> str:
     name, mime, path = str(a.get("name") or "file"), str(a.get("mime") or ""), str(a.get("path") or "")
     try:
-        data = await _download(owner_id, path)
-        if mime.startswith("image/"):
-            body = await _image(data, mime, name)
-            return f"### {name} (image)\n{body.strip() or 'No description available.'}"
-        if mime == "application/pdf" or name.lower().endswith(".pdf"):
-            text = await asyncio.to_thread(_pdf, data)
-        elif name.lower().endswith((".docx", ".xlsx", ".xlsm", ".pptx")):
-            from . import documents
-            ext = name.lower().rsplit(".", 1)[1]
-            text = await asyncio.to_thread({"docx": documents.read_docx, "pptx": documents.read_pptx}.get(ext, documents.read_xlsx), data)
-        elif name.lower().endswith((".doc", ".xls", ".ppt")):
-            return f"### {name}\n(An old Office format I can't read; ask them to save it as .{name.lower().rsplit('.', 1)[1]}x.)"
-        elif mime.startswith("text/") or TEXT_EXT.search(name):
-            text = data.decode("utf-8", "replace")
-        else:
-            return f"### {name}\n(A {mime or 'binary'} file I can't read as text.)"
-        text = text.strip()
-        clipped = len(text) > MAX_CHARS
-        return f"### {name}\n{text[:MAX_CHARS]}" + ("\n[truncated]" if clipped else "")
+        return await text_of(name, mime, await _download(owner_id, path))
     except Exception as e:
         log.warning("attachment %s unreadable: %s", name, e)
         return f"### {name}\n(Couldn't read this file.)"
