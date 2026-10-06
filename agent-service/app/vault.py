@@ -26,7 +26,7 @@ from . import config, memory
 
 ROOT = Path(os.environ.get("VAULT_DIR") or Path(os.environ.get("WORKSPACES_DIR", "data/workspaces")).parent / "vault")
 MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a request
-QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "20")) * 1024**3)  # per user; the user's choice, raise it here
+QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "20")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 1000, 60  # what a sheet preview carries
 TYPES = {
@@ -142,7 +142,7 @@ async def add_file(owner_id: str, name: str, data_path: Path, size: int, parent:
     """Takes a file already written to `data_path` (moved into the vault)."""
     await _check_parent(owner_id, parent)
     if (await usage(owner_id))["free"] < size:
-        raise ValueError(f"Your vault is full ({QUOTA / 1024**3:g} GB). Delete something to make room.")
+        raise ValueError(f"Your vault is full ({QUOTA / 1e9:g} GB). Delete something to make room.")
     key = str(uuid.uuid4())
     dest = file_path(owner_id, key)
     dest.parent.mkdir(parents=True, exist_ok=True)

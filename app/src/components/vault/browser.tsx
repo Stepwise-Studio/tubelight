@@ -233,7 +233,7 @@ export function StorageSheet({ open, onClose }: { open: boolean; onClose: () => 
   const used = files.reduce((s, r) => s + r.size, 0)
   const other = { label: 'Other', cat: 'all' as const, color: c.ink4, icon: File01Icon, n: files.length - parts.reduce((s, p) => s + p.n, 0), bytes: used - parts.reduce((s, p) => s + p.bytes, 0) }
   const shown = [...parts, other].filter((p) => p.bytes > 0)
-  const quota = usage?.quota || 20 * 1024 ** 3
+  const quota = usage?.quota || 20e9
   const free = usage?.free ?? Math.max(0, quota - used)
   const pct = Math.min(100, (used / quota) * 100)
   return (
