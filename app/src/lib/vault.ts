@@ -1,5 +1,6 @@
 // The Vault's data: your files on your own server (agent-service vault.py). One shared store: the tab, folders and
 // the viewer read the same list; uploads show in it at once with their progress.
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useEffect, useSyncExternalStore } from 'react'
 
 import { BASE, api, authHeaders } from '@/lib/api'
@@ -212,3 +213,49 @@ export function pathTo(id: string, all: VaultItem[]) {
 export const byFolderThenNewest = (a: VaultItem, b: VaultItem) =>
   a.kind !== b.kind ? (a.kind === 'folder' ? -1 : 1)
     : a.kind === 'folder' ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) : b.created_at.localeCompare(a.created_at)
+
+// ------------------------------------------------------------------ browsing
+export type Category = 'photos' | 'videos' | 'docs' | 'audio' | 'starred' | 'all'
+export const CATEGORIES: { id: Category; label: string }[] = [
+  { id: 'photos', label: 'Photos' }, { id: 'videos', label: 'Videos' }, { id: 'docs', label: 'Documents' },
+  { id: 'audio', label: 'Audio' }, { id: 'starred', label: 'Starred' }, { id: 'all', label: 'All files' },
+]
+const DOC_KINDS: FileKind[] = ['pdf', 'word', 'sheet', 'slides', 'markdown', 'text']
+
+export function inCategory(r: VaultItem, c: Category) {
+  if (c === 'starred') return r.starred
+  if (r.kind !== 'file') return false
+  const k = kindOf(r.name, r.mime)
+  return c === 'all' || (c === 'photos' ? k === 'image' : c === 'videos' ? k === 'video' : c === 'audio' ? k === 'audio' : DOC_KINDS.includes(k))
+}
+
+export type Sort = 'date' | 'name' | 'size' | 'type'
+export const SORTS: { id: Sort; label: string }[] = [
+  { id: 'date', label: 'Date added' }, { id: 'name', label: 'Name' }, { id: 'size', label: 'Size' }, { id: 'type', label: 'Type' },
+]
+
+/** Folders first (by name), then files in the chosen order. */
+export function sorter(sort: Sort) {
+  return (a: VaultItem, b: VaultItem) => {
+    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
+    const byName = a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+    if (a.kind === 'folder' || sort === 'name') return byName
+    if (sort === 'size') return b.size - a.size || byName
+    if (sort === 'type') return kindOf(a.name, a.mime).localeCompare(kindOf(b.name, b.mime)) || byName
+    return b.created_at.localeCompare(a.created_at)
+  }
+}
+
+/** How you like to browse (kept on the phone): list or grid, and the order. */
+let prefs: { view: 'list' | 'grid'; sort: Sort } = { view: 'list', sort: 'date' }
+const prefSubs = new Set<() => void>()
+AsyncStorage.getItem('tl.vault.prefs').then((v) => { if (v) { prefs = { ...prefs, ...JSON.parse(v) }; prefSubs.forEach((f) => f()) } }, () => {})
+export function useVaultPrefs() {
+  const p = useSyncExternalStore((f) => { prefSubs.add(f); return () => { prefSubs.delete(f) } }, () => prefs)
+  const set = (changes: Partial<typeof prefs>) => {
+    prefs = { ...prefs, ...changes }
+    prefSubs.forEach((f) => f())
+    AsyncStorage.setItem('tl.vault.prefs', JSON.stringify(prefs)).catch(() => {})
+  }
+  return [p, set] as const
+}

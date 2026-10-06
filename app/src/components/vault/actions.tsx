@@ -84,7 +84,7 @@ export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; hideOp
 // ------------------------------------------------------------------ sheets
 type Req =
   | { kind: 'name'; title: string; value: string; label: string; confirm: string; submit: (name: string) => Promise<unknown> }
-  | { kind: 'move'; item: VaultItem }
+  | { kind: 'move'; items: VaultItem[] }
 let req: Req | null = null
 let shown = false
 const subs = new Set<() => void>()
@@ -98,7 +98,8 @@ export function newFolderSheet(parent: string) {
 export function renameItem(item: VaultItem) {
   set({ kind: 'name', title: item.kind === 'folder' ? 'Rename folder' : 'Rename file', value: item.name, label: 'Name', confirm: 'Rename', submit: (name) => editItem(item.id, { name }) }, true)
 }
-export function moveItem(item: VaultItem) { set({ kind: 'move', item }, true) }
+export function moveItem(item: VaultItem) { set({ kind: 'move', items: [item] }, true) }
+export function moveItems(items: VaultItem[]) { if (items.length) set({ kind: 'move', items }, true) }
 
 export function VaultSheetsHost() {
   const s = useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f) } }, () => snap)
@@ -106,7 +107,7 @@ export function VaultSheetsHost() {
   return (
     <>
       <NameSheet key={`n${s.n}`} open={s.shown && s.req?.kind === 'name'} req={s.req?.kind === 'name' ? s.req : null} onClose={close} />
-      <MoveSheet open={s.shown && s.req?.kind === 'move'} item={s.req?.kind === 'move' ? s.req.item : null} onClose={close} />
+      <MoveSheet open={s.shown && s.req?.kind === 'move'} moving={s.req?.kind === 'move' ? s.req.items : null} onClose={close} />
     </>
   )
 }
@@ -140,25 +141,27 @@ function NameSheet({ open, req: r, onClose }: { open: boolean; req: Extract<Req,
   )
 }
 
-function MoveSheet({ open, item, onClose }: { open: boolean; item: VaultItem | null; onClose: () => void }) {
+function MoveSheet({ open, moving, onClose }: { open: boolean; moving: VaultItem[] | null; onClose: () => void }) {
   const { items } = useVault()
-  if (!item) return null
+  if (!moving?.length) return null
   const all = items ?? []
-  // Never into itself or anything inside it.
-  const inside = (id: string) => pathTo(id, all).some((p) => p.id === item.id)
+  const ids = new Set(moving.map((m) => m.id))
+  // Never into one of the moving folders or anything inside them.
+  const inside = (id: string) => pathTo(id, all).some((p) => ids.has(p.id))
   const folders = all.filter((r) => r.kind === 'folder' && !inside(r.id))
     .map((r) => ({ r, path: pathTo(r.id, all) }))
     .sort((a, b) => a.path.map((p) => p.name).join('/').localeCompare(b.path.map((p) => p.name).join('/')))
+  const here = moving.length === 1 ? moving[0].parent : null
   const move = (parent: string) => {
     onClose()
-    if (parent === item.parent) return
-    editItem(item.id, { parent }).then(() => { haptic.success(); refreshVault() }, (e) => toast({ title: 'Unable to move it', body: (e as Error).message, tone: 'error' }))
+    Promise.all(moving.filter((m) => m.parent !== parent).map((m) => editItem(m.id, { parent })))
+      .then(() => { haptic.success(); refreshVault() }, (e) => toast({ title: 'Unable to move', body: (e as Error).message, tone: 'error' }))
   }
   return (
-    <Sheet open={open} onClose={onClose} title={`Move “${item.name}”`}>
+    <Sheet open={open} onClose={onClose} title={moving.length === 1 ? `Move “${moving[0].name}”` : `Move ${moving.length} items`}>
       <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}>
-        <MoveRow label="Your vault" depth={0} current={item.parent === ''} onPress={() => move('')} />
-        {folders.map(({ r, path }) => <MoveRow key={r.id} label={r.name} depth={path.length} current={item.parent === r.id} onPress={() => move(r.id)} />)}
+        <MoveRow label="Your vault" depth={0} current={here === ''} onPress={() => move('')} />
+        {folders.map(({ r, path }) => <MoveRow key={r.id} label={r.name} depth={path.length} current={here === r.id} onPress={() => move(r.id)} />)}
         {!folders.length && <Text variant="footnote" color="ink3" style={{ padding: 12 }}>No other folders yet.</Text>}
       </ScrollView>
     </Sheet>

@@ -1,143 +1,182 @@
-// The Vault's browser, for the top of the vault and for each folder: what's stored (a storage card at the top),
-// search, filters, folders as cards, photos and videos as a grid, everything else as rows with their type's badge.
-// Uploads show in place with their progress. Long-press anything for its actions.
+// The Vault, as a file manager: at the top, what's stored (by kind), Browse (photos, videos, documents, audio,
+// starred, everything), Recent with real previews, then folders and files, sorted your way, as a list or a grid.
+// The same browser shows a folder or a category. Long-press to select several; tap ⋯ for one file's actions.
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
+import { router } from 'expo-router'
 import { useMemo, useState, type ReactNode } from 'react'
 import { FlatList, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn } from 'react-native-reanimated'
+import Animated, { FadeIn, FadeInDown, FadeOutDown } from 'react-native-reanimated'
 import {
-  Add01Icon, Camera01Icon, Cancel01Icon, File01Icon, FolderAddIcon, Image01Icon, MoreHorizontalIcon, PlayIcon, StarIcon,
+  Add01Icon, ArrowDown01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, File01Icon, FolderAddIcon,
+  FolderExportIcon, GridViewIcon, Image01Icon, LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon,
+  Share08Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
 
-import { kindOf, byFolderThenNewest, dismissUpload, formatSize, refreshVault, uploadFiles, useVault, type Upload, type VaultItem } from '@/lib/vault'
+import {
+  CATEGORIES, SORTS, deleteItem, dismissUpload, editItem, formatSize, inCategory, kindOf, refreshVault, sorter, uploadFiles,
+  useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
+} from '@/lib/vault'
 import { motion, useTheme } from '@/theme'
-import { Button, Chip, EmptyState, Icon, IconButton, Press, SearchField, Skeleton, Squircle, Text, haptic, showMenu, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Skeleton, Squircle, Text, confirm, elevation, haptic, showMenu, toast } from '@/ui'
 
-import { itemMenu, newFolderSheet, openItem } from './actions'
-import { FileTile, FolderGlyph, Thumb, tintOf } from './file-tile'
-
-type Filter = 'all' | 'photos' | 'videos' | 'docs' | 'starred'
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' }, { value: 'photos', label: 'Photos' }, { value: 'videos', label: 'Videos' },
-  { value: 'docs', label: 'Documents' }, { value: 'starred', label: 'Starred' },
-]
-const DOCS = ['pdf', 'word', 'sheet', 'slides', 'markdown', 'text']
+import { itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
+import { FileIcon, KIND_COLOR } from './file-icon'
+import { FolderGlyph } from './file-tile'
+import { FilePreview } from './preview'
 
 type Row =
-  | { type: 'title'; key: string; label: string }
+  | { type: 'title'; key: string; label: string; controls?: boolean }
   | { type: 'folders'; key: string; items: VaultItem[] }
-  | { type: 'media'; key: string; items: VaultItem[] }
+  | { type: 'tiles'; key: string; items: VaultItem[] }
   | { type: 'file'; key: string; item: VaultItem }
   | { type: 'upload'; key: string; upload: Upload }
 
-export function VaultBrowser({ parent, header, root }: { parent: string; header: ReactNode; root?: boolean }) {
+const CAT_LOOK: Record<Category, { icon: Parameters<typeof Icon>[0]['icon']; color: string }> = {
+  photos: { icon: Image01Icon, color: KIND_COLOR.image }, videos: { icon: PlayIcon, color: KIND_COLOR.video },
+  docs: { icon: File01Icon, color: KIND_COLOR.pdf }, audio: { icon: MusicNote01Icon, color: KIND_COLOR.audio },
+  starred: { icon: StarIcon, color: '#e5a50a' }, all: { icon: FolderAddIcon, color: '#8b8b93' },
+}
+
+export function VaultBrowser({ parent = '', category, header, root, bottom = 24 }: {
+  parent?: string; category?: Category; header: ReactNode; root?: boolean
+  /** Space under the content (and where the selection bar floats). */
+  bottom?: number
+}) {
   const { c } = useTheme()
   const { width } = useWindowDimensions()
   const { items, usage, uploads, error } = useVault()
-  const [filter, setFilter] = useState<Filter>('all')
+  const [prefs, setPrefs] = useVaultPrefs()
   const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const all = useMemo(() => items ?? [], [items])
+  const selecting = selected.size > 0
+  const media = category === 'photos' || category === 'videos'
+  const view = media ? 'grid' : prefs.view
 
-  const counts = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const r of all) m.set(r.parent, (m.get(r.parent) ?? 0) + 1)
+  const stats = useMemo(() => {
+    const m = new Map<string, { n: number; bytes: number }>()
+    for (const r of all) {
+      const s = m.get(r.parent) ?? { n: 0, bytes: 0 }
+      s.n++
+      s.bytes += r.size
+      m.set(r.parent, s)
+    }
     return m
   }, [all])
 
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase()
+    const byId = new Map(all.map((x) => [x.id, x]))
     const inside = (r: VaultItem) => {
       if (!parent) return true
-      const byId = new Map(all.map((x) => [x.id, x]))
-      let at = byId.get(r.parent)
-      while (at) { if (at.id === parent) return true; at = byId.get(at.parent) }
-      return r.parent === parent
+      for (let at = byId.get(r.parent); at; at = byId.get(at.parent)) if (at.id === parent) return true
+      return false
     }
-    let list: VaultItem[]
-    if (q) list = all.filter((r) => r.name.toLowerCase().includes(q) && inside(r))
-    else if (filter !== 'all') {
-      list = all.filter((r) => {
-        const k = kindOf(r.name, r.mime)
-        return filter === 'starred' ? r.starred : r.kind === 'file' && (filter === 'photos' ? k === 'image' : filter === 'videos' ? k === 'video' : DOCS.includes(k))
-      })
-    } else list = all.filter((r) => r.parent === parent)
-    list = [...list].sort(byFolderThenNewest)
+    let list = q ? all.filter((r) => r.name.toLowerCase().includes(q) && inside(r) && (!category || inCategory(r, category)))
+      : category ? all.filter((r) => inCategory(r, category))
+        : all.filter((r) => r.parent === parent)
+    list = [...list].sort(sorter(prefs.sort))
     const folders = list.filter((r) => r.kind === 'folder')
-    const media = list.filter((r) => r.kind === 'file' && ['image', 'video'].includes(kindOf(r.name, r.mime)))
-    const files = list.filter((r) => r.kind === 'file' && !media.includes(r))
+    const files = list.filter((r) => r.kind === 'file')
     const out: Row[] = []
-    const chunk = (l: VaultItem[], n: number, type: 'folders' | 'media') => {
+    const chunk = (l: VaultItem[], n: number, type: 'folders' | 'tiles') => {
       for (let i = 0; i < l.length; i += n) out.push({ type, key: `${type}-${l[i].id}`, items: l.slice(i, i + n) })
     }
     if (folders.length) { out.push({ type: 'title', key: 't-f', label: 'Folders' }); chunk(folders, 2, 'folders') }
-    const ups = q || filter !== 'all' ? [] : uploads.filter((u) => u.parent === parent)
-    if (media.length) { out.push({ type: 'title', key: 't-m', label: filter === 'videos' ? 'Videos' : filter === 'photos' ? 'Photos' : 'Photos & videos' }); chunk(media, 3, 'media') }
+    const ups = q || category ? [] : uploads.filter((u) => u.parent === parent)
     if (files.length || ups.length) {
-      out.push({ type: 'title', key: 't-d', label: 'Files' })
+      out.push({ type: 'title', key: 't-d', label: q ? 'Matches' : category ? `${files.length} ${files.length === 1 ? 'file' : 'files'}` : 'Files', controls: true })
       for (const u of ups) out.push({ type: 'upload', key: u.id, upload: u })
-      for (const f of files) out.push({ type: 'file', key: f.id, item: f })
+      if (view === 'grid') chunk(files, 3, 'tiles')
+      else for (const f of files) out.push({ type: 'file', key: f.id, item: f })
     }
     return out
-  }, [all, uploads, parent, filter, query])
+  }, [all, uploads, parent, category, query, prefs.sort, view])
 
-  const gridW = width - 32
-  const tile = Math.floor((gridW - 8) / 3)
-  const card = Math.floor((gridW - 10) / 2)
-  const filtered = !!query.trim() || filter !== 'all'
+  const tile = Math.floor((width - 32 - 16) / 3)
+  const card = Math.floor((width - 32 - 10) / 2)
+  const picked = all.filter((r) => selected.has(r.id))
+  const toggle = (r: VaultItem) => {
+    haptic.tap()
+    setSelected((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })
+  }
+  const press = (r: VaultItem) => (selecting ? toggle(r) : openItem(r))
+  const hold = (r: VaultItem) => { haptic.light(); toggle(r) }
+  const clear = () => setSelected(new Set())
 
   return (
-    <FlatList
-      data={items ? rows : []}
-      keyExtractor={(r) => r.key}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      contentContainerStyle={{ paddingBottom: 140, flexGrow: 1 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshVault(); setRefreshing(false) }}
-        tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
-      ListHeaderComponent={
-        <View>
-          {header}
-          <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}>
-            {root && !filtered && usage && items && <Storage items={all} free={usage.free} />}
-            <SearchField value={query} onChangeText={setQuery} placeholder={parent ? 'Search this folder' : 'Search your vault'} />
-            {root && !query && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-                {FILTERS.map((f) => <Chip key={f.value} label={f.label} selected={filter === f.value} onPress={() => { haptic.tap(); setFilter(f.value) }} />)}
-              </ScrollView>
-            )}
+    <View style={{ flex: 1 }}>
+      <FlatList
+        data={items ? rows : []}
+        keyExtractor={(r) => r.key}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={{ paddingBottom: bottom + (selecting ? 96 : 40), flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshVault(); setRefreshing(false) }}
+          tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
+        ListHeaderComponent={
+          <View>
+            {header}
+            <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: 2 }}>
+              <SearchField value={query} onChangeText={setQuery} placeholder={category ? `Search ${CATEGORIES.find((x) => x.id === category)?.label.toLowerCase()}` : parent ? 'Search this folder' : 'Search your vault'} />
+              {root && !query && usage && items && <Storage items={all} free={usage.free} />}
+            </View>
+            {root && !query && items && all.some((r) => r.kind === 'file') && <Browse items={all} width={card} />}
+            {root && !query && items && <Recent items={all} onOpen={press} onHold={hold} selected={selected} />}
           </View>
-        </View>
-      }
-      renderItem={({ item: r }) => {
-        if (r.type === 'title') return <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: 8 }}>{r.label}</Text>
-        if (r.type === 'folders') {
-          return (
-            <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 10 }}>
-              {r.items.map((f) => <FolderCard key={f.id} item={f} width={card} count={counts.get(f.id) ?? 0} />)}
-            </View>
-          )
         }
-        if (r.type === 'media') {
-          return (
-            <View style={{ flexDirection: 'row', gap: 4, paddingHorizontal: 16, marginBottom: 4 }}>
-              {r.items.map((m) => <MediaTile key={m.id} item={m} size={tile} />)}
-            </View>
-          )
-        }
-        if (r.type === 'upload') return <UploadRow u={r.upload} />
-        return <FileRow item={r.item} />
-      }}
-      ListEmptyComponent={!items ? <Loading tile={tile} /> : (
-        <EmptyState
-          art={<FolderGlyph size={56} />}
-          title={error ? 'Unable to reach your vault' : filtered ? 'Nothing matches' : parent ? 'This folder is empty' : 'Your vault is empty'}
-          body={error ?? (filtered ? 'Try another name or filter.' : 'Keep photos, videos, PDFs, notes and documents here. They live on your own server, and your teammates can find them when you ask.')}
-          action={error ? <Button label="Try again" onPress={() => refreshVault()} /> : filtered ? undefined : <Button label="Add files" icon={Add01Icon} onPress={() => addMenu(parent)} />}
-        />
-      )}
-    />
+        renderItem={({ item: r }) => {
+          if (r.type === 'title') {
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 10, paddingTop: 20, paddingBottom: 6 }}>
+                <Text variant="overline" color="ink3" accessibilityRole="header" style={{ flex: 1 }}>{r.label}</Text>
+                {r.controls && (
+                  <>
+                    <Press radius={10} static onPress={() => showMenu({ title: 'Sort by', items: SORTS.map((s) => ({ label: s.label, value: s.id === prefs.sort ? '✓' : undefined, onPress: () => setPrefs({ sort: s.id }) })) })}
+                      accessibilityLabel={`Sorted by ${SORTS.find((s) => s.id === prefs.sort)?.label}. Change`}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, minHeight: 32 }}>
+                      <Text variant="footnote" color="ink2">{SORTS.find((s) => s.id === prefs.sort)?.label}</Text>
+                      <Icon icon={ArrowDown01Icon} size={13} color="ink3" strokeWidth={2} />
+                    </Press>
+                    {!media && (
+                      <IconButton icon={view === 'grid' ? LeftToRightListBulletIcon : GridViewIcon} size={34} iconSize={17} color={c.ink2}
+                        accessibilityLabel={view === 'grid' ? 'Show as a list' : 'Show as a grid'} onPress={() => { haptic.tap(); setPrefs({ view: view === 'grid' ? 'list' : 'grid' }) }} />
+                    )}
+                  </>
+                )}
+              </View>
+            )
+          }
+          if (r.type === 'folders') {
+            return (
+              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 10 }}>
+                {r.items.map((f) => <FolderCard key={f.id} item={f} width={card} stat={stats.get(f.id)} selected={selected.has(f.id)} onPress={() => press(f)} onHold={() => hold(f)} />)}
+              </View>
+            )
+          }
+          if (r.type === 'tiles') {
+            return (
+              <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
+                {r.items.map((m) => <Tile key={m.id} item={m} size={tile} named={!media} selected={selected.has(m.id)} selecting={selecting} onPress={() => press(m)} onHold={() => hold(m)} />)}
+              </View>
+            )
+          }
+          if (r.type === 'upload') return <UploadRow u={r.upload} />
+          return <FileRow item={r.item} selected={selected.has(r.item.id)} selecting={selecting} onPress={() => press(r.item)} onHold={() => hold(r.item)} />
+        }}
+        ListEmptyComponent={!items ? <Loading tile={tile} /> : (
+          <EmptyState
+            art={<FolderGlyph size={56} />}
+            title={error ? 'Unable to reach your vault' : query ? 'Nothing matches' : category ? 'Nothing here yet' : parent ? 'This folder is empty' : 'Your vault is empty'}
+            body={error ?? (query ? 'Try another name.' : 'Keep photos, videos, PDFs, notes and documents here. They live on your own server, and your teammates can find them when you ask.')}
+            action={error ? <Button label="Try again" onPress={() => refreshVault()} /> : query || category ? undefined : <Button label="Add files" icon={Add01Icon} onPress={() => addMenu(parent)} />}
+          />
+        )}
+      />
+      {selecting && <SelectionBar picked={picked} bottom={bottom} onClear={clear} />}
+    </View>
   )
 }
 
@@ -181,31 +220,33 @@ export function addMenu(parent: string) {
 function Storage({ items, free }: { items: VaultItem[]; free: number }) {
   const { c } = useTheme()
   const parts = [
-    { label: 'Photos', kinds: ['image'], color: '#12a594' },
-    { label: 'Videos', kinds: ['video'], color: '#0090ff' },
-    { label: 'Documents', kinds: DOCS, color: '#8e4ec6' },
-    { label: 'Other', kinds: ['audio', 'archive', 'other'], color: c.ink4 },
-  ].map((p) => ({ ...p, bytes: items.filter((r) => r.kind === 'file' && p.kinds.includes(kindOf(r.name, r.mime))).reduce((s, r) => s + r.size, 0) }))
-  const used = parts.reduce((s, p) => s + p.bytes, 0)
-  const files = items.filter((r) => r.kind === 'file').length
+    { label: 'Photos', cat: 'photos' as const, color: KIND_COLOR.image },
+    { label: 'Videos', cat: 'videos' as const, color: KIND_COLOR.video },
+    { label: 'Documents', cat: 'docs' as const, color: KIND_COLOR.pdf },
+    { label: 'Audio', cat: 'audio' as const, color: KIND_COLOR.audio },
+  ].map((p) => ({ ...p, bytes: items.filter((r) => inCategory(r, p.cat)).reduce((s, r) => s + r.size, 0) }))
+  const files = items.filter((r) => r.kind === 'file')
+  const used = files.reduce((s, r) => s + r.size, 0)
+  const other = used - parts.reduce((s, p) => s + p.bytes, 0)
+  const shown = [...parts, { label: 'Other', cat: 'all' as const, color: c.ink4, bytes: other }].filter((p) => p.bytes > 0)
   return (
     <Animated.View entering={FadeIn.duration(motion.duration.slow)}>
-      <Squircle style={{ borderRadius: 20, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 16, gap: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+      <Squircle style={{ borderRadius: 22, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 16, gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
           <View style={{ flex: 1 }}>
-            <Text variant="footnote" color="ink3">In your vault</Text>
+            <Text variant="footnote" color="ink3">On your server</Text>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
               <Text variant="title" tabular>{formatSize(used)}</Text>
-              <Text variant="footnote" color="ink3" tabular>{files.toLocaleString()} {files === 1 ? 'file' : 'files'}</Text>
+              <Text variant="footnote" color="ink3" tabular>in {files.length.toLocaleString()} {files.length === 1 ? 'file' : 'files'}</Text>
             </View>
           </View>
-          <Text variant="footnote" color="ink3" tabular style={{ paddingBottom: 6 }}>{formatSize(free)} free on your server</Text>
+          <Text variant="footnote" color="ink3" tabular style={{ paddingBottom: 6 }}>{formatSize(free)} free</Text>
         </View>
-        <View style={{ flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: c.panel2, gap: used ? 2 : 0 }}>
-          {used > 0 && parts.filter((p) => p.bytes).map((p) => <Bar key={p.label} color={p.color} flex={p.bytes / used} />)}
+        <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: c.panel2, gap: used ? 2 : 0 }}>
+          {shown.map((p) => <View key={p.label} style={{ flex: Math.max(p.bytes / Math.max(used, 1), 0.02), backgroundColor: p.color }} />)}
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6 }}>
-          {parts.filter((p) => p.bytes).map((p) => (
+          {shown.map((p) => (
             <View key={p.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ width: 8, height: 8, borderRadius: 3, backgroundColor: p.color }} />
               <Text variant="footnote" color="ink2">{p.label}</Text>
@@ -219,75 +260,167 @@ function Storage({ items, free }: { items: VaultItem[]; free: number }) {
   )
 }
 
-function Bar({ color, flex }: { color: string; flex: number }) {
-  return <View style={{ flex: Math.max(flex, 0.02), backgroundColor: color }} />
+/** Browse by kind: each a tile with its count and size. */
+function Browse({ items, width }: { items: VaultItem[]; width: number }) {
+  const { c, scheme } = useTheme()
+  return (
+    <View style={{ paddingHorizontal: 16, paddingTop: 22, gap: 10 }}>
+      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 4 }}>Browse</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        {CATEGORIES.map((cat) => {
+          const hits = items.filter((r) => inCategory(r, cat.id))
+          const files = hits.filter((r) => r.kind === 'file')
+          const look = CAT_LOOK[cat.id]
+          return (
+            <Press key={cat.id} radius={18} onPress={() => { haptic.tap(); router.push({ pathname: '/vault/[id]', params: { id: `cat:${cat.id}` } }) }}
+              accessibilityLabel={`${cat.label}, ${hits.length}`} outerStyle={{ width }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
+              <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: `${look.color}${scheme === 'dark' ? '2b' : '1c'}` }}>
+                <Icon icon={look.icon} size={20} color={look.color} strokeWidth={1.9} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="bodyMedium" numberOfLines={1}>{cat.label}</Text>
+                <Text variant="footnote" color="ink3" tabular numberOfLines={1}>
+                  {hits.length ? `${hits.length}${files.length ? ` · ${formatSize(files.reduce((s, r) => s + r.size, 0))}` : ''}` : 'None yet'}
+                </Text>
+              </View>
+            </Press>
+          )
+        })}
+      </View>
+    </View>
+  )
 }
 
-function FolderCard({ item, width, count }: { item: VaultItem; width: number; count: number }) {
-  const { c } = useTheme()
+/** The newest files, as cards you can flick through. */
+function Recent({ items, onOpen, onHold, selected }: { items: VaultItem[]; onOpen: (r: VaultItem) => void; onHold: (r: VaultItem) => void; selected: Set<string> }) {
+  const recent = items.filter((r) => r.kind === 'file').sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 12)
+  if (!recent.length) return null
   return (
-    <Press radius={18} onPress={() => openItem(item)} onLongPress={() => itemMenu(item)} accessibilityLabel={`${item.name}, folder, ${count} items`}
-      outerStyle={{ width }} style={{ borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 14, gap: 12 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+    <View style={{ paddingTop: 22, gap: 10 }}>
+      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 20 }}>Recent</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+        {recent.map((r) => (
+          <Press key={r.id} radius={16} static onPress={() => onOpen(r)} onLongPress={() => onHold(r)} accessibilityLabel={r.name} style={{ width: 128, gap: 8 }}>
+            <View>
+              <FilePreview item={r} width={128} height={160} radius={16} />
+              {selected.has(r.id) && <Check on />}
+            </View>
+            <View style={{ paddingHorizontal: 2 }}>
+              <Text variant="label" numberOfLines={1}>{r.name}</Text>
+              <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{formatSize(r.size)} · {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>
+            </View>
+          </Press>
+        ))}
+      </ScrollView>
+    </View>
+  )
+}
+
+function FolderCard({ item, width, stat, selected, onPress, onHold }: {
+  item: VaultItem; width: number; stat?: { n: number; bytes: number }; selected: boolean; onPress: () => void; onHold: () => void
+}) {
+  const { c } = useTheme()
+  const n = stat?.n ?? 0
+  return (
+    <Press radius={18} onPress={onPress} onLongPress={onHold} accessibilityLabel={`${item.name}, folder, ${n} items`} accessibilityState={{ selected }}
+      outerStyle={{ width }} style={{ borderWidth: 1, borderColor: selected ? c.tube : c.line, backgroundColor: selected ? c.tubeSoft : c.panel, padding: 14, gap: 14 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <FolderGlyph size={40} />
-        {item.starred && <Icon icon={StarIcon} size={14} color="warning" strokeWidth={2} />}
+        {selected ? <Icon icon={CheckmarkCircle02Icon} size={20} color="tube" strokeWidth={2} />
+          : item.starred ? <Icon icon={StarIcon} size={15} color="#e5a50a" strokeWidth={2.2} />
+            : <IconButton icon={MoreHorizontalIcon} size={30} iconSize={16} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} style={{ marginTop: -4, marginRight: -6 }} />}
       </View>
       <View style={{ gap: 2 }}>
         <Text variant="bodyMedium" numberOfLines={1}>{item.name}</Text>
-        <Text variant="footnote" color="ink3" tabular>{count === 0 ? 'Empty' : `${count} ${count === 1 ? 'item' : 'items'}`}</Text>
+        <Text variant="footnote" color="ink3" tabular>{n === 0 ? 'Empty' : `${n} ${n === 1 ? 'item' : 'items'}${stat?.bytes ? ` · ${formatSize(stat.bytes)}` : ''}`}</Text>
       </View>
     </Press>
   )
 }
 
-function MediaTile({ item, size }: { item: VaultItem; size: number }) {
-  const video = kindOf(item.name, item.mime) === 'video'
+function Tile({ item, size, named, selected, selecting, onPress, onHold }: {
+  item: VaultItem; size: number; named: boolean; selected: boolean; selecting: boolean; onPress: () => void; onHold: () => void
+}) {
   return (
-    <Press radius={12} onPress={() => openItem(item)} onLongPress={() => itemMenu(item)} accessibilityLabel={`${item.name}, ${video ? 'video' : 'photo'}`}
-      outerStyle={{ width: size, height: size }} style={{ width: size, height: size, overflow: 'hidden' }}>
-      <Thumb item={item} style={{ width: size, height: size }} />
-      {video && (
-        <View style={{ position: 'absolute', left: 6, bottom: 6, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Icon icon={PlayIcon} size={10} color="#fff" strokeWidth={2.4} />
-          {!!item.meta?.duration && <Text variant="footnote" color="#fff" tabular style={{ fontSize: 11, lineHeight: 14 }}>
-            {`${Math.floor(item.meta.duration / 60)}:${String(Math.round(item.meta.duration % 60)).padStart(2, '0')}`}</Text>}
-        </View>
-      )}
-      {item.starred && (
-        <View style={{ position: 'absolute', right: 6, top: 6 }}><Icon icon={StarIcon} size={14} color="#fff" strokeWidth={2.2} /></View>
-      )}
+    <Press radius={14} static onPress={onPress} onLongPress={onHold} accessibilityLabel={item.name} accessibilityState={{ selected }} style={{ width: size, gap: 6 }}>
+      <View style={{ opacity: selecting && !selected ? 0.7 : 1 }}>
+        <FilePreview item={item} width={size} height={size} radius={14} />
+        {selecting && <Check on={selected} />}
+      </View>
+      {named && <Text variant="footnote" numberOfLines={1} style={{ paddingHorizontal: 2 }}>{item.name}</Text>}
     </Press>
   )
 }
 
-function FileRow({ item }: { item: VaultItem }) {
+function FileRow({ item, selected, selecting, onPress, onHold }: { item: VaultItem; selected: boolean; selecting: boolean; onPress: () => void; onHold: () => void }) {
   const { c } = useTheme()
   const kind = kindOf(item.name, item.mime)
   const date = new Date(item.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   const meta = [formatSize(item.size), item.meta?.pages && `${item.meta.pages} ${item.meta.pages === 1 ? 'page' : 'pages'}`, date].filter(Boolean).join(' · ')
+  const visual = kind === 'image' || kind === 'video' || kind === 'pdf'
   return (
-    <Press radius={0} onPress={() => openItem(item)} onLongPress={() => itemMenu(item)} accessibilityLabel={`${item.name}, ${meta}`}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 6, paddingVertical: 8 }}>
-      {kind === 'image' && item.thumb ? <Thumb item={item} style={{ width: 44, height: 44, borderRadius: 13 }} /> : <FileTile item={item} size={44} />}
+    <Press radius={0} onPress={onPress} onLongPress={onHold} accessibilityLabel={`${item.name}, ${meta}`} accessibilityState={{ selected }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingLeft: 16, paddingRight: 6, paddingVertical: 8, backgroundColor: selected ? c.tubeSoft : undefined }}>
+      {visual ? <FilePreview item={item} width={48} height={48} radius={12} /> : <View style={{ width: 48, alignItems: 'center' }}><FileIcon name={item.name} mime={item.mime} size={46} glow={false} /></View>}
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text variant="bodyMedium" numberOfLines={1} style={{ flexShrink: 1 }}>{item.name}</Text>
-          {item.starred && <Icon icon={StarIcon} size={12} color="warning" strokeWidth={2.2} />}
+          {item.starred && <Icon icon={StarIcon} size={12} color="#e5a50a" strokeWidth={2.2} />}
         </View>
         <Text variant="footnote" color="ink3" tabular numberOfLines={1}>{meta}</Text>
       </View>
-      <IconButton icon={MoreHorizontalIcon} size={40} iconSize={18} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} />
+      {selecting
+        ? <View style={{ width: 40, alignItems: 'center' }}><Icon icon={CheckmarkCircle02Icon} size={22} color={selected ? 'tube' : 'ink4'} strokeWidth={selected ? 2.2 : 1.5} /></View>
+        : <IconButton icon={MoreHorizontalIcon} size={40} iconSize={18} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} />}
     </Press>
+  )
+}
+
+function Check({ on }: { on: boolean }) {
+  const { c } = useTheme()
+  return (
+    <View style={{ position: 'absolute', left: 6, top: 6, width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: on ? c.tube : 'rgba(0,0,0,0.35)', borderWidth: 1.5, borderColor: '#fff' }}>
+      {on && <Icon icon={CheckmarkCircle02Icon} size={16} color="#fff" strokeWidth={2.4} />}
+    </View>
+  )
+}
+
+/** Several picked: what you can do with them all at once. */
+function SelectionBar({ picked, bottom, onClear }: { picked: VaultItem[]; bottom: number; onClear: () => void }) {
+  const { c, scheme } = useTheme()
+  const starAll = picked.some((r) => !r.starred)
+  const one = picked.length === 1 && picked[0].kind === 'file' ? picked[0] : null
+  const act = (f: () => unknown) => { haptic.tap(); f() }
+  return (
+    <Animated.View entering={FadeInDown.duration(motion.duration.fast)} exiting={FadeOutDown.duration(motion.duration.quick)}
+      style={[{ position: 'absolute', left: 16, right: 16, bottom: bottom + 8, borderRadius: 26 }, elevation(scheme)]}>
+      <Squircle style={{ borderRadius: 26, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', padding: 6, gap: 2 }}>
+        <IconButton icon={Cancel01Icon} round accessibilityLabel="Clear the selection" onPress={() => act(onClear)} />
+        <Text variant="bodyMedium" style={{ flex: 1 }} tabular>{picked.length} selected</Text>
+        <IconButton icon={StarIcon} color={starAll ? c.ink2 : '#e5a50a'} accessibilityLabel={starAll ? 'Star them' : 'Unstar them'}
+          onPress={() => act(() => Promise.all(picked.map((r) => editItem(r.id, { starred: starAll }))).catch(() => toast({ title: 'Unable to save', tone: 'error' })))} />
+        <IconButton icon={FolderExportIcon} accessibilityLabel="Move them" onPress={() => act(() => { moveItems(picked); onClear() })} />
+        {one && <IconButton icon={Share08Icon} accessibilityLabel="Share it" onPress={() => act(() => shareItem(viewable(one)))} />}
+        <IconButton icon={Delete02Icon} color={c.danger} accessibilityLabel="Delete them" onPress={async () => {
+          if (!await confirm({ title: `Delete ${picked.length} ${picked.length === 1 ? 'item' : 'items'}?`, body: 'They leave your server for good, with everything inside any folder.', confirmLabel: 'Delete', destructive: true })) return
+          onClear()
+          for (const r of picked) await deleteItem(r.id).catch(() => toast({ title: `Unable to delete ${r.name}`, tone: 'error' }))
+          haptic.success()
+        }} />
+      </Squircle>
+    </Animated.View>
   )
 }
 
 function UploadRow({ u }: { u: Upload }) {
   const { c } = useTheme()
-  const tint = tintOf(u) ?? c.tube
+  const tint = KIND_COLOR[kindOf(u.name, u.mime)]
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 16, paddingRight: 6, paddingVertical: 8 }}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingLeft: 16, paddingRight: 6, paddingVertical: 8 }}
       accessible accessibilityLabel={u.error ? `${u.name} didn’t upload: ${u.error}` : `Uploading ${u.name}, ${Math.round(u.progress * 100)} percent`}>
-      <FileTile item={u} size={44} />
+      <View style={{ width: 48, alignItems: 'center' }}><FileIcon name={u.name} mime={u.mime} size={46} glow={false} /></View>
       <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
         <Text variant="bodyMedium" numberOfLines={1} color={u.error ? 'ink3' : 'ink'}>{u.name}</Text>
         {u.error ? <Text variant="footnote" color="danger" numberOfLines={1}>{u.error}</Text> : (
@@ -305,12 +438,9 @@ function UploadRow({ u }: { u: Upload }) {
 function Loading({ tile }: { tile: number }) {
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 20, gap: 10 }} accessible accessibilityLabel="Loading your vault">
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Skeleton height={112} radius={18} style={{ flex: 1 }} />
-        <Skeleton height={112} radius={18} style={{ flex: 1 }} />
-      </View>
-      <View style={{ flexDirection: 'row', gap: 4 }}>
-        {[0, 1, 2].map((i) => <Skeleton key={i} width={tile} height={tile} radius={12} />)}
+      <Skeleton height={130} radius={22} />
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {[0, 1, 2].map((i) => <Skeleton key={i} width={tile} height={tile} radius={14} />)}
       </View>
     </View>
   )

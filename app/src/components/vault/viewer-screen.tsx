@@ -2,9 +2,9 @@
 // Used for vault files and for files in chats; each passes its own actions.
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
-import { type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { View } from 'react-native'
-import Animated, { FadeIn } from 'react-native-reanimated'
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ArrowLeft01Icon } from '@hugeicons/core-free-icons'
 
@@ -27,6 +27,7 @@ export function ViewerScreen({ item, shown, siblings = [], onIndex, actions }: {
 }) {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
+  const [bare, setBare] = useState(false) // photos: a tap hides the header for the picture alone
   const head = shown ?? item
   const kind = kindOf(head.name, head.mime)
   const dark = kind === 'image' || kind === 'video'
@@ -41,9 +42,10 @@ export function ViewerScreen({ item, shown, siblings = [], onIndex, actions }: {
   ].filter(Boolean).join(' · ')
   return (
     <View style={{ flex: 1, backgroundColor: dark ? '#000' : c.canvas }}>
-      <StatusBar style={dark ? 'light' : 'auto'} />
-      <FileBody item={item} siblings={siblings} onIndex={onIndex ?? (() => {})} chrome={{ top: dark ? 0 : bar, bottom: insets.bottom }} />
-      <Animated.View entering={FadeIn.duration(motion.duration.fast)} style={{
+      <StatusBar style={dark ? 'light' : 'auto'} hidden={bare} />
+      <FileBody item={item} siblings={siblings} onIndex={onIndex ?? (() => {})} chrome={{ top: dark ? 0 : bar, bottom: insets.bottom }}
+        onTap={() => setBare((b) => !b)} />
+      {!bare && <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)} style={{
         position: 'absolute', top: 0, left: 0, right: 0, paddingTop: insets.top, height: bar,
         backgroundColor: dark ? 'rgba(0,0,0,0.45)' : c.canvas, borderBottomWidth: dark ? 0 : 1, borderColor: c.line,
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 2,
@@ -54,7 +56,7 @@ export function ViewerScreen({ item, shown, siblings = [], onIndex, actions }: {
           {!!meta && <Text variant="footnote" color={dark ? 'rgba(255,255,255,0.7)' : 'ink3'} numberOfLines={1} tabular>{meta}</Text>}
         </View>
         {actions(ink)}
-      </Animated.View>
+      </Animated.View>}
     </View>
   )
 }
