@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard'
+import { router } from 'expo-router'
 import { Image } from 'expo-image'
 import { Fragment, createContext, memo, useContext, useEffect, useState } from 'react'
 import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
@@ -12,7 +13,7 @@ import { GenUI, drawable, drawing } from '@/components/genui/genui'
 import { openAutomation, openAutomationOfRun } from '@/lib/automations'
 import { copied, fullTime, plainText, stripCues } from '@/lib/format'
 import { appToken, mentionParts } from '@/lib/mentions'
-import { phoneLabel, runPhoneAction, type PhoneAction } from '@/lib/phone'
+import { Phone, phoneLabel, runPhoneAction, type PhoneAction } from '@/lib/phone'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Attachment, Teammate } from '@/lib/types'
 import type { ChatMessage, Ghost, LiveStatus } from '@/lib/use-thread'
@@ -26,6 +27,8 @@ import {
 import { Capsule, type Tone } from './capsule'
 import { ImageViewer, saveImage } from './image-viewer'
 import { FileTile } from '@/components/vault/file-tile'
+import { FileIcon } from '@/components/vault/file-icon'
+import { localCopy } from '@/components/vault/actions'
 import { saveAttachment } from '@/lib/vault'
 import { ConnectCard, QuestionCard } from './prompt-cards'
 import { SwipeToReply } from './swipe-reply'
@@ -382,13 +385,14 @@ function TeammateMessage({ m, teammate, first, last, paused, working, replyTo, h
       <TeammateBlock teammate={teammate} first={first} paused={paused} working={working} bleed={wide}>
         {/* A follow-up's capsule above already says why they're speaking up. */}
         {m.proactive && m.meta.event_type !== 'follow_up' && <Pad><EventLabel type={m.meta.event_type} runId={m.run_id} /></Pad>}
-        {(!!m.text || files.length > 0 || !pictures.length) && (
+        {(!!m.text || !(pictures.length + files.length)) && (
           <Pressable onLongPress={() => { haptic.light(); messageMenu(m, onReply, onReact) }} delayLongPress={350} accessibilityHint="Long press to react, reply or copy" style={wide ? { alignSelf: 'stretch' } : { maxWidth: '100%' }}>
-            <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined}
-              tail={files.length ? <Attachments items={files} /> : undefined} />
+            <Reply text={m.text} first={first} last={last} highlighted={highlighted} head={m.reply_to ? <ReplyQuote id={m.reply_to} target={replyTo} /> : undefined} />
           </Pressable>
         )}
         {pictures.map((a) => <Pad key={a.path}><Picture a={a} /></Pad>)}
+        {/* Documents too: a card of their own under the reply, opening in the viewer. */}
+        {files.map((a) => <Pad key={a.path}><DocCard a={a} /></Pad>)}
         {Array.isArray(m.meta.phone_actions) && (
           <Pad>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
@@ -559,6 +563,57 @@ async function openFile(a: Attachment) {
   Linking.openURL(data.signedUrl)
 }
 
+/** Opens a chat file in the app's viewer (download, Vault and share are there). */
+function openViewer(a: Attachment) {
+  haptic.tap()
+  router.push({ pathname: '/file', params: { path: a.path, name: a.name, mime: a.mime, size: String(a.size) } })
+}
+
+const firstPages = new Map<string, string>()
+
+/** A document a teammate sends: its first page (PDFs) or its icon, its name and size, open on tap, download beside. */
+function DocCard({ a }: { a: Attachment }) {
+  const { c } = useTheme()
+  const { width } = useWindowDimensions()
+  const pdf = a.mime === 'application/pdf' || a.name.toLowerCase().endsWith('.pdf')
+  const [page, setPage] = useState(firstPages.get(a.path))
+  const signedUrl = useSignedUrl(a.path)
+  const w = Math.min(320, width * 0.78)
+  useEffect(() => {
+    if (!pdf || page || !signedUrl || !Phone?.pdfPage) return
+    let on = true
+    localCopy({ id: a.path, name: a.name, size: a.size, src: signedUrl })
+      .then((f) => Phone!.pdfPage(f.uri, 0, Math.round(w * 2)))
+      .then((p) => { firstPages.set(a.path, p.uri); if (on) setPage(p.uri) }, () => {})
+    return () => { on = false }
+  }, [pdf, page, signedUrl, a.path, a.name, a.size, w])
+  const ext = a.name.split('.').pop()?.toUpperCase().slice(0, 4) ?? ''
+  return (
+    <Press radius={20} onPress={() => openViewer(a)} accessibilityLabel={`${a.name}, ${formatSize(a.size)}. Opens it`}
+      onLongPress={() => { haptic.light(); showMenu({ title: a.name, items: [
+        { label: 'Download', icon: Download03Icon, onPress: () => openFile(a) },
+        { label: 'Save to Vault', icon: VaultIcon, onPress: () => saveAttachment({ path: a.path, name: a.name }).then(
+          () => toast({ title: 'Saved to your vault', body: a.name, tone: 'success' }),
+          (e) => toast({ title: 'Unable to save it', body: (e as Error).message, tone: 'error' })) },
+      ] }) }}
+      outerStyle={{ width: w, marginTop: 6 }} style={{ borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, overflow: 'hidden' }}>
+      <View style={{ height: 150, backgroundColor: c.panel2, alignItems: 'center', justifyContent: page ? 'flex-start' : 'center', overflow: 'hidden' }}>
+        {page
+          ? <Image source={page} style={{ width: w - 32, height: (w - 32) * 1.41, marginTop: 16, borderRadius: 6 }} contentFit="cover" transition={150} />
+          : <FileIcon name={a.name} mime={a.mime} size={72} />}
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 14, paddingRight: 6, paddingVertical: 10, borderTopWidth: 1, borderColor: c.line }}>
+        <FileIcon name={a.name} mime={a.mime} size={30} glow={false} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="label" numberOfLines={1}>{a.name}</Text>
+          <Text variant="footnote" color="ink3">{[ext, formatSize(a.size)].filter(Boolean).join(' · ')}</Text>
+        </View>
+        <IconButton icon={Download03Icon} size={40} iconSize={19} color={c.ink2} accessibilityLabel={`Download ${a.name}`} onPress={() => openFile(a)} />
+      </View>
+    </Press>
+  )
+}
+
 function FileChip({ a }: { a: Attachment }) {
   const { c } = useTheme()
   const ext = a.name.split('.').pop()?.toUpperCase().slice(0, 4) ?? ''
@@ -575,8 +630,8 @@ function FileChip({ a }: { a: Attachment }) {
     })
   }
   return (
-    <Pressable onPress={() => openFile(a)} onLongPress={menu} accessibilityRole="button" accessibilityLabel={`${a.name}, ${formatSize(a.size)}`}
-      accessibilityHint="Downloads it. Long-press to save it to your vault.">
+    <Pressable onPress={() => openViewer(a)} onLongPress={menu} accessibilityRole="button" accessibilityLabel={`${a.name}, ${formatSize(a.size)}`}
+      accessibilityHint="Opens it. Long-press to download or save it to your vault.">
     <Squircle style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, backgroundColor: c.wash, padding: 8, paddingRight: 12, minWidth: 180 }}>
       <FileTile item={a} size={36} />
       <View style={{ flexShrink: 1 }}>

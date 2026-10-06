@@ -269,30 +269,34 @@ def _video(src: Path, thumb: Path) -> dict[str, Any]:
 
 
 def preview(owner_id: str, key: str, name: str, mime: str) -> dict[str, Any]:
-    """Documents as the app draws them natively: Word as Markdown, sheets as rows, slides as titled points. Cached."""
+    """A vault file as the app draws it natively (see preview_of). Cached next to the file."""
     cache = file_path(owner_id, key, ".preview.json")
     if cache.exists():
         return json.loads(cache.read_text())
+    out = preview_of(name, read_bytes(owner_id, key))
+    if out["type"] != "none":
+        cache.write_text(json.dumps(out))
+    return out
+
+
+def preview_of(name: str, data: bytes) -> dict[str, Any]:
+    """Documents as the app draws them natively: Word as Markdown, sheets as rows, slides as titled points."""
     from . import documents
 
-    data = read_bytes(owner_id, key)
     ext = Path(name).suffix.lower()
     if ext == ".docx":
-        out: dict[str, Any] = {"type": "markdown", "text": documents.read_docx(data)}
-    elif ext in (".xlsx", ".xlsm"):
-        out = {"type": "sheets", "sheets": _sheets(data)}
-    elif ext in (".csv", ".tsv"):
+        return {"type": "markdown", "text": documents.read_docx(data)}
+    if ext in (".xlsx", ".xlsm"):
+        return {"type": "sheets", "sheets": _sheets(data)}
+    if ext in (".csv", ".tsv"):
         import csv
         import io
 
         rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig", "replace")), delimiter="\t" if ext == ".tsv" else ","))
-        out = {"type": "sheets", "sheets": [{"name": name, "rows": [r[:MAX_COLS] for r in rows[:MAX_ROWS]], "total": len(rows)}]}
-    elif ext == ".pptx":
-        out = {"type": "slides", "slides": _slides(data)}
-    else:
-        return {"type": "none"}
-    cache.write_text(json.dumps(out))
-    return out
+        return {"type": "sheets", "sheets": [{"name": name, "rows": [r[:MAX_COLS] for r in rows[:MAX_ROWS]], "total": len(rows)}]}
+    if ext == ".pptx":
+        return {"type": "slides", "slides": _slides(data)}
+    return {"type": "none"}
 
 
 def _sheets(data: bytes) -> list[dict[str, Any]]:

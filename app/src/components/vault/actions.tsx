@@ -10,7 +10,7 @@ import {
   Delete02Icon, Download03Icon, Edit02Icon, FolderExportIcon, Share08Icon, StarIcon, StarOffIcon,
 } from '@hugeicons/core-free-icons'
 
-import { deleteItem, editItem, fileUrl, kindOf, newFolder, pathTo, refreshVault, useVault, type VaultItem } from '@/lib/vault'
+import { deleteItem, editItem, kindOf, newFolder, pathTo, refreshVault, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { Button, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
 
@@ -23,15 +23,15 @@ export function openItem(item: VaultItem) {
 }
 
 /** The file on the phone (downloaded once into the cache), for sharing, PDFs and saving. */
-export async function localCopy(item: VaultItem) {
+export async function localCopy(item: Pick<Viewable, 'id' | 'name' | 'size' | 'src'>) {
   const dir = Paths.cache
-  const file = new File(dir, `vault-${item.id}-${item.name.replace(/[^\w.-]+/g, '_')}`)
-  if (file.exists && file.size === item.size) return file
+  const file = new File(dir, `vault-${item.id.replace(/[^\w-]+/g, '_').slice(-60)}-${item.name.replace(/[^\w.-]+/g, '_')}`)
+  if (file.exists && (!item.size || file.size === item.size)) return file
   if (file.exists) file.delete()
-  return File.downloadFileAsync(fileUrl(item.url!), file)
+  return File.downloadFileAsync(item.src, file)
 }
 
-export async function shareItem(item: VaultItem) {
+export async function shareItem(item: Viewable) {
   try {
     const f = await localCopy(item)
     await Sharing.shareAsync(f.uri, { mimeType: item.mime || undefined, dialogTitle: item.name })
@@ -40,7 +40,7 @@ export async function shareItem(item: VaultItem) {
   }
 }
 
-export async function saveToPhotos(item: VaultItem) {
+export async function saveToPhotos(item: Viewable) {
   try {
     const { granted } = await requestPermissionsAsync(true, ['photo', 'video'])
     if (!granted) { toast({ title: 'Allow Tubelight to save to your photos', body: 'Turn it on in Settings, then try again.', tone: 'error' }); return }
@@ -72,8 +72,8 @@ export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; hideOp
     title: item.name,
     items: [
       { label: item.starred ? 'Unstar' : 'Star', icon: item.starred ? StarOffIcon : StarIcon, onPress: () => toggleStar(item) },
-      ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(item) }] : []),
-      ...(media ? [{ label: 'Save to photos', icon: Download03Icon, onPress: () => saveToPhotos(item) }] : []),
+      ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(viewable(item)) }] : []),
+      ...(media ? [{ label: 'Save to photos', icon: Download03Icon, onPress: () => saveToPhotos(viewable(item)) }] : []),
       { label: 'Rename', icon: Edit02Icon, onPress: () => renameItem(item) },
       { label: 'Move to…', icon: FolderExportIcon, onPress: () => moveItem(item) },
       { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: () => removeItem(item, opts.onDeleted) },

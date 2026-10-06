@@ -1392,6 +1392,19 @@ async def preview_vault_item(item_id: str, user: User = Depends(current_user)):
         return {"type": "error", "message": "This file couldn't be opened."}
 
 
+@app.get("/attachments/preview")
+async def preview_attachment(path: str, name: str, user: User = Depends(current_user)):
+    """A chat file (one a teammate made or you sent) as the app's viewer draws it."""
+    try:
+        data = await files._download(user["id"], path)
+        return await asyncio.to_thread(vault.preview_of, name, data)
+    except PermissionError:
+        raise HTTPException(404, "That file is gone.")
+    except Exception as e:
+        log.warning("attachment preview failed: %s", e)
+        return {"type": "error", "message": "This file couldn't be opened."}
+
+
 @app.get("/vault/f/{owner_id}/{item_id}")
 async def vault_file(owner_id: str, item_id: str, k: str = "file", e: int = 0, s: str = "", dl: int = 0):
     """A file (or its thumbnail) by signed link: no login, so players and image views can load and seek it."""

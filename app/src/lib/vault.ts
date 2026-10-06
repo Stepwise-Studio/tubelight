@@ -42,6 +42,24 @@ export function kindOf(name: string, mime = ''): FileKind {
 
 export const fileUrl = (path: string, download = false) => `${BASE}${path}${download ? '&dl=1' : ''}`
 
+/** Anything the file viewer can open: a vault file or a chat attachment. `src` is a URL that needs no login. */
+export interface Viewable {
+  id: string
+  name: string
+  mime: string
+  size: number
+  meta: VaultItem['meta']
+  src: string
+  thumb?: string
+  /** The API path of its native preview (Word, sheets, slides). */
+  preview: string
+}
+
+export const viewable = (r: VaultItem): Viewable => ({
+  id: r.id, name: r.name, mime: r.mime, size: r.size, meta: r.meta ?? {}, src: fileUrl(r.url!),
+  thumb: r.thumb ? fileUrl(r.thumb) : undefined, preview: `/vault/${r.id}/preview`,
+})
+
 export function formatSize(n: number) {
   if (n < 1000) return `${n} B`
   const units = ['KB', 'MB', 'GB', 'TB']

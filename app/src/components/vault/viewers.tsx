@@ -13,7 +13,7 @@ import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Ic
 import { ImageViewer } from '@/components/chat/image-viewer'
 import { api } from '@/lib/api'
 import { Phone } from '@/lib/phone'
-import { fileUrl, formatSize, kindOf, type VaultItem } from '@/lib/vault'
+import { formatSize, kindOf, type Viewable } from '@/lib/vault'
 import { type, useTheme } from '@/theme'
 import { Button, Icon, Markdown, Segment, Skeleton, Squircle, Text, haptic } from '@/ui'
 
@@ -21,10 +21,10 @@ import { localCopy, shareItem } from './actions'
 import { FileTile } from './file-tile'
 
 export function FileBody({ item, siblings, onIndex, chrome }: {
-  item: VaultItem
+  item: Viewable
   /** Photos in the same place, for swiping between them. */
-  siblings: VaultItem[]
-  onIndex: (item: VaultItem) => void
+  siblings: Viewable[]
+  onIndex: (item: Viewable) => void
   /** Header and footer space the body leaves (it may draw under them). */
   chrome: { top: number; bottom: number }
 }) {
@@ -39,14 +39,14 @@ export function FileBody({ item, siblings, onIndex, chrome }: {
 }
 
 // ------------------------------------------------------------------ photos
-function Photos({ items, start, onIndex }: { items: VaultItem[]; start: VaultItem; onIndex: (item: VaultItem) => void }) {
+function Photos({ items, start, onIndex }: { items: Viewable[]; start: Viewable; onIndex: (item: Viewable) => void }) {
   const { width, height } = useWindowDimensions()
   const [zoomed, setZoomed] = useState(false)
   const first = Math.max(0, items.findIndex((r) => r.id === start.id))
   const tell = useRef(onIndex)
   useEffect(() => { tell.current = onIndex })
   // FlatList wants the same function for its whole life.
-  const seen = useCallback((v: { viewableItems: ViewToken<VaultItem>[] }) => { if (v.viewableItems[0]?.item) tell.current(v.viewableItems[0].item) }, [])
+  const seen = useCallback((v: { viewableItems: ViewToken<Viewable>[] }) => { if (v.viewableItems[0]?.item) tell.current(v.viewableItems[0].item) }, [])
   return (
     <FlatList
       data={items}
@@ -62,7 +62,7 @@ function Photos({ items, start, onIndex }: { items: VaultItem[]; start: VaultIte
       windowSize={3}
       renderItem={({ item }) => (
         <View style={{ width, height }}>
-          <Zoomable uri={fileUrl(item.url!)} thumb={item.thumb ? fileUrl(item.thumb) : undefined} onZoom={setZoomed} label={item.name} />
+          <Zoomable uri={item.src} thumb={item.thumb} onZoom={setZoomed} label={item.name} />
         </View>
       )}
     />
@@ -124,8 +124,8 @@ const Zoomable = memo(function Zoomable({ uri, thumb, onZoom, label }: { uri: st
 })
 
 // ------------------------------------------------------------------ video and audio
-function Video({ item }: { item: VaultItem }) {
-  const player = useVideoPlayer(fileUrl(item.url!), (p) => { p.loop = false; p.play() })
+function Video({ item }: { item: Viewable }) {
+  const player = useVideoPlayer(item.src, (p) => { p.loop = false; p.play() })
   return (
     <VideoView player={player} nativeControls contentFit="contain" fullscreenOptions={{ enable: true }}
       style={{ flex: 1, backgroundColor: '#000' }} accessibilityLabel={item.name} />
@@ -134,9 +134,9 @@ function Video({ item }: { item: VaultItem }) {
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-function Audio({ item }: { item: VaultItem }) {
+function Audio({ item }: { item: Viewable }) {
   const { c } = useTheme()
-  const player = useAudioPlayer(fileUrl(item.url!))
+  const player = useAudioPlayer(item.src)
   const status = useAudioPlayerStatus(player)
   const [bar, setBar] = useState(0)
   const dur = status.duration || 0
@@ -177,7 +177,7 @@ function Audio({ item }: { item: VaultItem }) {
 }
 
 // ------------------------------------------------------------------ PDF
-function Pdf({ item, chrome }: { item: VaultItem; chrome: { top: number; bottom: number } }) {
+function Pdf({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: number } }) {
   const { width } = useWindowDimensions()
   const [doc, setDoc] = useState<{ uri: string; sizes: [number, number][] } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -236,14 +236,14 @@ const PdfPage = memo(function PdfPage({ uri, index, width, height, onOpen }: { u
 })
 
 // ------------------------------------------------------------------ text and Markdown
-function TextFile({ item, markdown, chrome }: { item: VaultItem; markdown: boolean; chrome: { top: number; bottom: number } }) {
+function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolean; chrome: { top: number; bottom: number } }) {
   const { c } = useTheme()
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const tooBig = item.size > 2_000_000
   useEffect(() => {
     if (tooBig) return
-    fetch(fileUrl(item.url!)).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`Couldn’t open it (${r.status})`))))
+    fetch(item.src).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`Couldn’t open it (${r.status})`))))
       .then(setText, (e) => setError((e as Error).message))
   }, [item.id, tooBig]) // eslint-disable-line react-hooks/exhaustive-deps
   if (tooBig) return <Other item={item} note="It’s too big to show here. Share it to open it in another app." />
@@ -272,11 +272,11 @@ type PreviewData =
   | { type: 'slides'; slides: Slide[] }
   | { type: 'none' | 'error'; message?: string }
 
-function Preview({ item, chrome }: { item: VaultItem; chrome: { top: number; bottom: number } }) {
+function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: number } }) {
   const [p, setP] = useState<PreviewData | null>(null)
   useEffect(() => {
-    api<PreviewData>(`/vault/${item.id}/preview`).then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
-  }, [item.id])
+    api<PreviewData>(item.preview).then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
+  }, [item.preview])
   if (!p) return <Loading />
   if (p.type === 'markdown') {
     return (
@@ -385,7 +385,7 @@ function Slides({ slides, chrome }: { slides: Slide[]; chrome: { top: number; bo
 }
 
 // ------------------------------------------------------------------ the rest
-function Other({ item, note }: { item: VaultItem; note?: string }) {
+function Other({ item, note }: { item: Viewable; note?: string }) {
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 18 }}>
       <FileTile item={item} size={96} />
