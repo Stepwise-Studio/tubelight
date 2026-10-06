@@ -5,8 +5,9 @@ type EventSubscription = { remove(): void }
 
 type Events = {
   onMic: (e: { data: string }) => void
-  onInputLevel: (e: { level: number }) => void
-  onOutputLevel: (e: { level: number }) => void
+  /** RMS and the three voice bands (0–1, an AnalyserNode's byte spectrum averaged over 80–300, 300–2000, 2000–6000 Hz). */
+  onInputLevel: (e: { level: number; bands?: number[] }) => void
+  onOutputLevel: (e: { level: number; bands?: number[] }) => void
   onPlayback: (e: { playing: boolean }) => void
   onInterruption: (e: { reason: string }) => void
 }

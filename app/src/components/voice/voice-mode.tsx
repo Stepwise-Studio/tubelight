@@ -23,8 +23,9 @@ type Phase = 'connecting' | 'listening' | 'speaking' | 'working' | 'muted' | 'er
 const TASK_TIMEOUT_MS = 120_000
 
 const plain = plainText
-/** Linear RMS → the raw level voice-glow's driver expects (its base gain 5 × default sensitivity 3.1). */
-const toBeam = (rms: number) => Math.min(1, rms * 15.5)
+/** The analyser's RMS and voice bands → voice-glow's raw input: base gain 5 (bands 1.7) × default sensitivity 3.1. */
+const toBeam = (level: number, bands?: number[]) =>
+  bands?.length === 3 ? [level * 15.5, bands[0] * 5.27, bands[1] * 5.27, bands[2] * 5.27] : [level * 15.5]
 
 /** One spoken turn. `saved`: it goes into the chat as a message (a spoken task result doesn't: the reply is there). */
 export interface VoiceTurn { role: 'user' | 'teammate'; text: string; saved: boolean }
@@ -59,7 +60,7 @@ export type VoiceSession = ReturnType<typeof useVoiceSession>
  * (`live`) while it's said, so the chat reads like texting, the teammate's words appearing as they're spoken.
  */
 export function useVoiceSession({ enabled, threadId, messages, working, activity, name, onTask, onEnd, screen }: VoiceSessionOptions) {
-  const beamLevel = useSharedValue(0)
+  const beamInput = useSharedValue<number[]>([0])
   const [phase, setPhase] = useState<Phase>('connecting')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
@@ -241,8 +242,8 @@ export function useVoiceSession({ enabled, threadId, messages, working, activity
       }
       subs.push(
         LiveAudio.addListener('onMic', ({ data }) => send({ realtimeInput: { audio: { data, mimeType: 'audio/pcm;rate=16000' } } })),
-        LiveAudio.addListener('onInputLevel', ({ level }) => { if (phaseRef.current !== 'speaking') beamLevel.set(toBeam(level)) }),
-        LiveAudio.addListener('onOutputLevel', ({ level }) => { if (phaseRef.current === 'speaking') beamLevel.set(toBeam(level)) }),
+        LiveAudio.addListener('onInputLevel', ({ level, bands }) => { if (phaseRef.current !== 'speaking') beamInput.set(toBeam(level, bands)) }),
+        LiveAudio.addListener('onOutputLevel', ({ level, bands }) => { if (phaseRef.current === 'speaking') beamInput.set(toBeam(level, bands)) }),
         LiveAudio.addListener('onPlayback', ({ playing }) => {
           if (playing && phaseRef.current !== 'muted') go('speaking')
           else if (!playing && phaseRef.current === 'speaking') go(idle())
@@ -303,7 +304,7 @@ export function useVoiceSession({ enabled, threadId, messages, working, activity
   const beam: VoiceBeamMode = phase === 'listening' ? 'listening' : phase === 'speaking' ? 'speaking'
     : phase === 'working' || phase === 'connecting' ? 'processing' : 'idle'
 
-  return { phase, label, beam, beamLevel, turns, live, startedAt, offer, toggleMute, interrupt, takeOffer, stayInVoice, retry, stop }
+  return { phase, label, beam, beamInput, turns, live, startedAt, offer, toggleMute, interrupt, takeOffer, stayInVoice, retry, stop }
 }
 
 /** Turns said this session that the chat doesn't hold yet as messages, then the one being said (oldest first). */
@@ -326,8 +327,9 @@ export function unsavedTurns(v: VoiceSession, messages: ChatMessage[]): VoiceTur
 export function VoiceGlow({ v }: { v: VoiceSession }) {
   const { scheme } = useTheme()
   const [radius] = useState(() => Phone?.screenRadius() ?? 0)
-  return <VoiceBeam mode={v.beam} level={v.beamLevel} theme={scheme} radius={radius} style={{ zIndex: 30 }} />
+  return <VoiceBeam mode={v.beam} input={v.beamInput} theme={scheme} radius={radius} style={ON_TOP} />
 }
+const ON_TOP = { zIndex: 30 }
 
 /** The bottom of a chat in voice mode: what's happening, mute and end, over a soft fade (the chat shows through). */
 export function VoiceControls({ v, name, onEnd, padBottom }: {

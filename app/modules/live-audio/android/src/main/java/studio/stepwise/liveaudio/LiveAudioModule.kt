@@ -20,7 +20,6 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
-import kotlin.math.sqrt
 
 /**
  * Full-duplex voice audio for live conversations (Gemini Live): the mic streams 16 kHz PCM with the phone's echo
@@ -95,23 +94,37 @@ class LiveAudioModule : Module() {
 
     thread(name = "live-audio-mic") {
       val buf = ByteArray(chunkBytes)
+      val spectrum = Spectrum(inRate)
+      var filled = 0
+      var silent = false
       while (running.get()) {
-        val n = rec.read(buf, 0, buf.size)
+        // 16 ms reads: the glow hears the voice ~60 times a second; Gemini still gets 64 ms chunks.
+        val n = rec.read(buf, filled, minOf(512, buf.size - filled))
         if (n <= 0) continue
-        val level = rms(buf, n)
         if (muted.get()) {
-          sendEvent("onInputLevel", mapOf("level" to 0.0))
+          filled = 0
+          if (!silent) sendEvent("onInputLevel", mapOf("level" to 0.0))
+          silent = true
           continue
         }
-        sendEvent("onInputLevel", mapOf("level" to level))
-        sendEvent("onMic", mapOf("data" to Base64.encodeToString(buf, 0, n, Base64.NO_WRAP)))
+        silent = false
+        spectrum.push(buf, filled, n)
+        val (level, bands) = spectrum.read(n / 2)
+        sendEvent("onInputLevel", mapOf("level" to level, "bands" to bands))
+        filled += n
+        if (filled == buf.size) {
+          sendEvent("onMic", mapOf("data" to Base64.encodeToString(buf, 0, filled, Base64.NO_WRAP)))
+          filled = 0
+        }
       }
     }
     thread(name = "live-audio-out") {
+      val spectrum = Spectrum(outRate)
       while (running.get()) {
         val data = queue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)
         if (data == null) {
           if (playing) setPlaying(false)
+          spectrum.clear()
           continue
         }
         val gen = generation.get()
@@ -122,7 +135,9 @@ class LiveAudioModule : Module() {
         while (off < data.size && running.get() && gen == generation.get()) {
           val len = minOf(slice, data.size - off)
           track?.write(data, off, len)
-          sendEvent("onOutputLevel", mapOf("level" to rms(data.copyOfRange(off, off + len), len)))
+          spectrum.push(data, off, len)
+          val (level, bands) = spectrum.read(len / 2)
+          sendEvent("onOutputLevel", mapOf("level" to level, "bands" to bands))
           off += len
         }
       }
@@ -194,17 +209,5 @@ class LiveAudioModule : Module() {
       @Suppress("DEPRECATION")
       am.isSpeakerphoneOn = external == null
     }
-  }
-
-  /** Linear RMS of PCM16 little-endian, 0..1. */
-  private fun rms(buf: ByteArray, n: Int): Double {
-    var sum = 0.0
-    var i = 0
-    while (i + 1 < n) {
-      val s = ((buf[i].toInt() and 0xff) or (buf[i + 1].toInt() shl 8)).toShort() / 32768.0
-      sum += s * s
-      i += 2
-    }
-    return if (n >= 2) sqrt(sum / (n / 2)) else 0.0
   }
 }
