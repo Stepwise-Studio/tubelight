@@ -28,6 +28,7 @@ export function ViewerScreen({ item, shown, siblings = [], onIndex, actions }: {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   const [bare, setBare] = useState(false) // photos: a tap hides the header for the picture alone
+  const [covered, setCovered] = useState(false) // PDF search sits where the header was
   const head = shown ?? item
   const kind = kindOf(head.name, head.mime)
   const dark = kind === 'image' || kind === 'video'
@@ -44,8 +45,8 @@ export function ViewerScreen({ item, shown, siblings = [], onIndex, actions }: {
     <View style={{ flex: 1, backgroundColor: dark ? '#000' : c.canvas }}>
       <StatusBar style={dark ? 'light' : 'auto'} hidden={bare} />
       <FileBody item={item} siblings={siblings} onIndex={onIndex ?? (() => {})} chrome={{ top: dark ? 0 : bar, bottom: insets.bottom }}
-        onTap={() => setBare((b) => !b)} />
-      {!bare && <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)} style={{
+        onTap={() => setBare((b) => !b)} onCover={setCovered} />
+      {!bare && !covered && <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)} style={{
         position: 'absolute', top: 0, left: 0, right: 0, paddingTop: insets.top, height: bar,
         backgroundColor: dark ? 'rgba(0,0,0,0.45)' : c.canvas, borderBottomWidth: dark ? 0 : 1, borderColor: c.line,
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 2,

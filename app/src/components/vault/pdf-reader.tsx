@@ -1,0 +1,375 @@
+// The PDF reader: pages drawn by Android itself (PdfRenderer), the way Preview reads.
+// - Zoom: pinch (live, around your fingers) or double-tap; on release the pages are laid out again at that size and
+//   redrawn sharp, so zoomed text is real resolution, and you scroll the zoomed document both ways.
+// - Pages: a sidebar of thumbnails to scroll through and jump from; the page count jumps to a page number.
+// - Search: Android 15+ reads the text layer; every match is highlighted on its page, with next/previous.
+// It opens where you left off.
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { Image } from 'expo-image'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewToken } from 'react-native'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import Animated, { SlideInLeft, SlideOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
+import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
+
+import { Phone } from '@/lib/phone'
+import { type Viewable } from '@/lib/vault'
+import { motion, useTheme } from '@/theme'
+import { Button, Icon, IconButton, Sheet, Skeleton, Squircle, Text, TextField, haptic } from '@/ui'
+
+import { localCopy } from './actions'
+
+type Match = { page: number; rects: [number, number, number, number][]; text: string }
+const GAP = 12
+const MAX_ZOOM = 4
+const RAIL = 112 // the page sidebar
+const QUICK = motion.timing(motion.duration.quick) // plain objects, so worklets can use them
+const FAST = motion.timing(motion.duration.fast)
+const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen (a constant: lists can't take new settings)
+
+export function PdfReader({ item, chrome, onCover, fallback }: {
+  item: Viewable
+  chrome: { top: number; bottom: number }
+  /** Search covers the frame's header while it's open. */
+  onCover: (covered: boolean) => void
+  fallback: (note?: string) => React.ReactNode
+}) {
+  const { c } = useTheme()
+  const { width, height } = useWindowDimensions()
+  const [doc, setDoc] = useState<{ uri: string; sizes: [number, number][]; start: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [zoom, setZoom] = useState(1)
+  const [rail, setRail] = useState(false)
+  const [jump, setJump] = useState(false)
+  const [finding, setFinding] = useState(false)
+  const [matches, setMatches] = useState<Match[] | null>(null)
+  const [hit, setHit] = useState(0)
+  const list = useRef<FlatList<number>>(null)
+  const across = useRef<ScrollView>(null)
+  const offX = useSharedValue(0) // scroll offsets, for keeping a zoom under the fingers
+  const offY = useSharedValue(0)
+  const [landing, setLanding] = useState<{ x: number; y: number } | null>(null)
+  const key = `tl.pdf.page.${item.id}`
+  const drawable = !!Phone?.pdfInfo
+
+  useEffect(() => {
+    let live = true
+    if (!drawable) return
+    Promise.all([localCopy(item).then((f) => Phone!.pdfInfo(f.uri).then((info) => ({ uri: f.uri, sizes: info.sizes }))), AsyncStorage.getItem(key).catch(() => null)])
+      .then(([d, saved]) => {
+        if (!live) return
+        const start = Math.min(Math.max(Number(saved) || 1, 1), d.sizes.length)
+        setDoc({ ...d, start })
+        setPage(start)
+      }, (e) => live && setError((e as Error).message))
+    return () => { live = false; Phone?.pdfClose() }
+  }, [item.id, drawable]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Remember the page, a moment after you settle on it.
+  useEffect(() => {
+    if (!doc) return
+    const t = setTimeout(() => AsyncStorage.setItem(key, String(page)).catch(() => {}), 800)
+    return () => clearTimeout(t)
+  }, [page, doc, key])
+  const seen = useCallback((v: { viewableItems: ViewToken<number>[] }) => { if (v.viewableItems[0]) setPage((v.viewableItems[0].index ?? 0) + 1) }, [])
+
+  const side = rail ? RAIL : 0 // the page sidebar takes the left; pages fit beside it
+  const base = width - 24 - side // a page's width at zoom 1
+  const pw = base * zoom
+  const layoutAt = useCallback((z: number) => (doc?.sizes ?? []).reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
+    const prev = out[out.length - 1]
+    out.push({ length: (base * z * h) / w + GAP, offset: prev ? prev.offset + prev.length : chrome.top + GAP })
+    return out
+  }, []), [doc, base, chrome.top])
+  const layout = useMemo(() => layoutAt(zoom), [layoutAt, zoom])
+
+  // ---- zoom: a live transform while pinching, then the real layout at the new size, kept under the fingers
+  const live = useSharedValue(1)
+  const fx = useSharedValue(0)
+  const fy = useSharedValue(0)
+  const zoomed = useSharedValue(1)
+  useEffect(() => { zoomed.set(zoom) }, [zoom, zoomed])
+  const commit = useCallback((ratio: number, x: number, y: number) => {
+    const next = Math.min(Math.max(zoom * ratio, 1), MAX_ZOOM)
+    if (Math.abs(next - zoom) < 0.02) { live.set(withTiming(1, QUICK)); return }
+    // The document point under the fingers, found on its page, then placed on that page at the new size.
+    const docY = offY.get() + y
+    const now = layout
+    let k = now.findIndex((l) => docY < l.offset + l.length)
+    if (k < 0) k = now.length - 1
+    const within = now[k] ? (docY - now[k].offset) / now[k].length : 0
+    const then = layoutAt(next)
+    const newY = then[k] ? then[k].offset + within * then[k].length - y : 0
+    const r = next / zoom
+    const newX = next === 1 ? 0 : (offX.get() + x - 12 - side) * r - x + 12 + side
+    setLanding({ x: Math.max(0, newX), y: Math.max(0, newY) })
+    setZoom(next)
+  }, [zoom, layout, layoutAt, live, offX, offY, side])
+  // After the new layout lands: scroll to keep the spot, then drop the live transform.
+  useLayoutEffect(() => {
+    if (!landing) return
+    list.current?.scrollToOffset({ offset: landing.y, animated: false })
+    across.current?.scrollTo({ x: landing.x, animated: false })
+    offX.set(landing.x)
+    offY.set(landing.y)
+    live.set(1)
+  }, [landing, live, offX, offY])
+
+  // The sidebar changes the pages' size: stay on the same page.
+  const [railFor, setRailFor] = useState(rail)
+  if (railFor !== rail) {
+    setRailFor(rail)
+    if (layout[page - 1]) setLanding({ x: 0, y: Math.max(0, layoutAt(zoom)[page - 1].offset - chrome.top - GAP) })
+  }
+
+  const pinch = Gesture.Pinch()
+    .onStart((e) => { fx.set(e.focalX); fy.set(e.focalY) })
+    .onUpdate((e) => { live.set(Math.min(Math.max(e.scale, 1 / zoomed.get()), MAX_ZOOM / zoomed.get())) })
+    .onEnd(() => { runOnJS(commit)(live.get(), fx.get(), fy.get()) })
+  const doubleTap = Gesture.Tap().numberOfTaps(2).maxDelay(250).onEnd((e) => {
+    const target = zoomed.get() > 1.05 ? 1 : 2.5
+    const ratio = target / zoomed.get()
+    fx.set(e.x)
+    fy.set(e.y)
+    live.set(withTiming(ratio, FAST, (done) => { if (done) runOnJS(commit)(ratio, e.x, e.y) }))
+  })
+  const area = { w: width, h: height }
+  const liveStyle = useAnimatedStyle(() => {
+    const s = live.get()
+    return { transform: [{ translateX: (fx.get() - area.w / 2) * (1 - s) }, { translateY: (fy.get() - area.h / 2) * (1 - s) }, { scale: s }] }
+  })
+
+  // ---- search
+  const show = (m: Match) => {
+    if (!doc || !layout[m.page]) return
+    const f = pw / doc.sizes[m.page][0]
+    const [l, t] = m.rects[0] ?? [0, 0]
+    list.current?.scrollToOffset({ offset: Math.max(0, layout[m.page].offset + t * f - height * 0.35), animated: true })
+    if (zoom > 1) across.current?.scrollTo({ x: Math.max(0, 12 + side + l * f - width * 0.3), animated: true })
+  }
+  const find = useCallback(async (q: string) => {
+    if (!doc || !Phone?.pdfSearch) return
+    if (q.trim().length < 2) { setMatches(null); return }
+    try {
+      const found = await Phone.pdfSearch(doc.uri, q.trim(), 500)
+      setMatches(found)
+      setHit(0)
+      if (found[0]) show(found[0])
+    } catch { setMatches([]) }
+  }, [doc]) // eslint-disable-line react-hooks/exhaustive-deps
+  const step = (d: number) => {
+    if (!matches?.length) return
+    haptic.tap()
+    const n = (hit + d + matches.length) % matches.length
+    setHit(n)
+    show(matches[n])
+  }
+  const openFind = () => { haptic.tap(); setRail(false); setFinding(true); onCover(true) }
+  const closeFind = () => { Keyboard.dismiss(); setFinding(false); setMatches(null); onCover(false) }
+
+  const byPage = useMemo(() => {
+    const m = new Map<number, { rects: Match['rects']; current: boolean }[]>()
+    matches?.forEach((x, i) => { const l = m.get(x.page) ?? []; l.push({ rects: x.rects, current: i === hit }); m.set(x.page, l) })
+    return m
+  }, [matches, hit])
+
+  if (!drawable) return fallback('This build can’t draw PDFs yet: update the app.')
+  if (error) return fallback(error)
+  if (!doc) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={c.ink3} /></View>
+  const pages = doc.sizes.length
+  const go = (n: number) => {
+    setJump(false)
+    const i = Math.min(Math.max(n, 1), pages) - 1
+    list.current?.scrollToOffset({ offset: layout[i].offset - chrome.top - GAP + 1, animated: true })
+  }
+
+  return (
+    <View style={{ flex: 1, overflow: 'hidden' }}>
+      <GestureDetector gesture={Gesture.Simultaneous(pinch, doubleTap)}>
+        <Animated.View style={[{ flex: 1 }, liveStyle]}>
+          <ScrollView ref={across} horizontal scrollEnabled={zoom > 1} showsHorizontalScrollIndicator={false} bounces={false}
+            onScroll={(e) => offX.set(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32}
+            contentContainerStyle={{ width: Math.max(width, pw + 24 + side) }}>
+            <FlatList
+              ref={list}
+              style={{ width: Math.max(width, pw + 24 + side) }}
+              data={doc.sizes.map((_, i) => i)}
+              keyExtractor={(i) => String(i)}
+              extraData={byPage}
+              contentContainerStyle={{ paddingTop: chrome.top + GAP, paddingBottom: chrome.bottom + 88, paddingLeft: 12 + side, paddingRight: 12 }}
+              getItemLayout={(_, i) => ({ ...layout[i], index: i })}
+              initialScrollIndex={doc.start - 1}
+              onViewableItemsChanged={seen}
+              viewabilityConfig={PAGE_SEEN}
+              onScroll={(e) => offY.set(e.nativeEvent.contentOffset.y)}
+              scrollEventThrottle={32}
+              windowSize={zoom > 1.5 ? 3 : 5}
+              renderItem={({ item: i }) => (
+                <View style={{ paddingBottom: GAP }}>
+                  <PdfPage uri={doc.uri} index={i} width={pw} height={(pw * doc.sizes[i][1]) / doc.sizes[i][0]} scale={pw / doc.sizes[i][0]} marks={byPage.get(i)} />
+                </View>
+              )}
+            />
+          </ScrollView>
+        </Animated.View>
+      </GestureDetector>
+
+      {/* Pages: thumbnails to scroll through */}
+      {rail && (
+        <Animated.View entering={SlideInLeft.duration(motion.duration.fast).easing(motion.ease.smoothOut)} exiting={SlideOutLeft.duration(motion.duration.quick)}
+          style={{ position: 'absolute', left: 0, top: chrome.top, bottom: 0, width: RAIL, backgroundColor: c.canvas, borderRightWidth: 1, borderColor: c.line }}>
+          <Rail uri={doc.uri} sizes={doc.sizes} page={page} bottom={chrome.bottom + 88} onPick={(n) => { haptic.tap(); go(n) }} />
+        </Animated.View>
+      )}
+
+      {/* The toolbar: pages, where you are, search */}
+      {!finding && (
+        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+          style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
+          <Squircle style={{ borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.9)', flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 4 }}>
+            <Pressable onPress={() => { haptic.tap(); setRail((r) => !r) }} accessibilityLabel={rail ? 'Hide pages' : 'Show pages'} hitSlop={6}
+              style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon icon={SidebarLeftIcon} size={19} color={rail ? c.tube : '#fff'} strokeWidth={1.8} />
+            </Pressable>
+            <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
+              style={{ paddingHorizontal: 8, height: 40, justifyContent: 'center' }}>
+              <Text variant="label" color="#fff" tabular>{page} / {pages}</Text>
+            </Pressable>
+            {!!Phone?.pdfSearch && (
+              <Pressable onPress={openFind} accessibilityLabel="Search in this PDF" hitSlop={6} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon icon={Search01Icon} size={19} color="#fff" strokeWidth={1.8} />
+              </Pressable>
+            )}
+          </Squircle>
+        </Animated.View>
+      )}
+
+      {finding && <FindBar top={chrome.top} matches={matches} hit={hit} onFind={find} onStep={step} onClose={closeFind} />}
+      <PageJump open={jump} pages={pages} page={page} onGo={go} onClose={() => setJump(false)} />
+    </View>
+  )
+}
+
+/** Search, over the header: a field, how many, next and previous. */
+function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
+  top: number; matches: Match[] | null; hit: number
+  onFind: (q: string) => void; onStep: (d: number) => void; onClose: () => void
+}) {
+  const { c } = useTheme()
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => onFind(q), 280)
+    return () => clearTimeout(t)
+  }, [q]) // eslint-disable-line react-hooks/exhaustive-deps
+  const n = matches?.length ?? 0
+  return (
+    <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: top, paddingTop: top - 56, backgroundColor: c.canvas, borderBottomWidth: 1, borderColor: c.line }}>
+      <View style={{ height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 2 }}>
+        <IconButton icon={ArrowLeft01Icon} iconSize={22} accessibilityLabel="Close search" onPress={onClose} />
+        <Squircle style={{ flex: 1, height: 40, borderRadius: 12, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 }}>
+          <Icon icon={Search01Icon} size={16} color="ink3" />
+          <TextInput value={q} onChangeText={setQ} autoFocus placeholder="Find in document" placeholderTextColor={c.ink4} returnKeyType="search"
+            onSubmitEditing={() => onStep(1)} selectionColor={c.tube} cursorColor={c.tube} style={{ flex: 1, color: c.ink, fontSize: 15, paddingVertical: 0 }} />
+          {matches && <Text variant="footnote" color="ink3" tabular>{n ? `${hit + 1} of ${n}${n >= 500 ? '+' : ''}` : 'None'}</Text>}
+        </Squircle>
+        <IconButton icon={ArrowUp01Icon} iconSize={20} accessibilityLabel="Previous match" disabled={!n} onPress={() => onStep(-1)} />
+        <IconButton icon={ArrowDown01Icon} iconSize={20} accessibilityLabel="Next match" disabled={!n} onPress={() => onStep(1)} />
+      </View>
+    </Animated.View>
+  )
+}
+
+/** The page sidebar: every page small, the one you're on outlined; it keeps the current page in view. */
+function Rail({ uri, sizes, page, bottom, onPick }: { uri: string; sizes: [number, number][]; page: number; bottom: number; onPick: (n: number) => void }) {
+  const { c } = useTheme()
+  const ref = useRef<FlatList<number>>(null)
+  const tw = RAIL - 50 // a thumbnail's width
+  const rows = useMemo(() => sizes.reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
+    const prev = out[out.length - 1]
+    out.push({ length: (tw * h) / w + 34, offset: prev ? prev.offset + prev.length : 12 })
+    return out
+  }, []), [sizes, tw])
+  const { height } = useWindowDimensions()
+  const near = (p: number) => Math.max(0, (rows[p - 1]?.offset ?? 0) - height * 0.3)
+  const [start] = useState(() => near(page))
+  useEffect(() => { ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <FlatList ref={ref} data={sizes.map((_, i) => i)} keyExtractor={(i) => String(i)} contentOffset={{ x: 0, y: start }}
+      getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: bottom }} showsVerticalScrollIndicator={false}
+      renderItem={({ item: i }) => {
+        const on = i === page - 1
+        const h = (tw * sizes[i][1]) / sizes[i][0]
+        return (
+          <Pressable onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} style={{ alignItems: 'center', height: h + 34 }}>
+            <View style={{ padding: 3, borderRadius: 7, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}>
+              <Thumb uri={uri} index={i} width={tw} height={h} />
+            </View>
+            <Text variant="footnote" color={on ? 'tube' : 'ink3'} tabular style={{ marginTop: 3, fontSize: 11 }}>{i + 1}</Text>
+          </Pressable>
+        )
+      }}
+    />
+  )
+}
+
+const Thumb = memo(function Thumb({ uri, index, width, height }: { uri: string; index: number; width: number; height: number }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    Phone?.pdfPage(uri, index, 200).then((p) => live && setSrc(p.uri), () => {})
+    return () => { live = false }
+  }, [uri, index])
+  return (
+    <View style={{ width, height, borderRadius: 3, overflow: 'hidden', backgroundColor: '#fff' }}>
+      {src && <Image source={src} style={{ width, height }} contentFit="contain" transition={80} />}
+    </View>
+  )
+})
+
+/** One page: drawn at the screen's real pixels for its size (in steps, capped), the last drawing kept while a sharper
+ * one comes, and search matches marked on it. */
+const PdfPage = memo(function PdfPage({ uri, index, width, height, scale, marks }: {
+  uri: string; index: number; width: number; height: number; scale: number
+  marks?: { rects: [number, number, number, number][]; current: boolean }[]
+}) {
+  const { scale: px } = useWindowDimensions()
+  const [img, setImg] = useState<{ src: string; prev: string | null } | null>(null)
+  const step = Math.min(2400, Math.ceil((width * px) / 480) * 480)
+  useEffect(() => {
+    let live = true
+    Phone?.pdfPage(uri, index, step).then((p) => live && setImg((o) => ({ src: p.uri, prev: o?.src ?? null })), () => {})
+    return () => { live = false }
+  }, [uri, index, step])
+  return (
+    <View accessibilityLabel={`Page ${index + 1}`} style={{ width, height, borderRadius: 4, overflow: 'hidden', backgroundColor: '#fff', elevation: 2 }}>
+      {img ? <Image source={img.src} placeholder={img.prev} placeholderContentFit="fill" style={{ width, height }} contentFit="fill" transition={img.prev ? 0 : 100} />
+        : <Skeleton width={width} height={height} radius={4} />}
+      {marks?.map((m, i) => m.rects.map(([l, t, r, b], j) => (
+        <View key={`${i}-${j}`} pointerEvents="none" style={{
+          position: 'absolute', left: l * scale - 1, top: t * scale - 1, width: (r - l) * scale + 2, height: (b - t) * scale + 2, borderRadius: 2,
+          backgroundColor: m.current ? 'rgba(249,115,22,0.45)' : 'rgba(250,204,21,0.38)',
+        }} />
+      )))}
+    </View>
+  )
+})
+
+function PageJump({ open, pages, page, onGo, onClose }: { open: boolean; pages: number; page: number; onGo: (n: number) => void; onClose: () => void }) {
+  const [value, setValue] = useState('')
+  const n = Number(value)
+  const ok = Number.isInteger(n) && n >= 1 && n <= pages
+  return (
+    <Sheet open={open} onClose={onClose} title="Go to page">
+      <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 12 }}>
+        <TextField label={`Page (1–${pages})`} value={value} onChangeText={setValue} keyboardType="number-pad" autoFocus placeholder={String(page)}
+          returnKeyType="go" onSubmitEditing={() => ok && onGo(n)} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flex: 1 }}><Button label="First page" variant="soft" fullWidth onPress={() => onGo(1)} /></View>
+          <View style={{ flex: 1 }}><Button label="Last page" variant="soft" fullWidth onPress={() => onGo(pages)} /></View>
+        </View>
+        <Button label="Go" fullWidth size="lg" disabled={!ok} onPress={() => onGo(n)} />
+      </View>
+    </Sheet>
+  )
+}

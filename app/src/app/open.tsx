@@ -2,14 +2,14 @@
 import { useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
-import { Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
+import { MoreHorizontalIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { shareItem } from '@/components/vault/actions'
 import { ViewerScreen } from '@/components/vault/viewer-screen'
 import { Phone } from '@/lib/phone'
 import { uploadFiles, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { IconButton, Text, haptic, toast } from '@/ui'
+import { IconButton, Text, showMenu, toast } from '@/ui'
 
 export default function OpenedFile() {
   const { uri } = useLocalSearchParams<{ uri: string }>()
@@ -25,14 +25,16 @@ export default function OpenedFile() {
   const item: Viewable = { id: file.uri, name: file.name, mime: file.mime, size: file.size, meta: {}, src: file.uri, preview: `upload:${file.uri}` }
   return (
     <ViewerScreen item={item} actions={(ink) => (
-      <>
-        <IconButton icon={VaultIcon} color={ink} accessibilityLabel="Save to Vault" onPress={async () => {
-          haptic.tap()
-          const r = await uploadFiles([{ uri: file.uri, name: file.name, mime: file.mime, size: file.size }], '')
-          toast(r.done ? { title: 'Saved to your vault', body: file.name, tone: 'success' } : { title: 'Unable to save it', tone: 'error' })
-        }} />
-        <IconButton icon={Share08Icon} color={ink} accessibilityLabel="Share" onPress={() => shareItem(item)} />
-      </>
+      <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More: save to Vault, share" onPress={() => showMenu({
+        title: file.name,
+        items: [
+          { label: 'Save to Vault', icon: VaultIcon, onPress: async () => {
+            const r = await uploadFiles([{ uri: file.uri, name: file.name, mime: file.mime, size: file.size }], '')
+            toast(r.done ? { title: 'Saved to your vault', body: file.name, tone: 'success' } : { title: 'Unable to save it', tone: 'error' })
+          } },
+          { label: 'Share or open in…', icon: Share08Icon, onPress: () => shareItem(item) },
+        ],
+      })} />
     )} />
   )
 }

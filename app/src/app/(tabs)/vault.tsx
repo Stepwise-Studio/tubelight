@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { View } from 'react-native'
-import { Add01Icon, PieChart09Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, PieChart02Icon } from '@hugeicons/core-free-icons'
 
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
@@ -15,7 +15,7 @@ export default function Vault() {
       <VaultBrowser root parent="" bottom={inset} header={
         <TabHeader title="Vault" right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <IconButton icon={PieChart09Icon} variant="soft" round accessibilityLabel="Storage" onPress={() => setStorage(true)} />
+            <IconButton icon={PieChart02Icon} variant="soft" round accessibilityLabel="Storage" onPress={() => setStorage(true)} />
             <IconButton icon={Add01Icon} variant="soft" round accessibilityLabel="Add to your vault" onPress={() => addMenu('')} />
           </View>
         } />

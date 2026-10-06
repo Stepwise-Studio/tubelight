@@ -1,7 +1,6 @@
 // The Vault's file viewer, one native view per kind: photos (pinch, double-tap, swipe between them), video and audio
 // players, PDFs drawn page by page by Android itself, Markdown and text, Word as formatted text, spreadsheets as a
 // grid with their sheets, slide decks as slides. Anything else: what it is, and Share to open it elsewhere.
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
@@ -11,21 +10,19 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Icon } from '@hugeicons/core-free-icons'
 
-import { ImageViewer } from '@/components/chat/image-viewer'
 import { api } from '@/lib/api'
-import { Phone } from '@/lib/phone'
 import { formatSize, kindOf, type Viewable } from '@/lib/vault'
 import { type, useTheme } from '@/theme'
-import { Button, Icon, Markdown, Segment, Sheet, Skeleton, Squircle, Text, TextField, haptic } from '@/ui'
+import { Button, Icon, Markdown, Segment, Squircle, Text, haptic } from '@/ui'
 
-import { localCopy, shareItem } from './actions'
+import { shareItem } from './actions'
 import { FileTile } from './file-tile'
+import { PdfReader } from './pdf-reader'
 
 // Module constants: a list can't take new viewability settings while mounted.
 const SWIPE_SEEN = { itemVisiblePercentThreshold: 60 }
-const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen
 
-export function FileBody({ item, siblings, onIndex, chrome, onTap }: {
+export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover }: {
   item: Viewable
   /** Photos in the same place, for swiping between them. */
   siblings: Viewable[]
@@ -34,12 +31,14 @@ export function FileBody({ item, siblings, onIndex, chrome, onTap }: {
   chrome: { top: number; bottom: number }
   /** A single tap on a photo (the frame hides or shows its header). */
   onTap?: () => void
+  /** The body covers the frame's header (PDF search). */
+  onCover?: (covered: boolean) => void
 }) {
   const kind = kindOf(item.name, item.mime)
   if (kind === 'image') return <Photos items={siblings.length ? siblings : [item]} start={item} onIndex={onIndex} onTap={onTap} />
   if (kind === 'video') return <Video item={item} />
   if (kind === 'audio') return <Audio item={item} />
-  if (kind === 'pdf') return <Pdf item={item} chrome={chrome} />
+  if (kind === 'pdf') return <PdfReader item={item} chrome={chrome} onCover={onCover ?? (() => {})} fallback={(note) => <Other item={item} note={note} />} />
   if (kind === 'markdown' || kind === 'text') return <TextFile item={item} markdown={kind === 'markdown'} chrome={chrome} />
   if (kind === 'word' || kind === 'sheet' || kind === 'slides') return <Preview item={item} chrome={chrome} />
   return <Other item={item} />
@@ -183,114 +182,6 @@ function Audio({ item }: { item: Viewable }) {
     </View>
   )
 }
-
-// ------------------------------------------------------------------ PDF
-/** A PDF, page after page, drawn by Android. It opens where you left off; tap the page count to jump. */
-function Pdf({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: number } }) {
-  const { width } = useWindowDimensions()
-  const [doc, setDoc] = useState<{ uri: string; sizes: [number, number][]; start: number } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
-  const [zoom, setZoom] = useState<string | null>(null)
-  const [jump, setJump] = useState(false)
-  const list = useRef<FlatList<number>>(null)
-  const key = `tl.pdf.page.${item.id}`
-  const drawable = !!Phone?.pdfInfo
-  useEffect(() => {
-    let live = true
-    if (!drawable) return
-    Promise.all([localCopy(item).then((f) => Phone!.pdfInfo(f.uri).then((info) => ({ uri: f.uri, sizes: info.sizes }))), AsyncStorage.getItem(key).catch(() => null)])
-      .then(([d, saved]) => {
-        if (!live) return
-        const start = Math.min(Math.max(Number(saved) || 1, 1), d.sizes.length)
-        setDoc({ ...d, start })
-        setPage(start)
-      }, (e) => live && setError((e as Error).message))
-    return () => { live = false; Phone?.pdfClose() }
-  }, [item.id, drawable]) // eslint-disable-line react-hooks/exhaustive-deps
-  // Remember the page, a moment after you settle on it.
-  useEffect(() => {
-    if (!doc) return
-    const t = setTimeout(() => AsyncStorage.setItem(key, String(page)).catch(() => {}), 800)
-    return () => clearTimeout(t)
-  }, [page, doc, key])
-  const seen = useCallback((v: { viewableItems: ViewToken<number>[] }) => { if (v.viewableItems[0]) setPage((v.viewableItems[0].index ?? 0) + 1) }, [])
-  const w = width - 24
-  const layout = useMemo(() => (doc?.sizes ?? []).reduce<{ length: number; offset: number }[]>((out, [pw, ph]) => {
-    const prev = out[out.length - 1]
-    out.push({ length: (w * ph) / pw + 12, offset: prev ? prev.offset + prev.length : 12 + chrome.top })
-    return out
-  }, []), [doc, w, chrome.top])
-  if (!drawable) return <Other item={item} note="This build can’t draw PDFs yet: update the app." />
-  if (error) return <Other item={item} note={error} />
-  if (!doc) return <Loading />
-  const go = (n: number) => { setJump(false); list.current?.scrollToIndex({ index: Math.min(Math.max(n, 1), doc.sizes.length) - 1, animated: true }) }
-  return (
-    <View style={{ flex: 1 }}>
-      <FlatList
-        ref={list}
-        data={doc.sizes.map((_, i) => i)}
-        keyExtractor={(i) => String(i)}
-        contentContainerStyle={{ paddingTop: chrome.top + 12, paddingBottom: chrome.bottom + 72, alignItems: 'center' }}
-        getItemLayout={(_, i) => ({ ...layout[i], index: i })}
-        initialScrollIndex={doc.start - 1}
-        onViewableItemsChanged={seen}
-        viewabilityConfig={PAGE_SEEN}
-        windowSize={5}
-        renderItem={({ item: i }) => (
-          <View style={{ paddingBottom: 12 }}>
-            <PdfPage uri={doc.uri} index={i} width={w} height={(w * doc.sizes[i][1]) / doc.sizes[i][0]} onOpen={setZoom} />
-          </View>
-        )}
-      />
-      <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${doc.sizes.length}. Go to a page`}
-        style={{ position: 'absolute', bottom: chrome.bottom + 20, alignSelf: 'center' }}>
-        <Squircle style={{ borderRadius: 16, backgroundColor: 'rgba(24,24,27,0.86)', paddingHorizontal: 14, paddingVertical: 7 }}>
-          <Text variant="label" color="#fff" tabular>{page} / {doc.sizes.length}</Text>
-        </Squircle>
-      </Pressable>
-      <PageJump open={jump} pages={doc.sizes.length} page={page} onGo={go} onClose={() => setJump(false)} />
-      <ImageViewer url={zoom} name={`${item.name}, page ${page}`} onClose={() => setZoom(null)} />
-    </View>
-  )
-}
-
-function PageJump({ open, pages, page, onGo, onClose }: { open: boolean; pages: number; page: number; onGo: (n: number) => void; onClose: () => void }) {
-  const [value, setValue] = useState('')
-  const n = Number(value)
-  const ok = Number.isInteger(n) && n >= 1 && n <= pages
-  return (
-    <Sheet open={open} onClose={onClose} title="Go to page">
-      <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 12 }}>
-        <TextField label={`Page (1–${pages})`} value={value} onChangeText={setValue} keyboardType="number-pad" autoFocus placeholder={String(page)}
-          returnKeyType="go" onSubmitEditing={() => ok && onGo(n)} />
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <View style={{ flex: 1 }}><Button label="First page" variant="soft" fullWidth onPress={() => onGo(1)} /></View>
-          <View style={{ flex: 1 }}><Button label="Last page" variant="soft" fullWidth onPress={() => onGo(pages)} /></View>
-        </View>
-        <Button label="Go" fullWidth size="lg" disabled={!ok} onPress={() => onGo(n)} />
-      </View>
-    </Sheet>
-  )
-}
-
-const PdfPage = memo(function PdfPage({ uri, index, width, height, onOpen }: { uri: string; index: number; width: number; height: number; onOpen: (uri: string) => void }) {
-  const { scale } = useWindowDimensions()
-  const [src, setSrc] = useState<string | null>(null)
-  useEffect(() => {
-    let live = true
-    // Drawn at the screen's real pixels (capped), so text is crisp; zooming opens a sharper copy.
-    Phone?.pdfPage(uri, index, Math.min(2048, Math.round(width * scale))).then((p) => live && setSrc(p.uri), () => {})
-    return () => { live = false }
-  }, [uri, index, width, scale])
-  return (
-    <Pressable onPress={() => src && Phone?.pdfPage(uri, index, 2400).then((p) => onOpen(p.uri), () => onOpen(src))}
-      accessibilityLabel={`Page ${index + 1}`} accessibilityHint="Opens the page to zoom in"
-      style={{ width, height, borderRadius: 6, overflow: 'hidden', backgroundColor: '#fff', elevation: 2 }}>
-      {src ? <Image source={src} style={{ width, height }} contentFit="contain" transition={100} /> : <Skeleton width={width} height={height} radius={6} />}
-    </Pressable>
-  )
-})
 
 // ------------------------------------------------------------------ text and Markdown
 function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolean; chrome: { top: number; bottom: number } }) {

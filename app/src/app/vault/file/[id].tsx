@@ -1,9 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
 import { View } from 'react-native'
-import { MoreHorizontalIcon, Share08Icon, StarIcon } from '@hugeicons/core-free-icons'
+import { MoreHorizontalIcon } from '@hugeicons/core-free-icons'
 
-import { itemMenu, shareItem, toggleStar } from '@/components/vault/actions'
+import { itemMenu } from '@/components/vault/actions'
 import { ViewerScreen } from '@/components/vault/viewer-screen'
 import { byFolderThenNewest, kindOf, useVault, viewable, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
@@ -24,11 +24,7 @@ export default function VaultFile() {
   return (
     <ViewerScreen item={viewable(opened ?? item)} shown={viewable(item)} siblings={siblings.map(viewable)} onIndex={(r: Viewable) => setCurrentId(r.id)}
       actions={(ink) => (
-        <>
-          <IconButton icon={StarIcon} color={item.starred ? c.warning : ink} accessibilityLabel={item.starred ? 'Unstar' : 'Star'} onPress={() => toggleStar(item)} />
-          <IconButton icon={Share08Icon} color={ink} accessibilityLabel="Share" onPress={() => shareItem(viewable(item))} />
-          <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More" onPress={() => itemMenu(item)} />
-        </>
+        <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More: star, share, rename, move, delete" onPress={() => itemMenu(item)} />
       )} />
   )
 }

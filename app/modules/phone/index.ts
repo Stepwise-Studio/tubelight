@@ -38,6 +38,9 @@ interface PhoneModule {
   pdfInfo(path: string): Promise<{ pages: number; sizes: [number, number][] }>
   /** One page drawn at `width` px into the cache (JPEG): its file URI and pixel size. */
   pdfPage(path: string, page: number, width: number): Promise<{ uri: string; width: number; height: number }>
+  /** Matches of `query` (Android 15+): page index, boxes in page points [l, t, r, b], and a line of text around it.
+   * Throws on older Android. */
+  pdfSearch?(path: string, query: string, limit: number): Promise<{ page: number; rects: [number, number, number, number][]; text: string }[]>
   /** Close the open PDF. */
   pdfClose(): void
   /** A file another app opened with Tubelight (content:// or file://), copied into the cache. */

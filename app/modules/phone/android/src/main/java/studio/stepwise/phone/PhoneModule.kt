@@ -75,6 +75,7 @@ class PhoneModule : Module() {
     Function("status") { status() }
     AsyncFunction("pdfInfo") { path: String -> Pdf.info(path) }
     AsyncFunction("pdfPage") { path: String, page: Int, width: Int -> Pdf.render(context, path, page, width) }
+    AsyncFunction("pdfSearch") { path: String, query: String, limit: Int -> Pdf.search(path, query, limit) }
     Function("pdfClose") { Pdf.close() }
     AsyncFunction("openFile") { uri: String -> Opened.take(context, uri) }
     // The display's own corner radius in dp (Android 12+ reports it), so a glow can hug the screen's rounded edge.

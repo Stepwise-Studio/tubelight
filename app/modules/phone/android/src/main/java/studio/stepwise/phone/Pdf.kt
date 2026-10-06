@@ -55,6 +55,37 @@ object Pdf {
     }
   }
 
+  /**
+   * Every match of `query` (Android 15+ reads the text layer itself): page, the match's boxes in page points, and a
+   * line of text around it. Capped at `limit` matches.
+   */
+  @Synchronized
+  fun search(path: String, query: String, limit: Int): List<Map<String, Any>> {
+    if (android.os.Build.VERSION.SDK_INT < 35) throw UnsupportedOperationException("Search needs Android 15 or later.")
+    val r = open(path)
+    val out = ArrayList<Map<String, Any>>()
+    for (i in 0 until r.pageCount) {
+      r.openPage(i).use { p ->
+        val found = p.searchText(query)
+        if (found.isEmpty()) return@use
+        val text = p.textContents.joinToString("") { it.text }
+        for (m in found) {
+          if (out.size >= limit) return out
+          val at = m.textStartIndex
+          val from = (at - 40).coerceAtLeast(0)
+          val to = (at + query.length + 60).coerceAtMost(text.length)
+          val line = if (at in 0..text.length) text.substring(from, to).replace(Regex("\\s+"), " ").trim() else ""
+          out.add(mapOf(
+            "page" to i,
+            "rects" to m.bounds.map { b -> listOf(b.left, b.top, b.right, b.bottom) },
+            "text" to (if (from > 0) "…" else "") + line,
+          ))
+        }
+      }
+    }
+    return out
+  }
+
   @Synchronized
   fun close() {
     renderer?.close(); fd?.close()

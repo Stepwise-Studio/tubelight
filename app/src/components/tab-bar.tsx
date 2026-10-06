@@ -1,24 +1,27 @@
-// Navigation: a floating capsule of three pinned places with a pill that slides to the current one. The current
-// place carries a small up/down mark; tapping it again opens every place in a Stepwise dropdown that grows out of
-// it (edit the pins there). A round create button sits beside the capsule.
+// Navigation: a floating capsule of four places with a pill that slides to the one you're on. The first three are
+// pinned; the fourth is the switchable one (it carries a small up/down mark): it shows the last other place you
+// went to, tap to go there, tap again (or long-press) to open every place in a Stepwise dropdown grown out of it,
+// with your picture and the edit circle for choosing the pins. A round + beside the capsule creates things.
 // The menu is mounted only while open and uses entering/exiting animations, so its rendered state is its resting
 // state (release builds need that: see CLAUDE.md's Reanimated note).
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { BackHandler, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, FadeOut, LinearTransition, useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
 import {
-  BubbleChatIcon, CheckListIcon, FolderAddIcon, InboxIcon, PencilEdit02Icon, PinIcon, RepeatIcon,
-  Stamp01Icon, UnfoldMoreIcon, UserAdd01Icon, UserCircleIcon, UserGroupIcon, VaultIcon, WorkHistoryIcon,
+  Add01Icon, BubbleChatIcon, CircleCheckIcon, FolderAddIcon, InboxIcon, PinIcon, SlidersHorizontalIcon, Stamp01Icon,
+  UnfoldMoreIcon, UserAdd01Icon, UserCircleIcon, UserGroupIcon, VaultIcon, WorkHistoryIcon, WorkflowIcon,
 } from '@hugeicons/core-free-icons'
 
 import { openSheet } from '@/components/sheet-screen'
 import { addMenu } from '@/components/vault/browser'
 import { isUnread } from '@/lib/format'
+import { useSession } from '@/lib/session'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import { Badge, Icon, ListRow, Press, Sheet, Squircle, TeammateAvatar, Text, elevation, haptic, showMenu, toast, type IconSvgElement } from '@/ui'
@@ -27,44 +30,50 @@ type BottomTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tab
 
 const BAR = 64
 const GAP = 10
-const SLOT = 56
-const MARK = 16 // the up/down mark beside the current place's icon
-const ROW = 44
-const MENU_W = 228
+const ROW = 46
+const MENU_W = 248
 const KEY = 'tl.nav.pinned'
+const EXTRA = 'tl.nav.extra'
 const DEFAULT_PINS = ['index', 'tasks', 'vault']
 
 /** Every place, in menu order. Tabs by route name; the rest are pages. */
 const PLACES: { name: string; label: string; icon: IconSvgElement; href?: '/automations' }[] = [
   { name: 'index', label: 'Inbox', icon: InboxIcon },
-  { name: 'tasks', label: 'Tasks', icon: CheckListIcon },
+  { name: 'tasks', label: 'Tasks', icon: CircleCheckIcon },
   { name: 'vault', label: 'Vault', icon: VaultIcon },
   { name: 'approvals', label: 'Approvals', icon: Stamp01Icon },
   { name: 'activity', label: 'Activity', icon: WorkHistoryIcon },
-  { name: 'automations', label: 'Automations', icon: RepeatIcon, href: '/automations' },
+  { name: 'automations', label: 'Automations', icon: WorkflowIcon, href: '/automations' },
   { name: 'profile', label: 'Profile', icon: UserCircleIcon },
 ]
-const MENU_H = 6 + 36 + PLACES.length * ROW + 6
+const MENU_H = 8 + 56 + 9 + PLACES.length * ROW + 8
+const ease = motion.ease.smoothOut
 
 /** Space a scrolling tab screen must leave under its content for the floating bar. */
 export function useTabBarInset() {
   return BAR + GAP + Math.max(useSafeAreaInsets().bottom, 12)
 }
 
-const ease = motion.ease.smoothOut
-
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const { width: screen } = useWindowDimensions()
   const ws = useWorkspace()
+  const { session } = useSession()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [pins, setPins] = useState<string[]>(DEFAULT_PINS)
+  const [extra, setExtra] = useState('approvals')
   const [picker, setPicker] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
-    AsyncStorage.getItem(KEY).then((v) => { const p = v ? JSON.parse(v) : null; if (Array.isArray(p) && p.length) setPins(p) }, () => {})
+    AsyncStorage.multiGet([KEY, EXTRA]).then(([[, p], [, e]]) => {
+      const list = p ? JSON.parse(p) : null
+      if (Array.isArray(list) && list.length === 3) setPins(list)
+      if (e) setExtra(e)
+      setLoaded(true)
+    }, () => setLoaded(true))
   }, [])
   useEffect(() => {
     if (!open) return
@@ -73,6 +82,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   }, [open])
 
   const current = state.routes[state.index]?.name
+  // The fourth slot follows you to any place that isn't pinned.
+  const fourth = current && !pins.includes(current) && current !== extra ? current : extra
+  if (fourth !== extra) setExtra(fourth) // adjusting state while rendering (React's pattern for derived state)
+  useEffect(() => { if (loaded) AsyncStorage.setItem(EXTRA, extra).catch(() => {}) }, [extra, loaded])
   const unread = ws.threads.some(isUnread)
   const waiting = ws.pendingApprovals.length
   const badge = (name: string) => (name === 'approvals' ? waiting : 0)
@@ -91,38 +104,32 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   }
   const togglePin = (name: string) => {
     haptic.tap()
-    let next = pins.includes(name) ? pins.filter((n) => n !== name) : [...pins, name]
-    if (!next.length) { toast({ title: 'Keep at least one in the bar' }); return }
-    if (next.length > 3) next = next.slice(-3) // the oldest pin makes room
+    if (pins.includes(name)) { toast({ title: 'Three places stay pinned', body: 'Pin another one to replace it.' }); return }
+    const next = [...pins.slice(1), name] // the oldest pin makes room
     setPins(next)
     AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {})
   }
 
-  // The bar: the pins, plus where you are when that isn't pinned.
-  const shown = PLACES.filter((p) => pins.includes(p.name) && !p.href)
-  const here = PLACES.find((p) => p.name === current)
-  if (here && !shown.includes(here)) shown.push(here)
-  // Slots narrow a little when a fourth icon joins, so the create button always fits beside the capsule.
-  const slot = Math.min(SLOT, Math.floor((screen - 32 - BAR - 12 - 12 - MARK) / shown.length))
-  const width = 12 + shown.length * slot + MARK
-  const at = Math.max(0, shown.findIndex((p) => p.name === current))
-  const hidden = PLACES.some((p) => !shown.includes(p) && (badge(p.name) || dot(p.name)))
+  const slots = [...pins, fourth].map((n) => PLACES.find((p) => p.name === n)!).filter(Boolean)
+  const width = screen - 32 - BAR - 12
+  const slot = (width - 12) / 4
+  const at = Math.max(0, slots.findIndex((p) => p.name === current))
+  const hidden = PLACES.some((p) => !slots.includes(p) && (badge(p.name) || dot(p.name)))
 
   // The pill: placed without animation the first time, then slides (transitions.dev tabs sliding, 250ms).
   const [placed, setPlaced] = useState(false)
   useEffect(() => { const t = requestAnimationFrame(() => setPlaced(true)); return () => cancelAnimationFrame(t) }, [])
   const pillX = 6 + at * slot
   const pill = useAnimatedStyle(() => ({
-    width: placed ? withTiming(slot + MARK, { duration: motion.duration.fast, easing: ease }) : slot + MARK,
     transform: [{ translateX: placed ? withTiming(pillX, { duration: motion.duration.fast, easing: ease }) : pillX }],
-  }), [pillX, slot, placed])
+  }), [pillX, placed])
 
   const create = () => {
     haptic.tap()
     showMenu({
       title: 'New',
       items: [
-        { label: 'To-do', icon: CheckListIcon, onPress: () => router.push({ pathname: '/todo/[id]', params: { id: 'new' } }) },
+        { label: 'To-do', icon: CircleCheckIcon, onPress: () => router.push({ pathname: '/todo/[id]', params: { id: 'new' } }) },
         { label: 'Add to Vault', icon: FolderAddIcon, onPress: () => addMenu('') },
         ...(ws.teammates.length ? [{ label: 'Message a teammate', icon: BubbleChatIcon, onPress: () => setPicker(true) }] : []),
         { label: 'Project', icon: UserGroupIcon, onPress: () => openSheet('project') },
@@ -131,8 +138,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
     })
   }
 
-  // The menu grows out of the current place (Stepwise dropdown: scale from the trigger, 360ms smooth out).
-  const originX = pillX + (slot + MARK) / 2
+  // The menu grows out of the fourth slot (Stepwise dropdown: scale from the trigger, 360ms smooth out).
+  const originX = 6 + 3.5 * slot
   const grow = () => {
     'worklet'
     return {
@@ -154,62 +161,73 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
     }
   }
 
+  const meta = session?.user.user_metadata ?? {}
+  const me = meta.full_name || meta.name || session?.user.email?.split('@')[0] || 'You'
+  const photo: string | undefined = meta.avatar_url || meta.picture
+  const menuLeft = Math.min(Math.max(0, originX - MENU_W / 2), width - MENU_W + 6 + BAR + 12)
+
   return (
     <>
       {open && <Pressable style={[StyleSheet.absoluteFill, { zIndex: 1 }]} onPress={close} accessibilityLabel="Close the menu" />}
-      <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: Math.max(insets.bottom, 12), zIndex: 2, flexDirection: 'row', alignItems: 'flex-end' }}>
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: Math.max(insets.bottom, 12), zIndex: 2, flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
         <View style={{ width }}>
           {/* The capsule */}
-          <Animated.View layout={LinearTransition.duration(motion.duration.fast).easing(ease)} style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
+          <View style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
             <Squircle style={{ height: BAR, borderRadius: BAR / 2, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 }}
               accessibilityRole="tablist">
-              <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, top: 6, bottom: 6, borderRadius: 26, backgroundColor: c.tubeSoft }, pill]} />
-              {shown.map((p) => {
+              <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, top: 6, bottom: 6, width: slot, borderRadius: 26, backgroundColor: c.tubeSoft }, pill]} />
+              {slots.map((p, i) => {
                 const on = current === p.name
+                const switcher = i === 3
                 return (
-                  <Animated.View key={p.name} layout={LinearTransition.duration(motion.duration.fast).easing(ease)}
-                    entering={FadeIn.duration(motion.duration.quick)} exiting={FadeOut.duration(motion.duration.micro)}>
-                    <Pressable onPress={() => (on ? (haptic.light(), setOpen(true)) : go(p))}
-                      onLongPress={() => { haptic.light(); setOpen(true) }}
-                      accessibilityRole="tab" accessibilityState={{ selected: on }}
-                      accessibilityLabel={badge(p.name) ? `${p.label}, ${badge(p.name)} waiting` : p.label}
-                      accessibilityHint={on ? 'Opens every place' : undefined}
-                      style={{ width: on ? slot + MARK : slot, height: BAR - 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon icon={p.icon} size={24} color={on ? 'tube' : 'ink3'} strokeWidth={on ? 2 : 1.6} />
-                      {on && (
-                        <Animated.View entering={FadeIn.duration(motion.duration.fast).delay(80)} exiting={FadeOut.duration(motion.duration.micro)} style={{ marginLeft: 2 }}>
-                          <Icon icon={UnfoldMoreIcon} size={14} color="tube" strokeWidth={2} />
-                          <Marker dot={hidden} small />
-                        </Animated.View>
-                      )}
-                      <Marker count={on ? 0 : badge(p.name)} dot={!on && dot(p.name)} />
-                    </Pressable>
-                  </Animated.View>
+                  <Pressable key={switcher ? 'fourth' : p.name}
+                    onPress={() => (switcher && on ? (haptic.light(), setOpen(true)) : go(p))}
+                    onLongPress={switcher ? () => { haptic.light(); setOpen(true) } : undefined}
+                    accessibilityRole="tab" accessibilityState={{ selected: on }}
+                    accessibilityLabel={badge(p.name) ? `${p.label}, ${badge(p.name)} waiting` : p.label}
+                    accessibilityHint={switcher ? (on ? 'Opens every place' : 'Tap again to open every place') : undefined}
+                    style={{ width: slot, height: BAR - 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon icon={p.icon} size={24} color={on ? 'tube' : 'ink3'} strokeWidth={on ? 2 : 1.6} />
+                    {switcher && (
+                      <View style={{ marginLeft: 1 }}>
+                        <Icon icon={UnfoldMoreIcon} size={13} color={on ? 'tube' : 'ink4'} strokeWidth={2} />
+                        <Marker dot={hidden} small />
+                      </View>
+                    )}
+                    <Marker count={badge(p.name)} dot={dot(p.name)} />
+                  </Pressable>
                 )
               })}
             </Squircle>
-          </Animated.View>
+          </View>
 
-          {/* Every place: a Stepwise dropdown above the bar, grown out of the current place */}
+          {/* Every place: a Stepwise dropdown above the bar, grown out of the fourth slot */}
           {open && (
             <Animated.View entering={grow} exiting={shrink}
-              style={[{ position: 'absolute', left: 0, bottom: BAR + 8, width: MENU_W, borderRadius: 20, transformOrigin: [originX, MENU_H, 0] }, elevation(scheme)]}>
-              <Squircle style={{ borderRadius: 20, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 6 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', height: 36, paddingLeft: 10 }}>
-                  <Text variant="label" color="ink3" style={{ flex: 1, fontWeight: '600' }}>{editing ? 'Pin up to 3' : 'Go to'}</Text>
-                  <Press radius={12} onPress={() => { haptic.tap(); setEditing((v) => !v) }}
-                    accessibilityLabel={editing ? 'Done choosing' : 'Choose what’s in the bar'}
-                    style={{ height: 30, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: editing ? c.tubeSoft : undefined }}>
-                    <Icon icon={PinIcon} size={14} color={editing ? 'tube' : 'ink3'} strokeWidth={1.8} />
-                    <Text variant="footnote" color={editing ? 'tube' : 'ink3'} style={{ fontWeight: '600' }}>{editing ? 'Done' : 'Edit'}</Text>
+              style={[{ position: 'absolute', left: menuLeft, bottom: BAR + 10, width: MENU_W, borderRadius: 22, transformOrigin: [originX - menuLeft, MENU_H, 0] }, elevation(scheme)]}>
+              <Squircle style={{ borderRadius: 22, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', height: 56, paddingLeft: 6, paddingRight: 2 }}>
+                  {photo ? <Image source={photo} style={{ width: 34, height: 34, borderRadius: 17 }} cachePolicy="disk" accessibilityIgnoresInvertColors />
+                    : <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: c.tube, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text variant="label" color={c.onTube}>{me.slice(0, 1).toUpperCase()}</Text>
+                    </View>}
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text variant="bodyMedium" numberOfLines={1}>{me}</Text>
+                    <Text variant="footnote" color="ink3" numberOfLines={1}>{editing ? 'Tap a place to pin it' : 'Go to'}</Text>
+                  </View>
+                  <Press radius={20} smoothing={0} onPress={() => { haptic.tap(); setEditing((v) => !v) }}
+                    accessibilityLabel={editing ? 'Done choosing' : 'Choose the pinned places'}
+                    style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: editing ? c.tubeSoft : c.panel2, borderWidth: 1, borderColor: editing ? 'transparent' : c.line }}>
+                    <Icon icon={SlidersHorizontalIcon} size={18} color={editing ? 'tube' : 'ink2'} />
                   </Press>
                 </View>
+                <View style={{ height: 1, backgroundColor: c.line, marginHorizontal: 6, marginVertical: 4 }} />
                 {PLACES.map((p) => {
                   const on = current === p.name
                   const pinned = pins.includes(p.name)
                   return (
                     <Press key={p.name} radius={12} onPress={() => (editing ? (p.href ? undefined : togglePin(p.name)) : go(p))} disabled={editing && !!p.href}
-                      accessibilityLabel={editing ? `${pinned ? 'Unpin' : 'Pin'} ${p.label}` : p.label}
+                      accessibilityLabel={editing ? `${pinned ? 'Pinned' : 'Pin'} ${p.label}` : p.label}
                       style={{ height: ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, backgroundColor: on && !editing ? c.panel2 : undefined, opacity: editing && p.href ? 0.4 : 1 }}>
                       <Icon icon={p.icon} size={20} color={on ? 'ink' : 'ink2'} strokeWidth={on ? 1.9 : 1.6} />
                       <Text variant="bodyMedium" color={on ? 'ink' : 'ink2'} style={{ flex: 1 }}>{p.label}</Text>
@@ -222,11 +240,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             </Animated.View>
           )}
         </View>
-        <View style={{ flex: 1 }} />
         <View style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
           <Press radius={BAR / 2} smoothing={0} onPress={create} accessibilityLabel="New"
             style={{ width: BAR, height: BAR, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
-            <Icon icon={PencilEdit02Icon} size={24} color="ink" strokeWidth={1.8} />
+            <Icon icon={Add01Icon} size={26} color="ink" strokeWidth={1.8} />
           </Press>
         </View>
       </View>

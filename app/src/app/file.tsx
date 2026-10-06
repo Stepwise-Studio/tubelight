@@ -3,14 +3,14 @@
 import { useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { Linking, View } from 'react-native'
-import { Download03Icon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Download03Icon, MoreHorizontalIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { shareItem } from '@/components/vault/actions'
 import { ViewerScreen } from '@/components/vault/viewer-screen'
 import { supabase } from '@/lib/supabase'
 import { saveAttachment, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { IconButton, Text, haptic, toast } from '@/ui'
+import { IconButton, Text, haptic, showMenu, toast } from '@/ui'
 
 export default function ChatFile() {
   const { path, name, mime, size, pages } = useLocalSearchParams<{ path: string; name: string; mime?: string; size?: string; pages?: string }>()
@@ -36,15 +36,15 @@ export default function ChatFile() {
   }
   return (
     <ViewerScreen item={item} actions={(ink) => (
-      <>
-        <IconButton icon={VaultIcon} color={ink} accessibilityLabel="Save to Vault" onPress={() => {
-          haptic.tap()
-          saveAttachment({ path, name }).then(() => toast({ title: 'Saved to your vault', body: name, tone: 'success' }),
-            (e) => toast({ title: 'Unable to save it', body: (e as Error).message, tone: 'error' }))
-        }} />
-        <IconButton icon={Share08Icon} color={ink} accessibilityLabel="Share" onPress={() => shareItem(item)} />
-        <IconButton icon={Download03Icon} color={ink} accessibilityLabel="Download" onPress={download} />
-      </>
+      <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More: save to Vault, share, download" onPress={() => showMenu({
+        title: name,
+        items: [
+          { label: 'Save to Vault', icon: VaultIcon, onPress: () => saveAttachment({ path, name }).then(() => toast({ title: 'Saved to your vault', body: name, tone: 'success' }),
+            (e) => toast({ title: 'Unable to save it', body: (e as Error).message, tone: 'error' })) },
+          { label: 'Share', icon: Share08Icon, onPress: () => shareItem(item) },
+          { label: 'Download', icon: Download03Icon, onPress: download },
+        ],
+      })} />
     )} />
   )
 }
