@@ -269,7 +269,7 @@ function TextFile({ item, markdown, chrome }: { item: VaultItem; markdown: boole
 type PreviewData =
   | { type: 'markdown'; text: string }
   | { type: 'sheets'; sheets: { name: string; rows: string[][]; total: number }[] }
-  | { type: 'slides'; slides: { title: string; items: { text: string; level: number }[]; table?: string[][]; notes?: string }[] }
+  | { type: 'slides'; slides: Slide[] }
   | { type: 'none' | 'error'; message?: string }
 
 function Preview({ item, chrome }: { item: VaultItem; chrome: { top: number; bottom: number } }) {
@@ -298,12 +298,12 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
   const sheet = sheets[at] ?? sheets[0]
   const cols = useMemo(() => {
     const n = Math.max(0, ...sheet.rows.map((r) => r.length))
-    return Array.from({ length: n }, (_, j) => Math.min(240, Math.max(64, 16 + 7.4 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length)))))
+    return Array.from({ length: n }, (_, j) => Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length)))))
   }, [sheet])
-  const numW = 14 + 8 * String(sheet.rows.length).length
+  const numW = 26 + 8 * String(sheet.rows.length).length
   const cell = (text: string, w: number, head?: boolean, key?: number | string) => (
     <View key={key} style={{ width: w, paddingHorizontal: 8, paddingVertical: 7, borderRightWidth: 1, borderColor: c.line, backgroundColor: head ? c.panel2 : undefined }}>
-      <Text variant={head ? 'label' : 'caption'} color={head ? 'ink3' : 'ink'} numberOfLines={2} tabular>{text}</Text>
+      <Text variant={head ? 'label' : 'caption'} color={head ? 'ink3' : 'ink'} numberOfLines={head ? 1 : 2} tabular>{text}</Text>
     </View>
   )
   return (
@@ -341,7 +341,9 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
   )
 }
 
-function Slides({ slides, chrome }: { slides: { title: string; items: { text: string; level: number }[]; table?: string[][]; notes?: string }[]; chrome: { top: number; bottom: number } }) {
+interface Slide { title: string; subtitle?: string; items: { text: string; level: number }[]; table?: string[][]; notes?: string }
+
+function Slides({ slides, chrome }: { slides: Slide[]; chrome: { top: number; bottom: number } }) {
   const { c } = useTheme()
   const { width } = useWindowDimensions()
   const w = width - 32
@@ -353,7 +355,8 @@ function Slides({ slides, chrome }: { slides: { title: string; items: { text: st
       renderItem={({ item: s, index }) => (
         <View style={{ gap: 6 }}>
           <Squircle style={{ width: w, minHeight: w * 9 / 16, borderRadius: 16, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 20, gap: 10 }}>
-            {!!s.title && <Text variant="heading">{s.title}</Text>}
+            {!!s.title && <Text variant={s.subtitle && !s.items.length ? 'title' : 'heading'}>{s.title}</Text>}
+            {!!s.subtitle && <Text variant="headline" color="ink2">{s.subtitle}</Text>}
             {s.items.map((p, i) => (
               <View key={i} style={{ flexDirection: 'row', gap: 8, paddingLeft: p.level * 16 }}>
                 <Text color="ink3">{p.level ? '◦' : '•'}</Text>
@@ -369,7 +372,7 @@ function Slides({ slides, chrome }: { slides: { title: string; items: { text: st
                 ))}
               </View>
             )}
-            {!s.title && !s.items.length && !s.table && <Text color="ink3">A picture slide</Text>}
+            {!s.title && !s.subtitle && !s.items.length && !s.table && <Text color="ink3">A picture slide</Text>}
           </Squircle>
           <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4 }}>
             <Text variant="footnote" color="ink3" tabular>{index + 1}</Text>

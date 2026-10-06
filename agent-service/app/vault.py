@@ -235,6 +235,8 @@ def _inspect(owner_id: str, key: str, mime: str) -> dict[str, Any]:
                 im.thumbnail((640, 640))
                 im.save(file_path(owner_id, key, ".thumb.jpg"), "JPEG", quality=82, optimize=True)
             return {"width": w, "height": h, "thumb": True}
+        if mime.startswith("video/") and shutil.which("ffmpeg"):
+            return _video(src, file_path(owner_id, key, ".thumb.jpg"))
         if mime == "application/pdf":
             from pypdf import PdfReader
 
@@ -244,6 +246,26 @@ def _inspect(owner_id: str, key: str, mime: str) -> dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def _video(src: Path, thumb: Path) -> dict[str, Any]:
+    """Length and size (ffprobe) and a frame a second in (ffmpeg) as the thumbnail."""
+    import subprocess
+
+    meta: dict[str, Any] = {}
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration",
+                            "-of", "json", str(src)], capture_output=True, text=True, timeout=30)
+    if probe.returncode == 0:
+        info = json.loads(probe.stdout)
+        st = (info.get("streams") or [{}])[0]
+        meta = {k: v for k, v in {"width": st.get("width"), "height": st.get("height"),
+                                  "duration": round(float((info.get("format") or {}).get("duration") or 0), 1)}.items() if v}
+    at = "1" if meta.get("duration", 2) >= 2 else "0"
+    made = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", at, "-i", str(src), "-frames:v", "1",
+                           "-vf", "scale='min(640,iw)':-2", "-q:v", "4", str(thumb)], capture_output=True, timeout=60)
+    if made.returncode == 0 and thumb.exists():
+        meta["thumb"] = True
+    return meta
 
 
 def preview(owner_id: str, key: str, name: str, mime: str) -> dict[str, Any]:
@@ -282,10 +304,12 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
     from openpyxl import load_workbook
 
     wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    raw = load_workbook(io.BytesIO(data), read_only=True)  # formulas, for cells saved without their results
     out = []
-    for ws in wb.worksheets:
+    for ws, wf in zip(wb.worksheets, raw.worksheets):
         rows, total = [], 0
-        for r in ws.iter_rows(values_only=True):
+        for r, f in zip(ws.iter_rows(values_only=True), wf.iter_rows(values_only=True)):
+            r = [v if v is not None else (fv if isinstance(fv, str) and fv.startswith("=") else None) for v, fv in zip(r, f)]
             cells = ["" if v is None else (f"{v:g}" if isinstance(v, float) else str(v)) for v in r[:MAX_COLS]]
             if not any(cells):
                 continue
@@ -312,11 +336,16 @@ def _slides(data: bytes) -> list[dict[str, Any]]:
         for sh in slide.shapes:
             if sh == head:
                 continue
-            if sh.has_text_frame:
+            if sh.is_placeholder and sh.placeholder_format.type == 4 and sh.has_text_frame and sh.text_frame.text.strip():  # SUBTITLE
+                s["subtitle"] = sh.text_frame.text.strip()
+            elif sh.has_text_frame:
                 s["items"] += [{"text": p.text.strip(), "level": p.level} for p in sh.text_frame.paragraphs if p.text.strip()]
             elif getattr(sh, "has_table", False) and sh.has_table and "table" not in s:
                 s["table"] = [[c.text.strip() for c in r.cells] for r in sh.table.rows]
         if slide.has_notes_slide and slide.notes_slide.notes_text_frame.text.strip():
             s["notes"] = slide.notes_slide.notes_text_frame.text.strip()
+        if not out and "subtitle" not in s and len(s["items"]) == 1 and "table" not in s:  # a title slide's one line
+            s["subtitle"] = s.pop("items")[0]["text"]
+            s["items"] = []
         out.append(s)
     return out

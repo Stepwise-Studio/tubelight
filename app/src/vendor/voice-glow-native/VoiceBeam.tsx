@@ -17,12 +17,15 @@
  */
 import { Canvas, Fill, Shader, Skia } from '@shopify/react-native-skia'
 import { memo, useEffect, useMemo, useState } from 'react'
-import { View, type ViewStyle } from 'react-native'
+import { PixelRatio, View, type ViewStyle } from 'react-native'
 import Animated, { FadeOut, useFrameCallback, useReducedMotion, useSharedValue, type SharedValue } from 'react-native-reanimated'
 
 import { MODES, resolve, source, step, type State, type Uniforms, type VoiceBeamMode } from './glow'
 
 export type { VoiceBeamMode } from './glow'
+
+/** Pixels per point the glow is drawn at (the screen has ~2.6): soft light needs no more. */
+const DENSITY = 1.25
 
 const effects: Partial<Record<'dark' | 'light', ReturnType<typeof Skia.RuntimeEffect.Make>>> = {}
 function effect(theme: 'dark' | 'light') {
@@ -61,23 +64,25 @@ function Glow({ mode, input, theme, radius, W, H }: { mode: VoiceBeamMode; input
   const fx = effect(theme)
   const modeValue = useSharedValue(MODES[mode])
   const state = useSharedValue<State>({ level: 0, b0: 0, b1: 0, b2: 0, phase: 0, scanA: 0, scanT: 0, t: 0, last: 0, warp: 1, opacity: 0 })
+  // Drawn at DENSITY pixels per point and scaled up to fill the host: a fraction of the screen's pixels, the same light.
+  const scale = Math.max(1, PixelRatio.get() / DENSITY)
   const uniforms = useSharedValue<Uniforms>(useMemo(
-    () => step({ level: 0, b0: 0, b1: 0, b2: 0, phase: 0, scanA: 0, scanT: 0, t: 0, last: 0, warp: 1, opacity: 0 }, k, 0, [0], W, H, radius, 0, true),
-    [k, W, H, radius]))
+    () => step({ level: 0, b0: 0, b1: 0, b2: 0, phase: 0, scanA: 0, scanT: 0, t: 0, last: 0, warp: 1, opacity: 0 }, k, 0, [0], W, H, radius, 0, true, scale),
+    [k, W, H, radius, scale]))
 
   useEffect(() => { modeValue.value = MODES[mode] }, [mode, modeValue])
 
   useFrameCallback(({ timestamp }) => {
     'worklet'
     const s = state.value
-    uniforms.value = step(s, k, modeValue.value, input.value, W, H, radius, timestamp, still)
+    uniforms.value = step(s, k, modeValue.value, input.value, W, H, radius, timestamp, still, scale)
     state.value = s
   })
 
   if (!fx) return null
   return (
     <View style={{ width: W, height: H }}>
-      <Canvas style={{ width: W, height: H }}>
+      <Canvas style={{ position: 'absolute', left: 0, top: 0, width: W / scale, height: H / scale, transform: [{ scale }], transformOrigin: 'left top' }}>
         <Fill>
           <Shader source={fx} uniforms={uniforms} />
         </Fill>

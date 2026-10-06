@@ -12,6 +12,8 @@ import { byFolderThenNewest, formatSize, kindOf, useVault, type VaultItem } from
 import { motion, useTheme } from '@/theme'
 import { IconButton, Text } from '@/ui'
 
+const clockOf = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+
 /** One file, full screen: photos and video on black under a floating header; documents on the canvas. */
 export default function VaultFile() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -29,7 +31,13 @@ export default function VaultFile() {
   const dark = kind === 'image' || kind === 'video'
   const ink = dark ? '#fff' : c.ink
   const bar = 56 + insets.top
-  const meta = [formatSize(item.size), item.meta?.width && item.meta?.height && `${item.meta.width} × ${item.meta.height}`, item.meta?.pages && `${item.meta.pages} pages`].filter(Boolean).join(' · ')
+  const m = item.meta ?? {}
+  const meta = [
+    formatSize(item.size),
+    kind === 'video' && m.duration && clockOf(m.duration),
+    (kind === 'image' || kind === 'video') && m.width && m.height && `${m.width} × ${m.height}`,
+    kind === 'pdf' && m.pages && `${m.pages} ${m.pages === 1 ? 'page' : 'pages'}`,
+  ].filter(Boolean).join(' · ')
   return (
     <View style={{ flex: 1, backgroundColor: dark ? '#000' : c.canvas }}>
       <StatusBar style={dark ? 'light' : 'auto'} />

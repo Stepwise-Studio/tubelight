@@ -59,6 +59,7 @@ export function source(dark: boolean) {
   const hi = dark ? [0.45, 0.3, 0.14, 0.65] : [0.55, 0.35, 0.22, 0.7]
   return `
 uniform float2 uSize;
+uniform float uScale;
 uniform float uR;
 uniform float uTop;
 uniform float4 uA[7];
@@ -121,7 +122,7 @@ float cover(float d, float hw, float s) { float a = abs(d); return phi((hw - a) 
 float bell(float t) {
   float s = max(0.05, SPREAD * (t < 0.0 ? 1.0 - SKEW : 1.0 + SKEW));
   float v = exp(-pow(abs(t) / s, CURVE));
-  float tail = exp(-pow(1.0 / s, CURVE));
+  float tail = t < 0.0 ? 0.238018 : 0.372423; // exp(-(1 / s)^CURVE), per side
   return max(0.0, (v - tail) / (1.0 - tail));
 }
 
@@ -183,7 +184,10 @@ float4 ridge(float4 acc, float dv, float sl, float inv, float ox, float oy, floa
   return r;
 }
 
-half4 main(float2 p) {
+// The canvas is drawn at a fraction of the screen's pixels and scaled up (the glow is all soft light):
+// \`pos\` is in canvas units, \`p\` in the host's.
+half4 main(float2 pos) {
+  float2 p = pos * uScale;
   if (p.y < uTop) return half4(0.0);
   float W = uSize.x;
   float H = uSize.y;
@@ -242,22 +246,24 @@ half4 main(float2 p) {
   }
 
   // z4 · band: the halo, then red above, faint green, blue below and the white core, each a blurred ramp.
-  if (uRidge.x > 0.002 && abs(dv) < 170.0) {
+  if (uRidge.x > 0.002 && abs(dv) < 125.0) {
     float x0 = uBand2.y;
     float x1 = uBand2.z;
     float u = (p.x - x0) / max(1.0, x1 - x0);
     float ends = u <= 0.0 || u >= 1.0 ? 0.0 : min(1.0, min(u, 1.0 - u) / END_FADE);
     if (ends > 0.0) {
-      float sl = (bandY(p.x + 1.0) - bandY(p.x - 1.0)) * 0.5;
+      float sl = (bandY(p.x + 2.0) - y0) * 0.5;
       float inv = inversesqrt(1.0 + sl * sl);
       float a = uRidge.x * ends;
       float th = uRidge.y;
       float c = a * 0.3 * cover(dv * inv, th * 1.1, BAND_SIGMA * 3.0);
       float4 b = float4(uK0 * c, c);
-      b = ridge(b, dv, sl, inv, uRidge.z, -uRidge.w, uK1, a, th);
-      b = ridge(b, dv, sl, inv, uRidge.z * 0.35, -uRidge.w * 0.35, uK2, a * 0.55, th);
-      b = ridge(b, dv, sl, inv, -uRidge.z, uRidge.w, uK3, a, th);
-      b = ridge(b, dv, sl, inv, 0.0, 0.0, uK0, a * 0.9, th);
+      if (abs(dv) < 80.0) { // the ridges reach ~60 px; past that only the halo shows
+        b = ridge(b, dv, sl, inv, uRidge.z, -uRidge.w, uK1, a, th);
+        b = ridge(b, dv, sl, inv, uRidge.z * 0.35, -uRidge.w * 0.35, uK2, a * 0.55, th);
+        b = ridge(b, dv, sl, inv, -uRidge.z, uRidge.w, uK3, a, th);
+        b = ridge(b, dv, sl, inv, 0.0, 0.0, uK0, a * 0.9, th);
+      }
       col = over(b, col);
     }
   }
@@ -328,7 +334,7 @@ export interface State {
 export type Uniforms = Record<string, number | number[]>
 
 /** One frame: the driver step, then the numbers the shader needs. */
-export function step(s: State, k: Config, mode: number, input: number[], W: number, H: number, R: number, ts: number, still: boolean): Uniforms {
+export function step(s: State, k: Config, mode: number, input: number[], W: number, H: number, R: number, ts: number, still: boolean, scale = 1): Uniforms {
   'worklet'
   const dt = s.last ? Math.min(0.05, (ts - s.last) / 1000) : 1 / 60
   s.last = ts
@@ -427,6 +433,7 @@ export function step(s: State, k: Config, mode: number, input: number[], W: numb
   const grow = 1.24
   return {
     uSize: [W, H],
+    uScale: scale,
     uR: R,
     uTop: Math.max(0, Math.min(H - maskB[3], base - apex * 1.7 - arcR - 180) - 8),
     uA: A, uB: B, uC: C,

@@ -41,7 +41,7 @@ def test_word_and_pdf_from_markdown_read_back():
     assert name == "Launch plan.docx"
     text = documents.read_docx(data)
     assert "# Launch plan" in text and "## Steps" in text and "| Hero | Dev | 20 Oct |" in text and "₹1,200" in text
-    assert "1.\tDesign the hero" in text and "Keep it simple." in text
+    assert "1. Design the hero" in text and "Keep it simple." in text
 
     name, data = documents.make("pdf", "Launch plan", MD)
     from pypdf import PdfReader

@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { RefreshControl, ScrollView, View } from 'react-native'
 import { Add01Icon, CheckListIcon, Clock01Icon } from '@hugeicons/core-free-icons'
@@ -7,7 +7,6 @@ import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { FollowupList, FollowupSheet } from '@/components/tasks/followups'
 import { TodoList } from '@/components/tasks/todo-list'
-import { TodoSheet } from '@/components/tasks/todo-sheet'
 import { dueLabel, refreshTasks, useFollowups, useTodos, type Followup, type Todo, type TodoStatus } from '@/lib/tasks'
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
@@ -22,7 +21,6 @@ export default function Tasks() {
   const { todos, error } = useTodos()
   const follow = useFollowups()
   const [view, setView] = useState<View_>('todos')
-  const [sheet, setSheet] = useState<{ open: boolean; todo: Todo | null; status?: TodoStatus; n: number }>({ open: false, todo: null, n: 0 })
   const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
   const [refreshing, setRefreshing] = useState(false)
 
@@ -33,7 +31,7 @@ export default function Tasks() {
   const dueToday = open.filter((t) => t.due && dueLabel(t.due).today).length
   const overdue = open.filter((t) => t.due && dueLabel(t.due).overdue).length
   const summary = [`${open.length} open`, dueToday && `${dueToday} due today`, overdue && `${overdue} overdue`].filter(Boolean).join(' · ')
-  const add = (status?: TodoStatus) => { haptic.tap(); setSheet((s) => ({ open: true, todo: null, status, n: s.n + 1 })) }
+  const add = (status?: TodoStatus) => { haptic.tap(); router.push({ pathname: '/todo/[id]', params: { id: 'new', ...(status ? { status } : {}) } }) }
   const sleeper = ws.teammates[0]
 
   return (
@@ -58,7 +56,7 @@ export default function Tasks() {
         {view === 'todos' ? (
           <Reveal ready={todos !== null || !!error} style={{ flexGrow: 1 }} skeleton={<Rows />}>
             {todos?.length ? (
-              <TodoList todos={todos} onOpen={(todo) => setSheet((s) => ({ open: true, todo, n: s.n + 1 }))} onAdd={add} />
+              <TodoList todos={todos} onOpen={(todo: Todo) => router.push({ pathname: '/todo/[id]', params: { id: todo.id } })} onAdd={add} />
             ) : (
               <EmptyState
                 art={<View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={CheckListIcon} size={26} color="tube" /></View>}
@@ -82,7 +80,6 @@ export default function Tasks() {
           </Reveal>
         )}
       </ScrollView>
-      <TodoSheet key={`t${sheet.n}`} open={sheet.open} todo={sheet.todo} status={sheet.status} onClose={() => setSheet((s) => ({ ...s, open: false }))} />
       <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={() => setFsheet((s) => ({ ...s, open: false }))} />
     </View>
   )

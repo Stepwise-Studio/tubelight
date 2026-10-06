@@ -76,3 +76,21 @@ def test_teammates_get_todos_and_vault(env):
     ivy = {"id": "i1", "name": "Ivy", "handle": "ivy", "role": "Chief of staff", "avatar_shape": "face:ivy", "allowed_toolkits": []}
     names = {t.name for t in tools.build(graph.RunCtx(run_id="r", owner_id=U, thread_id="dm:i1", members=[ivy]), ivy, [])}
     assert {"todos", "vault"} <= names
+
+
+async def test_assigning_a_todo_hands_it_to_the_teammate(env, monkeypatch):
+    from app import runs
+    fdb, _ = env
+    fdb.tables["teammates"] = [{"id": "i1", "owner_id": U, "name": "Ivy"}]
+    started = []
+
+    async def fake_start(owner, thread, text, **kw):
+        started.append((thread, text, kw))
+        return "run1"
+    monkeypatch.setattr(runs, "start", fake_start)
+    t = await todos.add(U, "Draft the launch post", assignee="i1", due="2026-10-09")
+    assert await todos.hand_to(U, t)
+    thread, text, kw = started[0]
+    assert thread == "dm:i1" and "Draft the launch post" in text and kw["teammate_id"] == "i1"
+    assert any("You assigned Ivy a to-do" in m["text"] for m in fdb.rows("messages", thread_id="dm:i1"))
+    assert "assigned to Ivy" in todos.describe(t, {"i1": "Ivy"})

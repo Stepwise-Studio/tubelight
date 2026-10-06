@@ -45,8 +45,12 @@ def read_docx(data: bytes) -> str:
             if not text:
                 continue
             m = re.match(r"Heading (\d)", style)
+            # Bullets and numbers typed into the text ("•\tItem", "2.\tItem") are list items too, marked once.
+            mark = re.match(r"^(?:[•◦▪‣–\-*]|(\d+)[.)])\s+", text)
+            if mark:
+                text = f"{mark.group(1)}. {text[mark.end():]}" if mark.group(1) else f"- {text[mark.end():]}"
             out.append(f"{'#' * int(m.group(1))} {text}" if m else f"# {text}" if style == "Title"
-                       else f"- {text}" if "List" in style else text)
+                       else text if mark else f"- {text}" if "List" in style else text)
         elif el.tag.endswith("}tbl"):
             rows = [[c.text.strip().replace("\n", " ") for c in r.cells] for r in Table(el, doc).rows]
             out.append(_md_table(rows))

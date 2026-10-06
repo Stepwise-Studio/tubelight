@@ -4,7 +4,7 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { useMemo, useState, type ReactNode } from 'react'
-import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
+import { FlatList, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
 import {
   Add01Icon, Camera01Icon, Cancel01Icon, File01Icon, FolderAddIcon, Image01Icon, MoreHorizontalIcon, PlayIcon, StarIcon,
@@ -103,9 +103,9 @@ export function VaultBrowser({ parent, header, root }: { parent: string; header:
             {root && !filtered && usage && items && <Storage items={all} free={usage.free} />}
             <SearchField value={query} onChangeText={setQuery} placeholder={parent ? 'Search this folder' : 'Search your vault'} />
             {root && !query && (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
                 {FILTERS.map((f) => <Chip key={f.value} label={f.label} selected={filter === f.value} onPress={() => { haptic.tap(); setFilter(f.value) }} />)}
-              </View>
+              </ScrollView>
             )}
           </View>
         </View>
@@ -247,8 +247,10 @@ function MediaTile({ item, size }: { item: VaultItem; size: number }) {
       outerStyle={{ width: size, height: size }} style={{ width: size, height: size, overflow: 'hidden' }}>
       <Thumb item={item} style={{ width: size, height: size }} />
       {video && (
-        <View style={{ position: 'absolute', left: 6, bottom: 6, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon icon={PlayIcon} size={12} color="#fff" strokeWidth={2.2} />
+        <View style={{ position: 'absolute', left: 6, bottom: 6, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Icon icon={PlayIcon} size={10} color="#fff" strokeWidth={2.4} />
+          {!!item.meta?.duration && <Text variant="footnote" color="#fff" tabular style={{ fontSize: 11, lineHeight: 14 }}>
+            {`${Math.floor(item.meta.duration / 60)}:${String(Math.round(item.meta.duration % 60)).padStart(2, '0')}`}</Text>}
         </View>
       )}
       {item.starred && (

@@ -1220,6 +1220,7 @@ class TodoIn(BaseModel):
     priority: int = 0
     due: str | None = None
     project_id: str | None = None
+    assignee: str | None = None
 
 
 @app.get("/todos")
@@ -1230,19 +1231,25 @@ async def list_todos(user: User = Depends(current_user)):
 @app.post("/todos")
 async def add_todo(body: TodoIn, user: User = Depends(current_user)):
     try:
-        return await todos.add(user["id"], body.title, **body.model_dump(exclude={"title"}))
+        t = await todos.add(user["id"], body.title, **body.model_dump(exclude={"title"}))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if t.get("assignee"):
+        await todos.hand_to(user["id"], t)
+    return t
 
 
 @app.patch("/todos/{todo_id}")
 async def edit_todo(todo_id: str, body: dict[str, Any], user: User = Depends(current_user)):
+    before = await todos.get(user["id"], todo_id)
     try:
         t = await todos.update(user["id"], todo_id, body)
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
     if not t:
         raise HTTPException(404, "That to-do is gone.")
+    if t.get("assignee") and t["assignee"] != (before or {}).get("assignee"):
+        await todos.hand_to(user["id"], t)  # newly assigned: they pick it up
     return t
 
 

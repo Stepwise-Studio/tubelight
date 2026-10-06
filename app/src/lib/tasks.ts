@@ -18,6 +18,8 @@ export interface Todo {
   thread_id: string | null
   /** The teammate who added it; null when you did. */
   added_by: string | null
+  /** The teammate it's assigned to (they work on it); null: yours. */
+  assignee: string | null
   sort: number
   created_at: string
   updated_at: string
@@ -107,7 +109,7 @@ async function optimistic(next: (l: Todo[]) => Todo[], call: () => Promise<unkno
 export async function addTodo(fields: Partial<Todo> & { title: string }) {
   const temp: Todo = {
     id: `temp-${Date.now()}`, notes: '', status: 'todo', priority: 0, due: null, project_id: null, thread_id: null,
-    added_by: null, sort: -Date.now() / 1000, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    added_by: null, assignee: null, sort: -Date.now() / 1000, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     completed_at: null, ...fields,
   }
   let made: Todo | null = null

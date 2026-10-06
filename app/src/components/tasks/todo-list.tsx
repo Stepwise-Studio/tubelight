@@ -17,6 +17,8 @@ import { Icon, IconButton, IconSwap, Press, TeammateAvatar, Text, haptic, showMe
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 
 const FOLDED: TodoStatus[] = ['done', 'canceled']
+/** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
+const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const layout = LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)
 
 export function TodoList({ todos, onOpen, onAdd }: { todos: Todo[]; onOpen: (t: Todo) => void; onAdd: (s: TodoStatus) => void }) {
@@ -75,7 +77,7 @@ function TodoRow({ todo: t, onOpen }: { todo: Todo; onOpen: () => void }) {
   const swipe = useRef<SwipeableMethods>(null)
   const finished = t.status === 'done' || t.status === 'canceled'
   const due = t.due && !finished ? dueLabel(t.due) : null
-  const adder = t.added_by ? ws.teammate(t.added_by) : null
+  const who = t.assignee ? ws.teammate(t.assignee) : t.added_by ? ws.teammate(t.added_by) : null
   const project = t.project_id ? ws.projects.find((p) => p.id === t.project_id) : null
 
   const toggle = () => {
@@ -131,7 +133,7 @@ function TodoRow({ todo: t, onOpen }: { todo: Todo; onOpen: () => void }) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 {project && <View style={{ width: 8, height: 8, borderRadius: 2.5, backgroundColor: project.color }} />}
                 <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flex: 1 }}>
-                  {[project?.name, t.notes.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ')}
+                  {[project?.name, plain(t.notes)].filter(Boolean).join(' · ')}
                 </Text>
               </View>
             )}
@@ -144,7 +146,7 @@ function TodoRow({ todo: t, onOpen }: { todo: Todo; onOpen: () => void }) {
               </View>
             )}
             {t.priority > 0 && !finished && <PriorityGlyph priority={t.priority} size={15} />}
-            {adder && <TeammateAvatar teammate={adder} size={20} interactive={false} />}
+            {who && <TeammateAvatar teammate={who} size={20} interactive={false} />}
           </View>
         </Press>
       </ReanimatedSwipeable>
