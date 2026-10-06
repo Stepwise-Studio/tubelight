@@ -21,7 +21,7 @@ export interface VaultItem {
   url?: string
   thumb?: string
 }
-export interface VaultUsage { used: number; files: number; free: number; total: number }
+export interface VaultUsage { used: number; files: number; free: number; total: number; quota: number }
 export interface Upload { id: string; name: string; parent: string; mime: string; size: number; progress: number; local: string; error?: string }
 
 export type FileKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'word' | 'sheet' | 'slides' | 'archive' | 'other'

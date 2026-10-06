@@ -6,7 +6,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
 import { useMemo, useState, type ReactNode } from 'react'
 import { FlatList, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, FadeInDown, FadeOutDown } from 'react-native-reanimated'
+import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated'
 import {
   Add01Icon, ArrowDown01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, File01Icon, FolderAddIcon,
   FolderExportIcon, GridViewIcon, Image01Icon, LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon,
@@ -18,7 +18,7 @@ import {
   useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
 } from '@/lib/vault'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, SearchField, Skeleton, Squircle, Text, confirm, elevation, haptic, showMenu, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Squircle, Text, confirm, elevation, haptic, showMenu, toast } from '@/ui'
 
 import { itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
 import { FileIcon, KIND_COLOR } from './file-icon'
@@ -45,7 +45,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
 }) {
   const { c } = useTheme()
   const { width } = useWindowDimensions()
-  const { items, usage, uploads, error } = useVault()
+  const { items, uploads, error } = useVault()
   const [prefs, setPrefs] = useVaultPrefs()
   const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -121,7 +121,6 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
             {header}
             <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: 2 }}>
               <SearchField value={query} onChangeText={setQuery} placeholder={category ? `Search ${CATEGORIES.find((x) => x.id === category)?.label.toLowerCase()}` : parent ? 'Search this folder' : 'Search your vault'} />
-              {root && !query && usage && items && <Storage items={all} free={usage.free} />}
             </View>
             {root && !query && items && all.some((r) => r.kind === 'file') && <Browse items={all} width={card} />}
             {root && !query && items && <Recent items={all} onOpen={press} onHold={hold} selected={selected} />}
@@ -216,47 +215,61 @@ export function addMenu(parent: string) {
   })
 }
 
-/** What the vault holds, by kind, and how much room the server has left. */
-function Storage({ items, free }: { items: VaultItem[]; free: number }) {
+/** What the vault holds, by kind, against its 20 GB: the bar is the whole allowance, so the empty part is what's free. */
+export function StorageSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { c } = useTheme()
+  const { items, usage } = useVault()
+  const all = items ?? []
   const parts = [
-    { label: 'Photos', cat: 'photos' as const, color: KIND_COLOR.image },
-    { label: 'Videos', cat: 'videos' as const, color: KIND_COLOR.video },
-    { label: 'Documents', cat: 'docs' as const, color: KIND_COLOR.pdf },
-    { label: 'Audio', cat: 'audio' as const, color: KIND_COLOR.audio },
-  ].map((p) => ({ ...p, bytes: items.filter((r) => inCategory(r, p.cat)).reduce((s, r) => s + r.size, 0) }))
-  const files = items.filter((r) => r.kind === 'file')
+    { label: 'Photos', cat: 'photos' as const, color: KIND_COLOR.image, icon: CAT_LOOK.photos.icon },
+    { label: 'Videos', cat: 'videos' as const, color: KIND_COLOR.video, icon: CAT_LOOK.videos.icon },
+    { label: 'Documents', cat: 'docs' as const, color: KIND_COLOR.pdf, icon: CAT_LOOK.docs.icon },
+    { label: 'Audio', cat: 'audio' as const, color: KIND_COLOR.audio, icon: CAT_LOOK.audio.icon },
+  ].map((p) => {
+    const l = all.filter((r) => inCategory(r, p.cat))
+    return { ...p, n: l.length, bytes: l.reduce((s, r) => s + r.size, 0) }
+  })
+  const files = all.filter((r) => r.kind === 'file')
   const used = files.reduce((s, r) => s + r.size, 0)
-  const other = used - parts.reduce((s, p) => s + p.bytes, 0)
-  const shown = [...parts, { label: 'Other', cat: 'all' as const, color: c.ink4, bytes: other }].filter((p) => p.bytes > 0)
+  const other = { label: 'Other', cat: 'all' as const, color: c.ink4, icon: File01Icon, n: files.length - parts.reduce((s, p) => s + p.n, 0), bytes: used - parts.reduce((s, p) => s + p.bytes, 0) }
+  const shown = [...parts, other].filter((p) => p.bytes > 0)
+  const quota = usage?.quota || 20 * 1024 ** 3
+  const free = usage?.free ?? Math.max(0, quota - used)
+  const pct = Math.min(100, (used / quota) * 100)
   return (
-    <Animated.View entering={FadeIn.duration(motion.duration.slow)}>
-      <Squircle style={{ borderRadius: 22, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 16, gap: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-          <View style={{ flex: 1 }}>
-            <Text variant="footnote" color="ink3">On your server</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-              <Text variant="title" tabular>{formatSize(used)}</Text>
-              <Text variant="footnote" color="ink3" tabular>in {files.length.toLocaleString()} {files.length === 1 ? 'file' : 'files'}</Text>
-            </View>
+    <Sheet open={open} onClose={onClose} title="Storage">
+      <View style={{ paddingHorizontal: 20, paddingBottom: 12, gap: 18 }}>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+            <Text variant="largeTitle" tabular>{formatSize(used)}</Text>
+            <Text variant="body" color="ink3" tabular>of {formatSize(quota)}</Text>
           </View>
-          <Text variant="footnote" color="ink3" tabular style={{ paddingBottom: 6 }}>{formatSize(free)} free</Text>
+          <Text variant="label" color="ink3" tabular>{formatSize(free)} free · {pct < 1 && used ? 'under 1' : Math.round(pct)}% used · {files.length.toLocaleString()} {files.length === 1 ? 'file' : 'files'}</Text>
         </View>
-        <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: c.panel2, gap: used ? 2 : 0 }}>
-          {shown.map((p) => <View key={p.label} style={{ flex: Math.max(p.bytes / Math.max(used, 1), 0.02), backgroundColor: p.color }} />)}
+        {/* The whole allowance; each kind takes its share, the rest is free space */}
+        <View accessibilityLabel={`${formatSize(used)} used, ${formatSize(free)} free`}
+          style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: c.panel2, gap: 2 }}>
+          {shown.map((p) => <View key={p.label} style={{ width: `${Math.max((p.bytes / quota) * 100, 1.2)}%`, backgroundColor: p.color }} />)}
+          <View style={{ flex: 1, borderRadius: 3, borderWidth: 1, borderColor: c.line, borderStyle: 'dashed' }} />
         </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 6 }}>
-          {shown.map((p) => (
-            <View key={p.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 3, backgroundColor: p.color }} />
-              <Text variant="footnote" color="ink2">{p.label}</Text>
-              <Text variant="footnote" color="ink3" tabular>{formatSize(p.bytes)}</Text>
-            </View>
+        <View style={{ gap: 4 }}>
+          {[...shown, { label: 'Free', cat: null, color: c.panel3, icon: null, n: 0, bytes: free }].map((p) => (
+            <Press key={p.label} radius={14} disabled={!p.cat} onPress={() => { onClose(); if (p.cat) router.push({ pathname: '/vault/[id]', params: { id: `cat:${p.cat}` } }) }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4 }}>
+              <View style={{ width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: p.icon ? p.color + '22' : c.panel2, borderWidth: p.icon ? 0 : 1, borderColor: c.line, borderStyle: 'dashed' }}>
+                {p.icon && <Icon icon={p.icon} size={17} color={p.color} strokeWidth={1.8} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyMedium">{p.label}</Text>
+                {!!p.n && <Text variant="footnote" color="ink3" tabular>{p.n.toLocaleString()} {p.n === 1 ? 'file' : 'files'}</Text>}
+              </View>
+              <Text variant="label" color="ink2" tabular>{formatSize(p.bytes)}</Text>
+            </Press>
           ))}
-          {!used && <Text variant="footnote" color="ink3">Nothing stored yet.</Text>}
         </View>
-      </Squircle>
-    </Animated.View>
+        {usage && usage.total > 0 && <Text variant="footnote" color="ink4">Kept on your home server. The vault is capped at {formatSize(quota)}.</Text>}
+      </View>
+    </Sheet>
   )
 }
 

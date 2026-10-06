@@ -94,3 +94,13 @@ async def test_assigning_a_todo_hands_it_to_the_teammate(env, monkeypatch):
     assert thread == "dm:i1" and "Draft the launch post" in text and kw["teammate_id"] == "i1"
     assert any("You assigned Ivy a to-do" in m["text"] for m in fdb.rows("messages", thread_id="dm:i1"))
     assert "assigned to Ivy" in todos.describe(t, {"i1": "Ivy"})
+
+
+async def test_vault_quota(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(vault, "ROOT", tmp_path)
+    monkeypatch.setattr(vault, "QUOTA", 10)
+    await vault.add_bytes(U, "a.txt", b"123456")
+    assert (await vault.usage(U))["free"] == 4
+    with pytest.raises(ValueError, match="full"):
+        await vault.add_bytes(U, "b.txt", b"12345")
+    assert [r["name"] for r in await vault.items(U)] == ["a.txt"]
