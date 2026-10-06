@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "13"  # 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "14"  # 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -403,7 +403,10 @@ def _driver(c: dict, a: dict):
         raise PermissionError("Using apps needs full access.")
     if not c.get("use_apps"):
         raise PermissionError("Using apps is off on this computer. Turn on “Let teammates use your apps” in Tubelight there.")
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    here = Path(__file__).resolve().parent
+    if not (here / "tubelight_driver.py").exists():  # updated from a runner that didn't know this part yet
+        (here / "tubelight_driver.py").write_bytes(fetch(c, "tubelight_driver.py"))
+    sys.path.insert(0, str(here))
     import tubelight_driver
     return tubelight_driver
 
