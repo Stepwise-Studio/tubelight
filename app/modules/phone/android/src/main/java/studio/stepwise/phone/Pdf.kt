@@ -61,3 +61,22 @@ object Pdf {
     renderer = null; fd = null; openPath = null
   }
 }
+
+/** A file another app hands over (Open with Tubelight): copied into the cache, with its real name, size and type. */
+object Opened {
+  fun take(context: android.content.Context, uri: String): Map<String, Any> {
+    val u = Uri.parse(uri)
+    val cr = context.contentResolver
+    var name = u.lastPathSegment?.substringAfterLast('/') ?: "file"
+    if (u.scheme == "content") {
+      cr.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst() && !c.isNull(0)) name = c.getString(0)
+      }
+    }
+    val dir = File(context.cacheDir, "opened").apply { mkdirs() }
+    val out = File(dir, "${System.currentTimeMillis()}-${name.replace(Regex("[^\\w.\\- ()]"), "_")}")
+    (cr.openInputStream(u) ?: throw IllegalStateException("Can't read that file")).use { input -> out.outputStream().use { input.copyTo(it) } }
+    val mime = cr.getType(u) ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: ""
+    return mapOf("uri" to Uri.fromFile(out).toString(), "name" to name, "size" to out.length(), "mime" to mime)
+  }
+}

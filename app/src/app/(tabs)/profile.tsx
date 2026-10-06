@@ -7,7 +7,7 @@ import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, AppState, Linking, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
-  Brain02Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
+  Add01Icon, Brain02Icon, CheckmarkCircle02Icon, Mail01Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -21,6 +21,7 @@ import type { Automation } from '@/lib/automations'
 import { whenLabel } from '@/lib/format'
 import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type Toolkit } from '@/lib/catalog'
 import { useSession } from '@/lib/session'
+import { google, identities } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import type { MemoryItem, Profile } from '@/lib/types'
 import { isPhone, useWorkspace } from '@/lib/workspace'
@@ -69,6 +70,7 @@ export default function ProfileScreen() {
       <TabHeader title="Profile" />
       <View style={{ paddingHorizontal: 16, paddingTop: 8, gap: 36 }}>
         <ProfileSection profile={profile} email={session?.user.email} onSaved={setProfile} />
+        <SignInSection />
         <AppsSection />
         <AutomationsSection />
         <ComputersSection />
@@ -326,6 +328,36 @@ function UsageSection() {
 }
 
 /** What runs on its own, in one row: how many are on and when the next one runs. */
+/** How you sign in: everything (chats, teammates, memory, to-dos, vault) belongs to this account, so adding Google
+ * here means signing in with Google on any phone brings it all back. */
+function SignInSection() {
+  const [ids, setIds] = useState<{ provider: string; email: string | null }[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => { identities().then(setIds, () => setIds([])) }, [])
+  useFocusEffect(load)
+  const g = ids?.find((i) => i.provider === 'google')
+  const mail = ids?.find((i) => i.provider === 'email')
+  return (
+    <FormSection title="Sign-in" hint="Your chats, teammates, memory, to-dos and vault belong to this account, not this phone. Sign in the same way on a new phone and it all comes back.">
+      <Surface style={{ overflow: 'hidden' }}>
+        {mail && <ListRow title="Email and password" subtitle={mail.email ?? undefined} icon={Mail01Icon} />}
+        {g ? <ListRow title="Google" subtitle={g.email ?? 'Linked'} icon={CheckmarkCircle02Icon} />
+          : <ListRow title={busy ? 'Opening Google…' : 'Add Google sign-in'} subtitle="Sign in with Google from now on, keeping everything" icon={Add01Icon}
+              onPress={async () => {
+                setBusy(true)
+                try {
+                  if (await google(true)) { toast({ title: 'Google is linked', body: 'Sign in with it on any phone.', tone: 'success' }); load() }
+                } catch (e) {
+                  toast({ title: 'Unable to link Google', body: (e as Error).message, tone: 'error' })
+                } finally {
+                  setBusy(false)
+                }
+              }} />}
+      </Surface>
+    </FormSection>
+  )
+}
+
 function AutomationsSection() {
   const [items, setItems] = useState<Automation[] | null>(null)
   useFocusEffect(useCallback(() => { api<Automation[]>('/automations').then(setItems, () => setItems([])) }, []))

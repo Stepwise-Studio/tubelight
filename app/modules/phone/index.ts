@@ -40,6 +40,8 @@ interface PhoneModule {
   pdfPage(path: string, page: number, width: number): Promise<{ uri: string; width: number; height: number }>
   /** Close the open PDF. */
   pdfClose(): void
+  /** A file another app opened with Tubelight (content:// or file://), copied into the cache. */
+  openFile(uri: string): Promise<{ uri: string; name: string; size: number; mime: string }>
 }
 
 /** null in builds without the module (an older dev client). */

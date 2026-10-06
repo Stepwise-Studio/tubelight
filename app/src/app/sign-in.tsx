@@ -3,7 +3,9 @@ import { TextInput, View } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import Svg, { Path } from 'react-native-svg'
 
+import { google } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { motion, useTheme } from '@/theme'
 import { Button, Logo, Press, Rise, Text, TextField, haptic } from '@/ui'
@@ -32,6 +34,19 @@ export default function SignIn() {
   const [notice, setNotice] = useState<string | null>(null)
   const emailRef = useRef<TextInput>(null)
   const passwordRef = useRef<TextInput>(null)
+  const [googling, setGoogling] = useState(false)
+  const withGoogle = async () => {
+    haptic.tap()
+    setGoogling(true)
+    setNotice(null)
+    try {
+      await google()
+    } catch (e) {
+      setNotice((e as Error).message)
+    } finally {
+      setGoogling(false)
+    }
+  }
 
   const submit = async () => {
     setNotice(null)
@@ -140,6 +155,17 @@ export default function SignIn() {
             />
           </Animated.View>
 
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 22 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: c.line }} />
+            <Text variant="footnote" color="ink3">or</Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: c.line }} />
+          </View>
+          <Press radius={16} onPress={withGoogle} disabled={googling} accessibilityLabel="Continue with Google" outerStyle={{ marginTop: 16 }}
+            style={{ height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1, borderColor: c.edge, backgroundColor: c.panel }}>
+            <GoogleMark />
+            <Text variant="bodyMedium">{googling ? 'Opening Google…' : 'Continue with Google'}</Text>
+          </Press>
+
           <Press radius={12} static onPress={switchMode} outerStyle={{ alignSelf: 'center', marginTop: 20 }} style={{ paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }}>
             <Text variant="label" color="ink2">
               {mode === 'sign-in' ? 'New to Tubelight? ' : 'Already have an account? '}
@@ -149,5 +175,17 @@ export default function SignIn() {
         </View>
       </KeyboardAwareScrollView>
     </View>
+  )
+}
+
+/** Google's "G", in its own colours (their sign-in button guidelines). */
+function GoogleMark() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 48 48">
+      <Path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z" />
+      <Path fill="#4285F4" d="M46.1 24.6c0-1.6-.2-3.2-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.4-4.1 6.8-10.1 6.8-17.4z" />
+      <Path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.1.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.6 10.7l7.9-6.1z" />
+      <Path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.1-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z" />
+    </Svg>
   )
 }

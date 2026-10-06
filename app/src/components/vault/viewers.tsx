@@ -328,8 +328,11 @@ type PreviewData =
 function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: number } }) {
   const [p, setP] = useState<PreviewData | null>(null)
   useEffect(() => {
-    api<PreviewData>(item.preview).then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
-  }, [item.preview])
+    const load = item.preview.startsWith('upload:')
+      ? (() => { const form = new FormData(); form.append('file', { uri: item.src, name: item.name, type: item.mime || 'application/octet-stream' } as unknown as Blob); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
+      : api<PreviewData>(item.preview)
+    load.then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
+  }, [item.preview, item.src, item.name, item.mime])
   if (!p) return <Loading />
   if (p.type === 'markdown') {
     return (
