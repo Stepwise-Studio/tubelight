@@ -332,14 +332,16 @@ export function VoiceGlow({ v }: { v: VoiceSession }) {
 const ON_TOP = { zIndex: 30 }
 
 /** The bottom of a chat in voice mode: what's happening, mute and end, over a soft fade (the chat shows through). */
-export function VoiceControls({ v, name, onEnd, padBottom }: {
+export function VoiceControls({ v, name, onEnd, padBottom, bare }: {
   v: VoiceSession; name: string; onEnd: () => void; padBottom: number
+  /** Over the assistant's dim: no fade of its own. */
+  bare?: boolean
 }) {
   const { c } = useTheme()
   const [size, setSize] = useState({ w: 0, h: 0 })
   return (
     <View style={{ paddingBottom: padBottom + 24, paddingTop: 56 }} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
-      {size.h > 0 && (
+      {size.h > 0 && !bare && (
         <Canvas style={{ position: 'absolute', left: 0, top: 0, width: size.w, height: size.h }} pointerEvents="none">
           <Rect x={0} y={0} width={size.w} height={size.h}>
             <LinearGradient start={vec(0, 0)} end={vec(0, size.h)} positions={[0, 0.45, 1]}
@@ -398,8 +400,9 @@ export interface VoiceModeProps {
 }
 
 /**
- * The phone-assistant sheet over other apps (src/assistant/root.tsx): the chat as bubbles (the last few messages and
- * what's said now, the teammate's words appearing as they're spoken), with the voice controls below.
+ * The phone assistant over other apps (src/assistant/root.tsx): no panel. What's behind is blurred and dimmed, deepening
+ * toward the bottom (the root's Shade), and the conversation lives in the lower 60%: the teammate's name, the chat as
+ * bubbles (the last few messages and what's said now, older ones fading as they rise), the voice controls, the glow.
  */
 export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, screen }: VoiceModeProps) {
   const { c, scheme } = useTheme()
@@ -412,27 +415,37 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       .map((m) => ({ mine: m.sender_type === 'user', text: plain(m.text).trim() })),
     ...unsavedTurns(v, messages).map((t) => ({ mine: t.role === 'user', text: t.text })),
   ]
+  const dark = scheme === 'dark'
   return (
     <Animated.View
-      entering={FadeIn.duration(motion.duration.fast)}
+      entering={FadeIn.duration(motion.duration.slow)}
       exiting={FadeOut.duration(motion.duration.quick)}
-      style={{ height: '66%', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden', backgroundColor: scheme === 'dark' ? '#000' : c.canvas }}
+      style={{ height: '60%' }}
       accessibilityViewIsModal
     >
-      <View style={{ paddingTop: 16, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+      <View style={{ paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
-        <Text variant="headline" numberOfLines={1}>{title}</Text>
+        <Text variant="headline" numberOfLines={1} color={dark ? '#fff' : c.ink}>{title}</Text>
       </View>
       <ScrollView ref={scroll} style={{ flex: 1 }} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
         onTouchEnd={v.interrupt}>
-        {bubbles.map((b, i) => (
-          <Squircle key={i} style={{ alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: b.mine ? c.tube : c.panel2 }}>
-            <Text variant="body" style={{ color: b.mine ? '#fff' : c.ink }}>{b.text}</Text>
-          </Squircle>
-        ))}
+        {bubbles.map((b, i) => {
+          const age = bubbles.length - 1 - i // 0 = newest
+          return (
+            <Squircle key={i} style={{
+              alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10,
+              opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
+              backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
+              borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
+            }}>
+              <Text variant="body" style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
+            </Squircle>
+          )
+        })}
       </ScrollView>
-      <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} />
+      <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
       <VoiceGlow v={v} />
     </Animated.View>
   )
