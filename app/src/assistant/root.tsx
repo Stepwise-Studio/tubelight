@@ -2,8 +2,8 @@
 // window over whatever app is open (or the lock screen), when Tubelight is the phone's digital assistant. Voice mode
 // as a bottom sheet with the phone's own teammate (agent phone.py), who also sees what was on screen when summoned. Opened by a
 // "needs you" alert instead (modules/phone `ring`), it goes to that chat with the decision on top.
-import { useEffect, useState } from 'react'
-import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
+import { useEffect, useMemo, useState } from 'react'
+import { Blur, Canvas, Image as SkImage, LinearGradient, Mask, Rect, Skia, vec } from '@shopify/react-native-skia'
 import { BackHandler, Linking, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -17,7 +17,7 @@ import { Phone, registerPhone, syncNotifications, usePhoneActions } from '@/lib/
 import { useSession } from '@/lib/session'
 import { useThread } from '@/lib/use-thread'
 import { WorkspaceProvider, isPhone, useWorkspace } from '@/lib/workspace'
-import { ThemeProvider, useTheme } from '@/theme'
+import { ThemeProvider, motion, useTheme } from '@/theme'
 import { Button, Surface, Text } from '@/ui'
 
 const close = () => BackHandler.exitApp() // finishes AssistActivity, back to what was on screen
@@ -82,7 +82,7 @@ function Talk({ userId }: { userId: string }) {
     && t.approvals[m.meta.approval_id]?.status === 'pending')
   const approval = waiting?.meta?.approval_id ? t.approvals[waiting.meta.approval_id] : undefined
   return (
-    <Shade>
+    <Shade image={screen?.image}>
       {approval && (
         <View style={{ paddingHorizontal: 12, paddingBottom: 10 }}>
           {waiting?.kind === 'question' ? <QuestionCard approval={approval} /> : <ApprovalCard approval={approval} teammate={speaker} beam />}
@@ -114,19 +114,37 @@ function Note({ title }: { title: string }) {
   )
 }
 
-/** The app underneath stays visible, blurred by the window (AssistActivity) and dimmed here, lightly at the top and
- * deepening through the lower 60% where the conversation sits; a tap above it closes the assistant. */
-function Shade({ children }: { children?: React.ReactNode }) {
+/**
+ * The app underneath, softened. Samsung keeps Android's cross-window blur to itself (`mBlurEnabled=false`), so the
+ * blur is drawn here from the screenshot the system hands the assistant: lightly blurred at the top, melting into a
+ * heavy blur through the lower 60% where the conversation sits, then dimmed the same way. Without a screenshot (opened
+ * from an alert, or screenshots off in the assistant settings) the dim alone carries it. A tap above it closes.
+ */
+function Shade({ children, image }: { children?: React.ReactNode; image?: string | null }) {
   const { scheme } = useTheme()
   const { width, height } = useWindowDimensions()
+  const shot = useMemo(() => (image ? Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(image)) : null), [image])
   const tint = scheme === 'dark' ? '0,0,0' : '250,250,250'
+  const dim = shot ? [0.1, 0.2, 0.5, 0.66, 0.74] : [0.18, 0.3, 0.7, 0.86, 0.92]
   return (
     <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-      <Animated.View entering={FadeIn.duration(350)} style={StyleSheet.absoluteFill} pointerEvents="none">
+      {shot && (
+        <Animated.View entering={FadeIn.duration(motion.duration.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Canvas style={{ width, height }}>
+            <SkImage image={shot} x={0} y={0} width={width} height={height} fit="cover"><Blur blur={4} mode="clamp" /></SkImage>
+            <Mask mask={<Rect x={0} y={0} width={width} height={height}>
+              <LinearGradient start={vec(0, height * 0.22)} end={vec(0, height * 0.5)} colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']} />
+            </Rect>}>
+              <SkImage image={shot} x={0} y={0} width={width} height={height} fit="cover"><Blur blur={26} mode="clamp" /></SkImage>
+            </Mask>
+          </Canvas>
+        </Animated.View>
+      )}
+      <Animated.View entering={FadeIn.duration(motion.duration.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Canvas style={{ width, height }}>
           <Rect x={0} y={0} width={width} height={height}>
             <LinearGradient start={vec(0, 0)} end={vec(0, height)} positions={[0, 0.36, 0.52, 0.75, 1]}
-              colors={[0.18, 0.3, 0.7, 0.86, 0.92].map((a) => `rgba(${tint},${a})`)} />
+              colors={dim.map((a) => `rgba(${tint},${a})`)} />
           </Rect>
         </Canvas>
       </Animated.View>

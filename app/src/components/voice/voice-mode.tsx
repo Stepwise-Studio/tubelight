@@ -1,4 +1,6 @@
+import MaskedView from '@react-native-masked-view/masked-view'
 import { requestRecordingPermissionsAsync } from 'expo-audio'
+import { LinearGradient as Fade } from 'expo-linear-gradient'
 import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
 import { useEffect, useRef, useState } from 'react'
 import { BackHandler, ScrollView, View } from 'react-native'
@@ -427,24 +429,27 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
         {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
         <Text variant="headline" numberOfLines={1} color={dark ? '#fff' : c.ink}>{title}</Text>
       </View>
-      <ScrollView ref={scroll} style={{ flex: 1 }} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
-        onTouchEnd={v.interrupt}>
-        {bubbles.map((b, i) => {
-          const age = bubbles.length - 1 - i // 0 = newest
-          return (
-            <Squircle key={i} style={{
-              alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10,
-              opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
-              backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
-              borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
-            }}>
-              <Text variant="body" style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
-            </Squircle>
-          )
-        })}
-      </ScrollView>
+      {/* The conversation melts into the dim at its top edge instead of being cut off */}
+      <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.22]} style={{ flex: 1 }} />}>
+        <ScrollView ref={scroll} style={{ flex: 1 }} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
+          onTouchEnd={v.interrupt}>
+          {bubbles.map((b, i) => {
+            const age = bubbles.length - 1 - i // 0 = newest
+            return (
+              <Squircle key={i} style={{
+                alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10,
+                opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
+                backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
+                borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
+              }}>
+                <Text variant="body" style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
+              </Squircle>
+            )
+          })}
+        </ScrollView>
+      </MaskedView>
       <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
       <VoiceGlow v={v} />
     </Animated.View>
