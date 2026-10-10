@@ -43,6 +43,19 @@ class LiveAudioModule : Module() {
   private val queue = LinkedBlockingQueue<ByteArray>()
   private val generation = java.util.concurrent.atomic.AtomicInteger(0)
   @Volatile private var playing = false
+  @Volatile private var lastOut = 0L // when the last slice went to the speaker
+
+  /**
+   * The echo gate. The phone's echo canceller doesn't always remove the model's voice (the Galaxy's bottom speaker at
+   * call loudness came straight back, and Gemini answered its own words, 2026-10-10), so while it speaks, plus a tail
+   * while the speaker drains, the mic sends silence. Your voice still interrupts: a level clearly above the echo for
+   * BARGE_READS reads in a row opens the gate for the rest of that turn. Levels are Spectrum's 0..1 (−100..−30 dB).
+   */
+  private companion object {
+    const val TAIL_MS = 350L
+    const val BARGE = 0.7
+    const val BARGE_READS = 3 // 16 ms reads
+  }
 
   private val context: Context
     get() = appContext.reactContext ?: throw IllegalStateException("No React context")
@@ -97,6 +110,9 @@ class LiveAudioModule : Module() {
       val spectrum = Spectrum(inRate)
       var filled = 0
       var silent = false
+      var loud = 0
+      var open = false
+      var peak = 0.0 // the loudest the mic got while gated this turn (logged, to tune BARGE)
       while (running.get()) {
         // 16 ms reads: the glow hears the voice ~60 times a second; Gemini still gets 64 ms chunks.
         val n = rec.read(buf, filled, minOf(512, buf.size - filled))
@@ -111,6 +127,16 @@ class LiveAudioModule : Module() {
         spectrum.push(buf, filled, n)
         val (level, bands) = spectrum.read(n / 2)
         sendEvent("onInputLevel", mapOf("level" to level, "bands" to bands))
+        val echoing = playing || System.currentTimeMillis() - lastOut < TAIL_MS
+        if (echoing && !open) {
+          peak = maxOf(peak, level)
+          loud = if (level >= BARGE) loud + 1 else 0
+          if (loud >= BARGE_READS) { open = true; Log.d("LiveAudio", "gate: barge-in at %.2f".format(level)) }
+          else java.util.Arrays.fill(buf, filled, filled + n, 0)
+        } else if (!echoing && (open || peak > 0)) {
+          Log.d("LiveAudio", "gate: turn over, peak while gated %.2f, opened %b".format(peak, open))
+          open = false; loud = 0; peak = 0.0
+        }
         filled += n
         if (filled == buf.size) {
           sendEvent("onMic", mapOf("data" to Base64.encodeToString(buf, 0, filled, Base64.NO_WRAP)))
@@ -135,6 +161,7 @@ class LiveAudioModule : Module() {
         while (off < data.size && running.get() && gen == generation.get()) {
           val len = minOf(slice, data.size - off)
           track?.write(data, off, len)
+          lastOut = System.currentTimeMillis()
           spectrum.push(data, off, len)
           val (level, bands) = spectrum.read(len / 2)
           sendEvent("onOutputLevel", mapOf("level" to level, "bands" to bands))

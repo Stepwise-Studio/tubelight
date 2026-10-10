@@ -11,7 +11,7 @@ import { Cancel01Icon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icon
 import { api } from '@/lib/api'
 import { LIVE_WS, frameText } from '@/lib/live'
 import { plainText } from '@/lib/format'
-import { ChatActionsContext, ChatRow, senderOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
+import type { ChatItem } from '@/components/chat/message-row'
 import { Phone } from '@/lib/phone'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
@@ -415,58 +415,53 @@ export interface VoiceModeProps {
 
 /**
  * The phone assistant over other apps (src/assistant/root.tsx): no panel. What's behind is blurred and dimmed, deepening
- * toward the bottom (the root's Shade), and the conversation lives in the lower 80%, the way voice mode reads in the
- * app: only this conversation, your words as your messages and the teammate's reply streaming in as it's spoken
- * (the chat's own rows), fading into the dim at the top; then the voice controls and the glow.
+ * toward the bottom (the root's Shade), and the conversation lives in the lower 80% as centered lines, no bubbles:
+ * what you said, softer, and the teammate's reply under it, brighter, appearing as it's spoken. Only what was said
+ * aloud this time (the hidden task copy of a request never shows); older lines rise and fade into the dim.
  */
 export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, screen }: VoiceModeProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const name = teammate?.name ?? title
   const v = useVoiceSession({ enabled: true, threadId, messages, working, activity, name, onTask, onEnd: onClose, screen })
-  const items: ChatItem[] = [
-    ...voiceItems(v, messages, threadId, teammate?.id ?? ''),
-    ...messages.filter((m) => m.created_at >= v.startedAt && m.kind === 'text' && !m.local && m.text.trim())
-      .map((m) => ({ type: 'message' as const, key: m.id, m })),
+  const dark = scheme === 'dark'
+  const lines = [
+    ...unsavedTurns(v, messages).reverse().map((t, i) => ({ key: t === v.live ? 'live' : `turn:${i}`, mine: t.role === 'user', text: t.text })),
+    ...messages.filter((m) => m.created_at >= v.startedAt && m.meta?.voice && !m.meta?.voice_task && m.text.trim())
+      .map((m) => ({ key: m.id, mine: m.sender_type === 'user', text: plain(m.text).trim() })),
   ]
   return (
-    <ChatActionsContext.Provider value={ASSIST_ACTIONS}>
-      <Animated.View
-        entering={FadeIn.duration(motion.duration.slow)}
-        exiting={FadeOut.duration(motion.duration.quick)}
-        style={{ height: '80%' }}
-        accessibilityViewIsModal
-      >
-        <View style={{ paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
-          <Text variant="headline" numberOfLines={1} color={scheme === 'dark' ? '#fff' : c.ink}>{title}</Text>
-        </View>
-        {/* The conversation melts into the dim at its top edge instead of being cut off */}
-        <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.16]} style={{ flex: 1 }} />}>
-          {/* Inverted: the newest sits on the bottom edge by design, however the sizes settle */}
-          <FlatList inverted style={{ flex: 1 }} data={items} keyExtractor={(it) => it.key}
-            showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
-            onTouchEnd={v.interrupt}
-            renderItem={({ item, index }) => {
-              const newer = items[index - 1]
-              const older = items[index + 1]
-              return (
-                <ChatRow item={item} firstInGroup={!older || senderOf(older) !== senderOf(item)} lastInGroup={!newer || senderOf(newer) !== senderOf(item)}
-                  dayBreak={null} pauseAvatar={false} working={item.type === 'ghost' && v.phase === 'working'} />
-              )
-            }}
-          />
-        </MaskedView>
-        <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
-        <VoiceGlow v={v} />
-      </Animated.View>
-    </ChatActionsContext.Provider>
+    <Animated.View
+      entering={FadeIn.duration(motion.duration.slow)}
+      exiting={FadeOut.duration(motion.duration.quick)}
+      style={{ height: '80%' }}
+      accessibilityViewIsModal
+    >
+      <View style={{ paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
+        <Text variant="headline" numberOfLines={1} color={dark ? '#fff' : c.ink}>{title}</Text>
+      </View>
+      {/* The conversation melts into the dim at its top edge instead of being cut off */}
+      <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.2]} style={{ flex: 1 }} />}>
+        {/* Inverted: the newest sits on the bottom edge by design, however the sizes settle */}
+        <FlatList inverted style={{ flex: 1 }} data={lines} keyExtractor={(l) => l.key}
+          showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 28, paddingBottom: 24 }}
+          onTouchEnd={v.interrupt}
+          renderItem={({ item: l, index }) => {
+            const older = lines[index + 1]
+            return (
+              <Text align="center" accessibilityLiveRegion={index === 0 ? 'polite' : 'none'}
+                style={l.mine
+                  ? { fontSize: 17, lineHeight: 24, color: dark ? 'rgba(255,255,255,0.58)' : c.ink3, marginTop: older ? 26 : 0 }
+                  : { fontSize: 21, lineHeight: 30, fontWeight: '500', letterSpacing: -0.2, color: dark ? '#fff' : c.ink, marginTop: older?.mine ? 10 : older ? 18 : 0 }}>
+                {l.text}
+              </Text>
+            )
+          }}
+        />
+      </MaskedView>
+      <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
+      <VoiceGlow v={v} />
+    </Animated.View>
   )
-}
-
-const none = () => {}
-/** The assistant's rows are read-only: no replies, reactions or retries from here. */
-const ASSIST_ACTIONS: ChatActions = {
-  onReply: none, jumpTo: none, onRetryMessage: none, onDiscardMessage: none, onRetryRun: none, onDecided: none, onReact: none,
-  handles: new Set(), group: false, onSend: none,
 }
