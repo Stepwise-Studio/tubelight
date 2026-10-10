@@ -3,7 +3,7 @@ import { requestRecordingPermissionsAsync } from 'expo-audio'
 import { LinearGradient as Fade } from 'expo-linear-gradient'
 import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, ScrollView, View } from 'react-native'
+import { BackHandler, FlatList, View } from 'react-native'
 import Animated, { FadeIn, FadeOut, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icons'
@@ -409,7 +409,6 @@ export interface VoiceModeProps {
 export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, screen }: VoiceModeProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
-  const scroll = useRef<ScrollView>(null)
   const name = teammate?.name ?? title
   const v = useVoiceSession({ enabled: true, threadId, messages, working, activity, name, onTask, onEnd: onClose, screen })
   const bubbles = [
@@ -431,24 +430,22 @@ export function VoiceMode({ teammate, title, threadId, messages, working, activi
       </View>
       {/* The conversation melts into the dim at its top edge instead of being cut off */}
       <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.22]} style={{ flex: 1 }} />}>
-        <ScrollView ref={scroll} style={{ flex: 1 }} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
-          onTouchEnd={v.interrupt}>
-          {bubbles.map((b, i) => {
-            const age = bubbles.length - 1 - i // 0 = newest
-            return (
-              <Squircle key={i} style={{
-                alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10,
-                opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
-                backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
-                borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
-              }}>
-                <Text variant="body" style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
-              </Squircle>
-            )
-          })}
-        </ScrollView>
+        {/* Inverted: the newest sits on the bottom edge by design, however the sizes settle */}
+        <FlatList inverted style={{ flex: 1 }} data={[...bubbles].reverse()} keyExtractor={(_, i) => String(bubbles.length - i)}
+          showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
+          onTouchEnd={v.interrupt}
+          renderItem={({ item: b, index: age }) => (
+            <Squircle style={{
+              alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10, marginTop: 8,
+              opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
+              backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
+              borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
+            }}>
+              {/* earlier messages are context: a few lines each, so what's said now has the room */}
+              <Text variant="body" numberOfLines={age < 2 ? undefined : 3} style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
+            </Squircle>
+          )}
+        />
       </MaskedView>
       <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
       <VoiceGlow v={v} />
