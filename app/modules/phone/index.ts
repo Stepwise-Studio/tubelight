@@ -3,10 +3,14 @@
 import { requireOptionalNativeModule } from 'expo'
 
 export interface PhoneAction {
-  action: 'alarm' | 'alarms' | 'timer' | 'call' | 'text' | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app' | 'settings'
-  title?: string; text?: string; number?: string; to?: string; place?: string; url?: string; app?: string
+  action: 'alarm' | 'alarms' | 'alarm_off' | 'snooze' | 'timer' | 'timers' | 'timer_off' | 'call' | 'text' | 'sms' | 'reply'
+    | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app' | 'settings' | 'panel'
+    | 'flashlight' | 'volume' | 'dnd' | 'brightness' | 'media' | 'play' | 'photo' | 'use_app'
+  title?: string; text?: string; number?: string; name?: string; to?: string; place?: string; url?: string; app?: string
+  key?: string; level?: number; goal?: string; inputs?: string[]; done_when?: string
   hour?: number; minute?: number; seconds?: number; start?: number; end?: number
 }
+export interface AppScreen { snapshot?: string; app?: string; text?: string; status?: string; did?: string; why?: string }
 export interface Noted { key: string; app: string; title: string; text: string; at: number }
 
 interface PhoneModule {
@@ -24,6 +28,17 @@ interface PhoneModule {
   clearRing(): void
   canRing(): boolean
   openRingSettings(): void
+  /** Using apps (Settings → Accessibility → Tubelight), Apps.kt: the app in front as elements, acted on by id. */
+  appsOn(): boolean
+  openAppsAccess(): void
+  appLook(): Promise<AppScreen>
+  appAct(snapshot: string, element: string, action: string, value: string): Promise<AppScreen>
+  appKey(key: string): Promise<AppScreen>
+  appOpen(app: string): Promise<AppScreen>
+  canDnd(): boolean
+  openDndAccess(): void
+  canBrightness(): boolean
+  openBrightnessAccess(): void
   notificationAccess(): boolean
   openNotificationAccess(): void
   recentNotifications(sinceMs: number): Noted[]

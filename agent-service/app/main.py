@@ -976,6 +976,41 @@ async def phone_notifications(body: PhoneNotes, user: User = Depends(current_use
     return {"kept": await phone.save_notes(user["id"], body.items)}
 
 
+class PhoneStep(BaseModel):
+    goal: str = Field(min_length=1, max_length=1000)
+    inputs: list[str] = Field(default_factory=list, max_length=20)
+    done_when: str = Field("", max_length=500)
+    steps: list[str] = Field(default_factory=list, max_length=40)
+    screen: str = Field(max_length=30000)
+
+
+@app.post("/phone/step")
+async def phone_step(body: PhoneStep, user: User = Depends(current_user)):
+    """The phone works through an OK'd task in an app (lib/phone.ts workInApp): the next action for this screen, from
+    the same fast model and rules as computer use on the user's computer."""
+    from . import computer_use
+    return await computer_use.decide(body.goal, body.inputs, body.done_when, body.steps, body.screen, computer_use.PHONE)
+
+
+class PhoneResult(BaseModel):
+    thread_id: str | None = None
+    text: str = Field(min_length=1, max_length=2000)
+
+
+@app.post("/phone/result")
+async def phone_result(body: PhoneResult, user: User = Depends(current_user)):
+    """How a task in an app on the phone went, posted in the phone's chat as its teammate."""
+    tm = await phone.mate(user["id"])
+    if not tm:
+        raise HTTPException(404, "This phone isn't set up yet.")
+    thread = f"dm:{tm['id']}"
+    if body.thread_id and body.thread_id != thread and not await db.one("threads", {"id": f"eq.{body.thread_id}", "owner_id": f"eq.{user['id']}"}):
+        raise HTTPException(404, "That chat is gone.")
+    await db.insert("messages", {"thread_id": body.thread_id or thread, "owner_id": user["id"], "sender_type": "teammate",
+                                 "teammate_id": tm["id"], "text": body.text, "kind": "text", "meta": {"phone_task": True}})
+    return {"ok": True}
+
+
 class CloseApp(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     force: bool = False

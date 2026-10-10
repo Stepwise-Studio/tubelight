@@ -13,8 +13,10 @@ from typing import Any
 from . import config, memory
 
 DAY = 24 * 3600
-KINDS = ("alarm", "alarms", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url",
-         "search", "settings")
+KINDS = ("alarm", "alarms", "alarm_off", "snooze", "timer", "timers", "timer_off", "call", "text", "whatsapp", "email",
+         "navigate", "calendar", "open_app", "open_url", "search", "settings", "panel", "flashlight", "volume", "dnd",
+         "brightness", "media", "play", "photo")
+SENDS = ("reply", "sms")  # these send something as the user: only through phone_send, after their OK
 
 
 def _clock(s: str) -> tuple[int, int] | None:
@@ -39,20 +41,27 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
     kind = kind.strip().lower()
     if kind not in KINDS:
         return f"Unknown action {kind!r}: use one of {', '.join(KINDS)}."
-    a: dict[str, Any] = {"action": kind, **{k: v for k, v in f.items() if v}}
+    a: dict[str, Any] = {"action": kind, **{k: v for k, v in f.items() if v or (k == "level" and v == 0)}}
     if kind == "alarm":
         hm = _clock(raw_when)
         if not hm:
             return "Give the alarm time in `when`, like 06:30."
         a |= {"hour": hm[0], "minute": hm[1]}
+    elif kind == "alarm_off":
+        if hm := _clock(raw_when):
+            a |= {"hour": hm[0], "minute": hm[1]}
+    elif kind in ("volume", "brightness") and not 0 <= int(f.get("level") if f.get("level") is not None else -1) <= 100:
+        return "Give `level` from 0 to 100."
+    elif kind == "play" and not f.get("text"):
+        return "Say what to play in `text` (and the app in `app`, like Spotify)."
     elif kind == "timer" and not f.get("seconds"):
         return "Give the timer length in `seconds`."
     elif kind == "calendar":
         if not when:
             return "Give the start in `when` as a date-time, like 2026-10-05T15:00."
         a |= {"start": int(when.timestamp() * 1000), "end": int((end or when + timedelta(hours=1)).timestamp() * 1000)}
-    elif kind in ("call", "text", "whatsapp") and not f.get("number"):
-        return "I need their phone number (I can't see the phone's contacts): ask for it, or look it up in a connected app."
+    elif kind in ("call", "text", "whatsapp") and not f.get("number") and not f.get("name"):
+        return "Say who: `name` (looked up in the phone's contacts) or `number`."
     elif kind == "navigate" and not f.get("place"):
         return "Say where to in `place`."
     elif kind == "open_app" and not f.get("app"):
@@ -67,8 +76,13 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
 # ------------------------------------------------------------------ the phone's own teammate
 PROMPT = """You are {name}, {owner}'s phone, talking with them in Tubelight (and when they hold the side key: your
 panel opens over whatever they're doing, and you see what was on screen). You are the only one who can do things on
-this phone: set alarms and timers, open apps, get calls, texts, WhatsApp messages and emails ready to send, start
-directions, put events in the calendar and, if they shared them, look through their notifications. For a reminder at a
+this phone: alarms (set, turn off, snooze) and timers, the flashlight, volume, Do Not Disturb, brightness, music
+(play something, pause, skip), calls (by name, from their contacts), texts, WhatsApp and emails ready to send, directions,
+calendar events, opening apps, the camera, and settings panels (Wi-Fi, Bluetooth, mobile data, airplane mode and battery
+saver can't be switched by an app: open their panel). With their OK (phone_send) you can reply to a message from its
+notification or send an SMS, and (phone_use_app) do a task inside any app on the phone for them.
+phone_status has their next alarm, the calendar till tomorrow night, recent calls and what's playing, as of when they
+last opened Tubelight; phone_notifications has what arrived (if they shared it). For a reminder at a
 later time, set a follow-up. Other teammates ask you for things on the phone: say what they asked and why, and
 remember that anything you do for them waits for {owner}'s OK. Check storage, battery, the next alarm and the like
 with phone_status. Android shows apps only the next alarm, never the whole list: for "what alarms do I have", say the
@@ -127,6 +141,23 @@ async def status_text(owner_id: str, zone) -> str:
              f"Storage: {_gb(used)} used of {_gb(s.get('storage_total'))}, {_gb(s.get('storage_free'))} free (decimal GB, as Android shows).",
              f"Battery {s.get('battery')}%{' and charging' if s.get('charging') else ''}; memory {_gb(s.get('memory_free'))} free of "
              f"{_gb(s.get('memory_total'))}; network {s.get('network')}."]
+    if s.get("playing"):
+        p = s["playing"]
+        lines.append(f"{'Playing' if p.get('playing') else 'Paused'} in {p.get('app')}: {p.get('title') or '?'}"
+                     + (f" by {p['artist']}" if p.get("artist") else ""))
+    if s.get("calendar") is not None:
+        ev = [f"{datetime.fromtimestamp(e['start'] / 1000, zone).strftime('%a %H:%M') if not e.get('all_day') else datetime.fromtimestamp(e['start'] / 1000, zone).strftime('%a') + ' all day'}"
+              f" {e.get('title') or '(no title)'}" + (f" @ {e['place']}" if e.get("place") else "") for e in s["calendar"]]
+        lines.append("Calendar till tomorrow night: " + ("; ".join(ev) if ev else "nothing."))
+    if s.get("calls"):
+        lines.append("Recent calls: " + "; ".join(
+            f"{c['type']} {c.get('name') or c.get('number')} {datetime.fromtimestamp(c['at'] / 1000, zone).strftime('%a %H:%M')}"
+            + (f" ({int(c['seconds'] // 60)}m)" if c.get("seconds", 0) >= 60 else "") for c in s["calls"][:10]))
+    can = s.get("can") or {}
+    off = [w for k, w in (("contacts", "contacts (call or text by name)"), ("call", "calling straight away"), ("sms", "sending SMS"),
+                          ("dnd", "Do Not Disturb"), ("brightness", "brightness"), ("apps", "using apps")) if can and not can.get(k)]
+    if off:
+        lines.append("Not allowed yet (they turn these on in Profile → Phone assistant): " + ", ".join(off) + ".")
     if s.get("next_alarm"):
         lines.append(f"Next alarm: {datetime.fromtimestamp(s['next_alarm'] / 1000, zone).strftime('%a %d %b, %H:%M')}"
                      + (f" ({s['next_alarm_app']})" if s.get("next_alarm_app") else "") + ". Android shows only the next one.")
@@ -153,7 +184,7 @@ async def save_notes(owner_id: str, items: list[dict[str, Any]]) -> int:
     have = {n["key"]: n for n in (item.value.get("items") if item else [])}
     for n in items:
         if n.get("key"):
-            have[str(n["key"])] = {k: n.get(k) for k in ("key", "app", "title", "text", "at")}
+            have[str(n["key"])] = {k: n.get(k) for k in ("key", "app", "title", "text", "at", "reply")}
     cutoff = (time.time() - DAY) * 1000
     keep = sorted((n for n in have.values() if (n.get("at") or 0) > cutoff), key=lambda n: n["at"])[-300:]
     await memory.store.aput(_ns(owner_id), "notifications", {"items": keep, "synced": time.time()}, index=False)
@@ -180,5 +211,5 @@ async def notes(owner_id: str, query: str, app: str, hours: int, zone) -> str:
     if not rows:
         return f"No notifications match (phone last synced at {synced})."
     lines = [f"{datetime.fromtimestamp(n['at'] / 1000, zone).strftime('%a %H:%M')} · {n.get('app')} · {n.get('title')}: {n.get('text')}"
-             for n in rows[-60:]]
+             + (f" [reply key: {n['key']}]" if n.get("reply") else "") for n in rows[-60:]]
     return f"Notifications on their phone (synced {synced}, oldest first):\n" + "\n".join(lines)

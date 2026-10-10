@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="tubelight_apps_description">Lets your phone teammate use apps for you when you ask (after you OK each task): it reads the app in front and taps or types in it. Nothing is read when no task is running.</string>
+</resources>

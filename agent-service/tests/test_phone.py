@@ -10,7 +10,7 @@ IST = ZoneInfo("Asia/Kolkata")
 def test_actions_need_what_the_phone_needs():
     assert phone.action("alarm", None, None, "6.30 pm", title="Gym") == {"action": "alarm", "title": "Gym", "hour": 18, "minute": 30}
     assert "alarm time" in phone.action("alarm", None, None, "tomorrow")
-    assert "phone number" in phone.action("call", None, None, "")
+    assert "`name`" in phone.action("call", None, None, "")
     start = datetime(2026, 10, 5, 15, 0, tzinfo=IST)
     cal = phone.action("calendar", start, None, "2026-10-05T15:00", title="Review")
     assert cal["end"] - cal["start"] == 3600_000 and cal["title"] == "Review"
@@ -52,3 +52,19 @@ async def test_phone_status_reads_like_android(env):
     assert "88.0 GB used of 128.0 GB, 40.0 GB free" in out and "72% and charging" in out
     assert "videos 30.0 GB, photos 20.0 GB" in out and "WhatsApp 9.0 GB (1.0 GB cache)" in out
     assert "Say which settings page" in phone.action("settings", None, None, "")
+
+
+def test_new_phone_actions():
+    assert phone.action("call", None, None, "", name="Mom") == {"action": "call", "name": "Mom"}
+    assert phone.action("volume", None, None, "", level=0, text="media") == {"action": "volume", "level": 0, "text": "media"}
+    assert "level" in phone.action("brightness", None, None, "")
+    assert phone.action("alarm_off", None, None, "06:30") == {"action": "alarm_off", "hour": 6, "minute": 30}
+    assert phone.action("alarm_off", None, None, "") == {"action": "alarm_off"}
+    assert "text" in phone.action("play", None, None, "")
+    assert "Unknown" in phone.action("reply", None, None, "")  # sending goes through phone_send (approval), not here
+
+
+def test_sends_and_app_tasks_wait_for_approval():
+    from app import tools
+    assert tools.classify("phone_send") == "act" and tools.classify("phone_use_app") == "act"
+    assert tools.title("phone_use_app", {"app": "Swiggy", "task": "Reorder my last order"}) == "Use Swiggy on your phone: Reorder my last order"

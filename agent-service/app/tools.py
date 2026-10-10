@@ -75,7 +75,7 @@ INTERNAL = {
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
@@ -84,7 +84,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -206,6 +206,12 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"On your phone: {what}"[:80]
     if name == "phone_notifications":
         return "Look through your phone's notifications"
+    if name == "phone_send":
+        who = args.get("name") or args.get("number") or "the chat"
+        return (f"Reply: “{str(args.get('text', ''))[:50]}”" if args.get("kind") == "reply"
+                else f"SMS {who}: “{str(args.get('text', ''))[:40]}”")[:80]
+    if name == "phone_use_app":
+        return f"Use {str(args.get('app') or 'an app')} on your phone: {str(args.get('task') or '')}"[:80]
     if name == "computer_to_drive":
         where = f" (folder {args.get('folder')})" if args.get("folder") else ""
         return f"Upload {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]} to Google Drive{where}"[:80]
@@ -467,10 +473,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
     if not helper and phone.is_phone(tm):  # only the phone's own teammate touches the phone
         async def phone_action(action: str, when: str = "", end: str = "", seconds: int = 0, title: str = "",
-                               text: str = "", number: str = "", to: str = "", place: str = "", url: str = "",
-                               app: str = "") -> str:
+                               text: str = "", number: str = "", name: str = "", to: str = "", place: str = "", url: str = "",
+                               app: str = "", level: int | None = None) -> str:
             a = phone.action(action, _when(when) if "T" in when or "-" in when else None, _when(end) if end else None,
-                             when, seconds=seconds, title=title, text=text, number=number, to=to, place=place, url=url, app=app)
+                             when, seconds=seconds, title=title, text=text, number=number, name=name, to=to, place=place,
+                             url=url, app=app, level=level)
             if isinstance(a, str):
                 return f"Not done: {a}"
             ctx.phone_actions.setdefault(tm["id"], []).append(a)
@@ -480,18 +487,54 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools.append(StructuredTool.from_function(
             coroutine=phone_action, name="phone_action",
             description=(
-                "Do something on their phone right now: alarm (when: HH:MM), alarms (open their alarm list), timer (seconds), call / text / whatsapp "
-                "(number, text), email (to, title, text), navigate (place), calendar (title, when + end as date-times, "
-                "place), open_app (app name), open_url (url), search (text), settings (text: storage, battery, wifi, bluetooth, "
-                "display, apps, sound, location). For a reminder at a later time use a "
+                "Do something on their phone right now: alarm (when: HH:MM), alarms (open their alarm list), alarm_off "
+                "(when: HH:MM, or title: its label, or neither for the next/ringing one), snooze, timer (seconds), timers, "
+                "timer_off, call / text / whatsapp (name from their contacts, or number; text), email (to, title, text), "
+                "navigate (place), calendar (title, when + end as date-times, place), open_app (app), open_url (url), "
+                "search (text), flashlight (text: on/off), volume (level 0-100, text: media/ring/alarm/notification), "
+                "dnd (text: on/off), brightness (level 0-100), media (text: play/pause/next/previous/stop), play (text: what, "
+                "app: Spotify/YouTube Music/JioSaavn), photo (opens the camera), panel (text: wifi/internet/bluetooth/"
+                "airplane/battery saver/location/volume: apps can't switch these, so their panel opens), settings (text: "
+                "storage, battery, wifi, bluetooth, display, apps, sound, location). For a reminder at a later time use a "
                 "follow-up instead (it pings them then); for their Google Calendar use the calendar app if connected.")))
         async def phone_status() -> str:
             return await phone.status_text(ctx.owner_id, zone)
 
+        async def phone_send(kind: str, text: str, key: str = "", name: str = "", number: str = "") -> str:
+            kind = kind.strip().lower()
+            if kind not in phone.SENDS:
+                return "kind is reply (key from phone_notifications) or sms (name or number)."
+            if not text.strip() or (kind == "reply" and not key) or (kind == "sms" and not (name or number)):
+                return "Give the text, and the notification's reply key (reply) or who (sms)."
+            ctx.phone_actions.setdefault(tm["id"], []).append({"action": kind, "text": text, **{k: v for k, v in
+                                                                (("key", key), ("name", name), ("number", number)) if v}})
+            return "It goes out from their phone as your reply arrives. Say it's sent, in a few words."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=phone_send, name="phone_send",
+            description="Send something from their phone, after their OK: kind reply = answer a message from its "
+                        "notification (key: the [reply key] phone_notifications shows; works in WhatsApp, Telegram, "
+                        "Messages, Slack…); kind sms = an SMS (name from their contacts, or number). text: exactly what "
+                        "to send."))
+
+        async def phone_use_app(app: str, task: str, inputs: list[str] | None = None, done_when: str = "") -> str:
+            ctx.phone_actions.setdefault(tm["id"], []).append({"action": "use_app", "app": app, "goal": task,
+                                                                 "inputs": inputs or [], "done_when": done_when})
+            return ("The phone works through it in the app as your reply arrives and posts how it went in this chat. "
+                    "Say you're on it, in a few words.")
+
+        tools.append(StructuredTool.from_function(
+            coroutine=phone_use_app, name="phone_use_app",
+            description="Do a task inside an app on their phone for them, after their OK (when no action above does "
+                        "it: ordering, booking, changing an app's setting, finding something in an app). app: its name; "
+                        "task: one clear goal; inputs: every text it may type (it types nothing else); done_when: what "
+                        "the screen shows when it's done. The phone opens the app and works through it."))
+
         tools.append(StructuredTool.from_function(
             coroutine=phone_status, name="phone_status",
-            description="This phone's storage (and what's taking it, by kind and by app), battery, memory and network, "
-                        "as it last reported (it reports whenever they open Tubelight or send a message)."))
+            description="This phone as it last reported (whenever they open Tubelight or the assistant): storage, battery, "
+                        "network, the next alarm, the calendar till tomorrow night, recent calls, what's playing, and "
+                        "which permissions are still off."))
         if ctx.phone_notes:
             async def phone_notifications(query: str = "", app: str = "", hours: int = 12) -> str:
                 return await phone.notes(ctx.owner_id, query, app, hours, zone)

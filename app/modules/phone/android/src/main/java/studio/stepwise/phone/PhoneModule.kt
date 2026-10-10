@@ -69,6 +69,16 @@ class PhoneModule : Module() {
       Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty().contains(context.packageName)
     }
     Function("openNotificationAccess") { start(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+    Function("appsOn") { Apps.on(context) }
+    Function("openAppsAccess") { start(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+    AsyncFunction("appLook") { Apps.look(context) }
+    AsyncFunction("appAct") { snapshot: String, element: String, action: String, value: String -> Apps.act(context, snapshot, element, action, value) }
+    AsyncFunction("appKey") { key: String -> Apps.key(context, key) }
+    AsyncFunction("appOpen") { app: String -> act(mapOf("action" to "open_app", "app" to app)); Apps.waitFor(context, app) }
+    Function("canDnd") { Controls.canDnd(context) }
+    Function("openDndAccess") { start(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+    Function("canBrightness") { Settings.System.canWrite(context) }
+    Function("openBrightnessAccess") { start(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}"))) }
     Function("recentNotifications") { since: Double -> Notes.since(context, since.toLong()) }
     Function("usageAccess") { usageAccess() }
     Function("openUsageAccess") { start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
@@ -130,6 +140,12 @@ class PhoneModule : Module() {
         try { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
       }
     }
+    Controls.calendar(context)?.let { out["calendar"] = it }
+    Controls.calls(context)?.let { out["calls"] = it }
+    Controls.nowPlaying(context)?.let { out["playing"] = it }
+    out["can"] = mapOf("contacts" to Controls.granted(context, android.Manifest.permission.READ_CONTACTS),
+      "call" to Controls.granted(context, android.Manifest.permission.CALL_PHONE), "sms" to Controls.granted(context, android.Manifest.permission.SEND_SMS),
+      "dnd" to Controls.canDnd(context), "brightness" to Settings.System.canWrite(context), "apps" to Apps.on(context))
     out["usage_access"] = usageAccess()
     if (Build.VERSION.SDK_INT >= 26 && usageAccess()) {
       try {
@@ -171,13 +187,71 @@ class PhoneModule : Module() {
           .putExtra(AlarmClock.EXTRA_MESSAGE, str(a, "title").ifEmpty { "Tubelight" }).putExtra(AlarmClock.EXTRA_SKIP_UI, true))
         return "Timer started"
       }
-      "call" -> { start(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${enc(str(a, "number"))}"))); return "Dialer opened" }
+      "call" -> {
+        val (who, number) = person(a)
+        // Straight through when they let Tubelight make calls and the name matched; otherwise the dialer, ready.
+        if (Controls.granted(context, android.Manifest.permission.CALL_PHONE)) {
+          start(Intent(Intent.ACTION_CALL, Uri.parse("tel:${enc(number)}"))); return "Calling $who"
+        }
+        start(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${enc(number)}"))); return "Dialer opened for $who"
+      }
       "text" -> {
-        start(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${enc(str(a, "number"))}")).putExtra("sms_body", str(a, "text")))
-        return "Message ready to send"
+        val (who, number) = person(a)
+        start(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${enc(number)}")).putExtra("sms_body", str(a, "text")))
+        return "Message to $who ready to send"
+      }
+      "sms" -> { // sent as it is: only after their OK (the server's phone_send asks first)
+        if (!Controls.granted(context, android.Manifest.permission.SEND_SMS)) throw CodedException("Allow SMS first: Profile → Phone assistant.")
+        val (who, number) = person(a)
+        val sm = context.getSystemService(android.telephony.SmsManager::class.java)
+        sm.sendMultipartTextMessage(number, null, sm.divideMessage(str(a, "text")), null, null)
+        return "Sent to $who"
+      }
+      "reply" -> return Replies.send(context, str(a, "key"), str(a, "text"))
+      "flashlight" -> return Controls.flashlight(context, str(a, "text") != "off")
+      "volume" -> return Controls.volume(context, str(a, "text"), num(a, "level").toInt())
+      "dnd" -> return Controls.dnd(context, str(a, "text") != "off")
+      "brightness" -> return Controls.brightness(context, num(a, "level").toInt())
+      "media" -> return Controls.media(context, str(a, "text").lowercase())
+      "play" -> { // "play X on Spotify": the standard play-from-search, which music apps start playing
+        val i = Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtra(SearchManager.QUERY, str(a, "text"))
+          .putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+        val want = str(a, "app").lowercase()
+        MUSIC.entries.firstOrNull { want.isNotEmpty() && want.contains(it.key) }?.let { i.setPackage(it.value) }
+        start(i); return "Playing ${str(a, "text")}"
+      }
+      "timers" -> { start(Intent(AlarmClock.ACTION_SHOW_TIMERS)); return "Timers opened" }
+      "timer_off" -> { start(Intent(AlarmClock.ACTION_DISMISS_TIMER)); return "Timer stopped" }
+      "snooze" -> { start(Intent(AlarmClock.ACTION_SNOOZE_ALARM)); return "Alarm snoozed" }
+      "alarm_off" -> { // a ringing alarm, or one by time or label; whether the clock app obeys is up to it
+        val i = Intent(AlarmClock.ACTION_DISMISS_ALARM)
+        when {
+          a["hour"] != null -> i.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
+            .putExtra(AlarmClock.EXTRA_HOUR, num(a, "hour").toInt()).putExtra(AlarmClock.EXTRA_MINUTES, num(a, "minute").toInt())
+          str(a, "title").isNotEmpty() -> i.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_LABEL)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, str(a, "title"))
+          else -> i.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_NEXT)
+        }
+        start(i); return "Alarm turned off"
+      }
+      "photo" -> { start(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); return "Camera opened" }
+      "panel" -> { // the switches apps can't flip themselves (Android 10+): their own panel opens
+        val page = str(a, "text").lowercase()
+        start(Intent(when {
+          "wi" in page -> Settings.Panel.ACTION_WIFI
+          "internet" in page || "data" in page -> Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+          "nfc" in page -> Settings.Panel.ACTION_NFC
+          "volume" in page -> Settings.Panel.ACTION_VOLUME
+          "bluetooth" in page -> Settings.ACTION_BLUETOOTH_SETTINGS
+          "battery" in page || "saver" in page -> Settings.ACTION_BATTERY_SAVER_SETTINGS
+          "airplane" in page || "flight" in page -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+          "location" in page -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+          else -> Settings.ACTION_SETTINGS
+        }))
+        return "Opened, flip it there"
       }
       "whatsapp" -> {
-        val digits = str(a, "number").filter { it.isDigit() }
+        val digits = person(a).second.filter { it.isDigit() }
         start(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits?text=${enc(str(a, "text"))}")))
         return "WhatsApp opened"
       }
@@ -231,6 +305,13 @@ class PhoneModule : Module() {
     }
   }
 
+  /** Who to reach: the number given, or a contact found by name on the phone. */
+  private fun person(a: Map<String, Any?>): Pair<String, String> {
+    str(a, "number").takeIf { it.isNotBlank() }?.let { return (str(a, "name").ifBlank { it }) to it }
+    val name = str(a, "name").ifBlank { throw CodedException("Who? Give a name or a number.") }
+    return Controls.contact(context, name) ?: throw CodedException("No contact called $name on this phone.")
+  }
+
   /** Over the lock screen (or with the screen off): a full-screen alert that opens the assistant panel on the
    *  decision waiting. Unlocked and in use, the normal notification is enough: returns false. */
   private fun ring(a: Map<String, Any?>): Boolean {
@@ -254,6 +335,8 @@ class PhoneModule : Module() {
   }
 
   companion object {
+    private val MUSIC = mapOf("spotify" to "com.spotify.music", "youtube" to "com.google.android.apps.youtube.music",
+      "jiosaavn" to "com.jio.media.jiobeats", "saavn" to "com.jio.media.jiobeats", "amazon" to "com.amazon.mp3", "wynk" to "com.bsbportal.music")
     private const val RING_ID = 4711
     private const val RING_CHANNEL = "tl-ring"
   }

@@ -16,12 +16,20 @@ const pad = (n = 0) => String(n).padStart(2, '0')
 
 /** What the action does, for its chip under the reply. */
 export function phoneLabel(a: PhoneAction): string {
+  const who = a.name || a.number
   switch (a.action) {
     case 'alarm': return `Alarm ${pad(a.hour)}:${pad(a.minute)}`
+    case 'alarms': return 'Open your alarms'
+    case 'alarm_off': return a.hour != null ? `Turn off the ${pad(a.hour)}:${pad(a.minute)} alarm` : a.title ? `Turn off “${a.title}”` : 'Turn off the alarm'
+    case 'snooze': return 'Snooze the alarm'
     case 'timer': return `Timer ${a.seconds && a.seconds >= 60 ? `${Math.round(a.seconds / 60)} min` : `${a.seconds} s`}`
-    case 'call': return `Call ${a.number}`
-    case 'text': return `Text ${a.number}`
-    case 'whatsapp': return `WhatsApp ${a.number}`
+    case 'timers': return 'Open your timers'
+    case 'timer_off': return 'Stop the timer'
+    case 'call': return `Call ${who}`
+    case 'text': return `Text ${who}`
+    case 'sms': return `Send SMS to ${who}`
+    case 'reply': return 'Reply'
+    case 'whatsapp': return `WhatsApp ${who}`
     case 'email': return `Email ${a.to}`
     case 'navigate': return `Directions to ${a.place}`
     case 'calendar': return `Add “${a.title}” to calendar`
@@ -29,16 +37,59 @@ export function phoneLabel(a: PhoneAction): string {
     case 'open_url': return 'Open link'
     case 'search': return `Search “${a.text}”`
     case 'settings': return `Open ${a.text ?? ''} settings`.replace('  ', ' ')
-    case 'alarms': return 'Open your alarms'
+    case 'panel': return `Open ${a.text ?? ''}`
+    case 'flashlight': return `Flashlight ${a.text === 'off' ? 'off' : 'on'}`
+    case 'volume': return `${a.text || 'Media'} volume ${a.level ?? 0}%`
+    case 'dnd': return `Do Not Disturb ${a.text === 'off' ? 'off' : 'on'}`
+    case 'brightness': return `Brightness ${a.level ?? 0}%`
+    case 'media': return a.text ? a.text[0].toUpperCase() + a.text.slice(1) : 'Play/pause'
+    case 'play': return `Play ${a.text}`
+    case 'photo': return 'Open the camera'
+    case 'use_app': return `${a.app}: ${a.goal}`
   }
 }
 
-export function runPhoneAction(a: PhoneAction) {
+export function runPhoneAction(a: PhoneAction, threadId?: string) {
   if (!Phone) { toast({ title: 'Update Tubelight to do this on your phone', tone: 'error' }); return }
+  if (a.action === 'use_app') { workInApp(a, threadId); return }
   try {
     toast({ title: Phone.act(a), tone: 'success' })
   } catch (e) {
     toast({ title: `Couldn’t: ${phoneLabel(a)}`, body: (e as Error).message, tone: 'error' })
+  }
+}
+
+/**
+ * An OK'd task in an app on this phone (Apps.kt): open it, then a fast model on the server picks one action at a time
+ * from what's on screen (POST /phone/step, the same loop computer use runs on Linux) until it's done, stuck or needs
+ * something; the outcome goes to the phone's chat as the teammate's message. It may only type the texts it was given.
+ */
+async function workInApp(a: PhoneAction, threadId?: string) {
+  const steps: string[] = []
+  const finish = (text: string) => api('/phone/result', { method: 'POST', json: { thread_id: threadId, text } }).catch(() => {})
+  if (!Phone!.appsOn()) {
+    toast({ title: 'Turn on app control first', body: 'Profile → Phone assistant → Use apps for you.', tone: 'error' })
+    return finish(`Couldn't use ${a.app}: app control is off on the phone (Profile → Phone assistant).`)
+  }
+  toast({ title: `Working in ${a.app}…` })
+  try {
+    let screen = await Phone!.appOpen(a.app ?? '')
+    for (let i = 0; i < 20; i++) {
+      const d = await api<{ action: string; element?: string; value?: string; keys?: string[]; why?: string }>('/phone/step', {
+        method: 'POST', json: { goal: a.goal, inputs: a.inputs ?? [], done_when: a.done_when ?? '', steps, screen: screen.text },
+      })
+      if (['DONE', 'BLOCKED', 'NEEDS_INPUT'].includes(d.action)) {
+        toast({ title: d.action === 'DONE' ? `Done in ${a.app}` : `Stopped in ${a.app}`, body: d.why, tone: d.action === 'DONE' ? 'success' : 'error' })
+        return finish(`${d.action === 'DONE' ? 'Done' : d.action === 'BLOCKED' ? 'Couldn’t finish' : 'Needs something from you'} in ${screen.app}: ${d.why ?? ''}`)
+      }
+      if (d.action === 'KEYS') screen = await Phone!.appKey(String(d.keys?.[0] ?? 'back'))
+      else screen = await Phone!.appAct(screen.snapshot ?? '', d.element ?? '', d.action, d.value ?? '')
+      steps.push(`${d.action.toLowerCase()} ${d.element ?? d.keys?.join(' ') ?? ''}: ${screen.did ?? screen.status ?? ''}${screen.status === 'stale' ? ` (${screen.why})` : ''}`)
+    }
+    return finish(`Stopped after 20 steps in ${a.app} without finishing. Steps: ${steps.join('; ')}`)
+  } catch (e) {
+    toast({ title: `Couldn’t finish in ${a.app}`, body: (e as Error).message, tone: 'error' })
+    return finish(`Couldn't finish in ${a.app}: ${(e as Error).message}`)
   }
 }
 
@@ -58,7 +109,7 @@ export function usePhoneActions(messages: ChatMessage[]) {
       for (const m of fresh) {
         if (done.has(m.id)) continue
         done.add(m.id)
-        for (const a of m.meta.phone_actions as PhoneAction[]) runPhoneAction(a)
+        for (const a of m.meta.phone_actions as PhoneAction[]) runPhoneAction(a, m.thread_id)
       }
       AsyncStorage.setItem(DONE, JSON.stringify([...done].slice(-100))).catch(() => {})
     })()
