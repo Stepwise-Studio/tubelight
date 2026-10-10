@@ -113,6 +113,8 @@ class LiveAudioModule : Module() {
       var loud = 0
       var open = false
       var peak = 0.0 // the loudest the mic got while gated this turn (logged, to tune BARGE)
+      var beat = System.currentTimeMillis()
+      var real = 0; var zeroed = 0; var top = 0.0 // since the last heartbeat
       while (running.get()) {
         // 16 ms reads: the glow hears the voice ~60 times a second; Gemini still gets 64 ms chunks.
         val n = rec.read(buf, filled, minOf(512, buf.size - filled))
@@ -128,13 +130,20 @@ class LiveAudioModule : Module() {
         val (level, bands) = spectrum.read(n / 2)
         sendEvent("onInputLevel", mapOf("level" to level, "bands" to bands))
         val echoing = playing || System.currentTimeMillis() - lastOut < TAIL_MS
+        top = maxOf(top, level)
+        if (echoing && !open) zeroed++ else real++
+        if (System.currentTimeMillis() - beat > 2000) { // ponytail: diagnostics for the echo gate; drop once tuned
+          Log.i("LiveAudio", "mic: playing=%b sinceOut=%dms open=%b top=%.2f real=%d zeroed=%d".format(
+            playing, System.currentTimeMillis() - lastOut, open, top, real, zeroed))
+          beat = System.currentTimeMillis(); real = 0; zeroed = 0; top = 0.0
+        }
         if (echoing && !open) {
           peak = maxOf(peak, level)
           loud = if (level >= BARGE) loud + 1 else 0
-          if (loud >= BARGE_READS) { open = true; Log.d("LiveAudio", "gate: barge-in at %.2f".format(level)) }
+          if (loud >= BARGE_READS) { open = true; Log.i("LiveAudio", "gate: barge-in at %.2f".format(level)) }
           else java.util.Arrays.fill(buf, filled, filled + n, 0)
         } else if (!echoing && (open || peak > 0)) {
-          Log.d("LiveAudio", "gate: turn over, peak while gated %.2f, opened %b".format(peak, open))
+          Log.i("LiveAudio", "gate: turn over, peak while gated %.2f, opened %b".format(peak, open))
           open = false; loud = 0; peak = 0.0
         }
         filled += n

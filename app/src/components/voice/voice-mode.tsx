@@ -195,6 +195,9 @@ export function useVoiceSession({ enabled, threadId, messages, working, activity
       }
       const sc = m.serverContent
       if (!sc) return
+      if (__DEV__ && (sc.interrupted || sc.turnComplete || sc.inputTranscription?.text)) { // ponytail: voice diagnostics, dev only
+        console.log('[live]', sc.interrupted ? 'interrupted' : '', sc.turnComplete ? 'turnComplete' : '', sc.inputTranscription?.text ? `heard: ${sc.inputTranscription.text}` : '')
+      }
       if (sc.interrupted) {
         LiveAudio.clear() // barge-in: stop talking at once
         go(idle())
@@ -238,6 +241,7 @@ export function useVoiceSession({ enabled, threadId, messages, working, activity
       sock.onmessage = (e) => onMessage(frameText(e.data))
       sock.onerror = () => {}
       sock.onclose = (e) => {
+        if (__DEV__) console.log('[live] closed', e.code, e.reason)
         if (cancelled || ws.current !== sock) return
         LiveAudio.stop()
         setError(e.code === 1000 ? 'The call ended.' : 'The connection dropped.')
