@@ -104,3 +104,13 @@ async def test_vault_quota(env, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="full"):
         await vault.add_bytes(U, "b.txt", b"12345")
     assert [r["name"] for r in await vault.items(U)] == ["a.txt"]
+
+
+async def test_todo_add_with_the_phones_id_is_idempotent(env):
+    import uuid as _uuid
+    key = str(_uuid.uuid4())
+    a = await todos.add(U, "Buy milk", id=key)
+    b = await todos.add(U, "Buy milk", id=key)
+    assert a["id"] == b["id"] == key and len([t for t in await todos.listing(U) if t["id"] == key]) == 1
+    with pytest.raises(ValueError):
+        await todos.add(U, "x", id="not-a-uuid")

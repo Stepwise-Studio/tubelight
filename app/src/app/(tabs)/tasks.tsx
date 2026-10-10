@@ -18,7 +18,7 @@ export default function Tasks() {
   const { c } = useTheme()
   const ws = useWorkspace()
   const inset = useTabBarInset()
-  const { todos, error } = useTodos()
+  const { todos, error, offline, unsynced } = useTodos()
   const follow = useFollowups()
   const [view, setView] = useState<View_>('todos')
   const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
@@ -30,7 +30,9 @@ export default function Tasks() {
   const open = (todos ?? []).filter((t) => t.status !== 'done' && t.status !== 'canceled')
   const dueToday = open.filter((t) => t.due && dueLabel(t.due).today).length
   const overdue = open.filter((t) => t.due && dueLabel(t.due).overdue).length
-  const summary = [`${open.length} open`, dueToday && `${dueToday} due today`, overdue && `${overdue} overdue`].filter(Boolean).join(' · ')
+  // Offline, changes wait on the phone and go out when the server's back.
+  const sync = offline ? (unsynced ? `Offline, ${unsynced} ${unsynced === 1 ? 'change' : 'changes'} to sync` : 'Offline') : unsynced ? 'Syncing…' : null
+  const summary = [`${open.length} open`, dueToday && `${dueToday} due today`, overdue && `${overdue} overdue`, sync].filter(Boolean).join(' · ')
   const add = (status?: TodoStatus) => { haptic.tap(); router.push({ pathname: '/todo/[id]', params: { id: 'new', ...(status ? { status } : {}) } }) }
   const sleeper = ws.teammates[0]
 
@@ -47,7 +49,7 @@ export default function Tasks() {
         <View style={{ paddingHorizontal: 16, gap: 10 }}>
           <Segment<View_> value={view} onChange={setView} accessibilityLabel="Tasks"
             options={[{ value: 'todos', label: 'To-dos', count: open.length || undefined }, { value: 'followups', label: 'Follow-ups', count: follow.pending?.length || undefined }]} />
-          {view === 'todos' && !!todos?.length && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 4 }}>{summary}</Text>}
+          {view === 'todos' && (!!todos?.length || !!sync) && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 4 }}>{summary}</Text>}
           {view === 'followups' && !!follow.pending?.length && (
             <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 4 }}>What your teammates will come back to. Tap one to change it.</Text>
           )}

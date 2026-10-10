@@ -69,13 +69,18 @@ async def get(owner_id: str, key: str) -> dict[str, Any] | None:
 
 
 async def add(owner_id: str, title: str, *, added_by: str | None = None, thread_id: str | None = None,
-              **fields: Any) -> dict[str, Any]:
+              id: str | None = None, **fields: Any) -> dict[str, Any]:
+    """`id`: the phone makes its own (offline to-dos), so sending the same add twice keeps one."""
+    if id:
+        key = str(uuid.UUID(id))  # ValueError for anything that isn't one
+        if existing := await get(owner_id, key):
+            return existing
     now = _now()
     t: dict[str, Any] = {"title": "", "notes": "", "status": "todo", "priority": 0, "due": None, "project_id": None, "assignee": None,
                          "sort": -time.time(), **clean({**fields, "title": title}),
                          "added_by": added_by, "thread_id": thread_id, "created_at": now, "updated_at": now}
     t["completed_at"] = now if t["status"] == "done" else None
-    key = str(uuid.uuid4())
+    key = str(uuid.UUID(id)) if id else str(uuid.uuid4())
     await memory.store.aput(_ns(owner_id), key, t, index=False)
     return {"id": key, **t}
 

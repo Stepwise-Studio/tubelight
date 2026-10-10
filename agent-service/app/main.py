@@ -1214,6 +1214,7 @@ async def test_rule(rule_id: str, user: User = Depends(current_user)):
 
 # ------------------------------------------------------------------ tasks: to-dos and every chat's follow-ups
 class TodoIn(BaseModel):
+    id: str | None = None  # made on the phone (offline to-dos): resending it is safe
     title: str
     notes: str = ""
     status: str = "todo"
@@ -1231,10 +1232,11 @@ async def list_todos(user: User = Depends(current_user)):
 @app.post("/todos")
 async def add_todo(body: TodoIn, user: User = Depends(current_user)):
     try:
+        known = bool(body.id and await todos.get(user["id"], body.id))
         t = await todos.add(user["id"], body.title, **body.model_dump(exclude={"title"}))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if t.get("assignee"):
+    if t.get("assignee") and not known:
         await todos.hand_to(user["id"], t)
     return t
 
