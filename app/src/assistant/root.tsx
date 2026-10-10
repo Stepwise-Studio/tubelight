@@ -117,7 +117,7 @@ function Note({ title }: { title: string }) {
 /**
  * The app underneath, softened. Samsung keeps Android's cross-window blur to itself (`mBlurEnabled=false`), so the
  * blur is drawn here from the screenshot the system hands the assistant: lightly blurred at the top, melting into a
- * heavy blur through the lower 60% where the conversation sits, then dimmed the same way. Without a screenshot (opened
+ * heavy blur through the lower 80% where the conversation sits, then dimmed the same way. Without a screenshot (opened
  * from an alert, or screenshots off in the assistant settings) the dim alone carries it. A tap above it closes.
  */
 function Shade({ children, image }: { children?: React.ReactNode; image?: string | null }) {
@@ -133,7 +133,7 @@ function Shade({ children, image }: { children?: React.ReactNode; image?: string
           <Canvas style={{ width, height }}>
             <SkImage image={shot} x={0} y={0} width={width} height={height} fit="cover"><Blur blur={4} mode="clamp" /></SkImage>
             <Mask mask={<Rect x={0} y={0} width={width} height={height}>
-              <LinearGradient start={vec(0, height * 0.22)} end={vec(0, height * 0.5)} colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']} />
+              <LinearGradient start={vec(0, height * 0.06)} end={vec(0, height * 0.3)} colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']} />
             </Rect>}>
               <SkImage image={shot} x={0} y={0} width={width} height={height} fit="cover"><Blur blur={26} mode="clamp" /></SkImage>
             </Mask>
@@ -143,7 +143,7 @@ function Shade({ children, image }: { children?: React.ReactNode; image?: string
       <Animated.View entering={FadeIn.duration(motion.duration.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Canvas style={{ width, height }}>
           <Rect x={0} y={0} width={width} height={height}>
-            <LinearGradient start={vec(0, 0)} end={vec(0, height)} positions={[0, 0.36, 0.52, 0.75, 1]}
+            <LinearGradient start={vec(0, 0)} end={vec(0, height)} positions={[0, 0.16, 0.34, 0.65, 1]}
               colors={dim.map((a) => `rgba(${tint},${a})`)} />
           </Rect>
         </Canvas>

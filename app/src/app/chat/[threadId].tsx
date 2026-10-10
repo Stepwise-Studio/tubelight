@@ -9,7 +9,7 @@ import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-ico
 import { Composer } from '@/components/chat/composer'
 import { ComputerInfo } from '@/components/chat/computer-info'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
-import { VoiceControls, VoiceGlow, unsavedTurns, useVoiceSession } from '@/components/voice/voice-mode'
+import { VoiceControls, VoiceGlow, useVoiceSession, voiceItems } from '@/components/voice/voice-mode'
 import { ChatActionsContext, ChatRow, senderOf, timeOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { ScreenHeader } from '@/components/screen-header'
 import { ThreadAvatar } from '@/components/thread-avatar'
@@ -97,14 +97,9 @@ export default function Thread() {
   }
   // Voice mode is this chat, spoken: what's being said (and turns not saved yet) shows as messages at the bottom.
   const speaker = dmMate?.id ?? people[0]?.id ?? ''
-  const voiceItems: ChatItem[] = voice ? unsavedTurns(v, t.messages).reverse().map((turn, i, all) => {
-    const key = turn === v.live ? 'voice:live' : `voice:${all.length - i}`
-    return turn.role === 'user'
-      ? { type: 'message' as const, key, m: { id: key, thread_id: threadId, owner_id: '', sender_type: 'user' as const, teammate_id: null, text: turn.text, mentions: [], kind: 'text' as const, meta: { voice: true }, proactive: false, run_id: null, created_at: new Date().toISOString() } as ChatMessage }
-      : { type: 'ghost' as const, key, g: { stream_id: key, run_id: 'voice', teammate_id: speaker, text: turn.text, done: turn !== v.live } }
-  }) : []
+  const spoken: ChatItem[] = voice ? voiceItems(v, t.messages, threadId, speaker) : []
   const items: ChatItem[] = [
-    ...voiceItems,
+    ...spoken,
     ...liveItems,
     ...t.messages.filter((m, i) => shown(m, i)).map((m) => ({ type: 'message' as const, key: m.meta?.stream_id ? `s:${m.meta.stream_id}` : m.id, m })),
   ]

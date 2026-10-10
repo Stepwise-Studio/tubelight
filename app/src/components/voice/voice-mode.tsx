@@ -11,11 +11,12 @@ import { Cancel01Icon, Mic01Icon, MicOff01Icon } from '@hugeicons/core-free-icon
 import { api } from '@/lib/api'
 import { LIVE_WS, frameText } from '@/lib/live'
 import { plainText } from '@/lib/format'
+import { ChatActionsContext, ChatRow, senderOf, type ChatActions, type ChatItem } from '@/components/chat/message-row'
 import { Phone } from '@/lib/phone'
 import type { Teammate } from '@/lib/types'
 import type { ChatMessage } from '@/lib/use-thread'
-import { motion, radius, useTheme } from '@/theme'
-import { Button, IconButton, Squircle, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
+import { motion, useTheme } from '@/theme'
+import { Button, IconButton, Surface, TeammateAvatar, Text, TextSwap, haptic } from '@/ui'
 import { VoiceBeam, type VoiceBeamMode } from '@/vendor/voice-glow-native/VoiceBeam'
 
 import { LiveAudio } from '../../../modules/live-audio'
@@ -322,6 +323,17 @@ export function unsavedTurns(v: VoiceSession, messages: ChatMessage[]): VoiceTur
   return [...waiting, ...(v.live ? [v.live] : [])]
 }
 
+/** What's being said (and turns not saved yet) as chat rows, newest first: your words as your messages, the
+ * teammate's as its reply streaming in. The chat screen and the assistant both show voice this way. */
+export function voiceItems(v: VoiceSession, messages: ChatMessage[], threadId: string, speaker: string): ChatItem[] {
+  return unsavedTurns(v, messages).reverse().map((turn, i, all) => {
+    const key = turn === v.live ? 'voice:live' : `voice:${all.length - i}`
+    return turn.role === 'user'
+      ? { type: 'message' as const, key, m: { id: key, thread_id: threadId, owner_id: '', sender_type: 'user' as const, teammate_id: null, text: turn.text, mentions: [], kind: 'text' as const, meta: { voice: true }, proactive: false, run_id: null, created_at: new Date().toISOString() } as ChatMessage }
+      : { type: 'ghost' as const, key, g: { stream_id: key, run_id: 'voice', teammate_id: speaker, text: turn.text, done: turn !== v.live } }
+  })
+}
+
 /**
  * libraries.dev voice-glow, `type="mobile"`: the glow lives on the phone's own bottom edge, hugging its rounded
  * corners, over whatever is on screen. A layer of its own (full screen, no touches), never boxed into a panel.
@@ -403,52 +415,58 @@ export interface VoiceModeProps {
 
 /**
  * The phone assistant over other apps (src/assistant/root.tsx): no panel. What's behind is blurred and dimmed, deepening
- * toward the bottom (the root's Shade), and the conversation lives in the lower 60%: the teammate's name, the chat as
- * bubbles (the last few messages and what's said now, older ones fading as they rise), the voice controls, the glow.
+ * toward the bottom (the root's Shade), and the conversation lives in the lower 80%, the way voice mode reads in the
+ * app: only this conversation, your words as your messages and the teammate's reply streaming in as it's spoken
+ * (the chat's own rows), fading into the dim at the top; then the voice controls and the glow.
  */
 export function VoiceMode({ teammate, title, threadId, messages, working, activity, onTask, onClose, screen }: VoiceModeProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const name = teammate?.name ?? title
   const v = useVoiceSession({ enabled: true, threadId, messages, working, activity, name, onTask, onEnd: onClose, screen })
-  const bubbles = [
-    ...messages.filter((m) => m.kind === 'text' && !m.local && plain(m.text).trim()).slice(0, 8).reverse()
-      .map((m) => ({ mine: m.sender_type === 'user', text: plain(m.text).trim() })),
-    ...unsavedTurns(v, messages).map((t) => ({ mine: t.role === 'user', text: t.text })),
+  const items: ChatItem[] = [
+    ...voiceItems(v, messages, threadId, teammate?.id ?? ''),
+    ...messages.filter((m) => m.created_at >= v.startedAt && m.kind === 'text' && !m.local && m.text.trim())
+      .map((m) => ({ type: 'message' as const, key: m.id, m })),
   ]
-  const dark = scheme === 'dark'
   return (
-    <Animated.View
-      entering={FadeIn.duration(motion.duration.slow)}
-      exiting={FadeOut.duration(motion.duration.quick)}
-      style={{ height: '60%' }}
-      accessibilityViewIsModal
-    >
-      <View style={{ paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
-        <Text variant="headline" numberOfLines={1} color={dark ? '#fff' : c.ink}>{title}</Text>
-      </View>
-      {/* The conversation melts into the dim at its top edge instead of being cut off */}
-      <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.22]} style={{ flex: 1 }} />}>
-        {/* Inverted: the newest sits on the bottom edge by design, however the sizes settle */}
-        <FlatList inverted style={{ flex: 1 }} data={[...bubbles].reverse()} keyExtractor={(_, i) => String(bubbles.length - i)}
-          showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12 }}
-          onTouchEnd={v.interrupt}
-          renderItem={({ item: b, index: age }) => (
-            <Squircle style={{
-              alignSelf: b.mine ? 'flex-end' : 'flex-start', maxWidth: '84%', borderRadius: radius.lg, paddingHorizontal: 14, paddingVertical: 10, marginTop: 8,
-              opacity: age < 2 ? 1 : Math.max(0.28, 1 - (age - 1) * 0.24),
-              backgroundColor: b.mine ? c.tube : dark ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.85)',
-              borderWidth: b.mine ? 0 : 1, borderColor: dark ? 'rgba(255,255,255,0.08)' : c.line,
-            }}>
-              {/* earlier messages are context: a few lines each, so what's said now has the room */}
-              <Text variant="body" numberOfLines={age < 2 ? undefined : 3} style={{ color: b.mine ? '#fff' : dark ? '#fafafa' : c.ink }}>{b.text}</Text>
-            </Squircle>
-          )}
-        />
-      </MaskedView>
-      <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
-      <VoiceGlow v={v} />
-    </Animated.View>
+    <ChatActionsContext.Provider value={ASSIST_ACTIONS}>
+      <Animated.View
+        entering={FadeIn.duration(motion.duration.slow)}
+        exiting={FadeOut.duration(motion.duration.quick)}
+        style={{ height: '80%' }}
+        accessibilityViewIsModal
+      >
+        <View style={{ paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {teammate && <TeammateAvatar teammate={teammate} size={28} state={v.phase === 'working' ? 'working' : 'default'} interactive={false} />}
+          <Text variant="headline" numberOfLines={1} color={scheme === 'dark' ? '#fff' : c.ink}>{title}</Text>
+        </View>
+        {/* The conversation melts into the dim at its top edge instead of being cut off */}
+        <MaskedView style={{ flex: 1 }} maskElement={<Fade colors={['transparent', '#000']} locations={[0, 0.16]} style={{ flex: 1 }} />}>
+          {/* Inverted: the newest sits on the bottom edge by design, however the sizes settle */}
+          <FlatList inverted style={{ flex: 1 }} data={items} keyExtractor={(it) => it.key}
+            showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
+            onTouchEnd={v.interrupt}
+            renderItem={({ item, index }) => {
+              const newer = items[index - 1]
+              const older = items[index + 1]
+              return (
+                <ChatRow item={item} firstInGroup={!older || senderOf(older) !== senderOf(item)} lastInGroup={!newer || senderOf(newer) !== senderOf(item)}
+                  dayBreak={null} pauseAvatar={false} working={item.type === 'ghost' && v.phase === 'working'} />
+              )
+            }}
+          />
+        </MaskedView>
+        <VoiceControls v={v} name={name} onEnd={onClose} padBottom={insets.bottom} bare />
+        <VoiceGlow v={v} />
+      </Animated.View>
+    </ChatActionsContext.Provider>
   )
+}
+
+const none = () => {}
+/** The assistant's rows are read-only: no replies, reactions or retries from here. */
+const ASSIST_ACTIONS: ChatActions = {
+  onReply: none, jumpTo: none, onRetryMessage: none, onDiscardMessage: none, onRetryRun: none, onDecided: none, onReact: none,
+  handles: new Set(), group: false, onSend: none,
 }
