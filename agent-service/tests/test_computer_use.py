@@ -52,3 +52,14 @@ def test_teammates_with_a_computer_get_the_app_tools(env):
         C.device_of = orig
     assert {"computer_use", "computer_look", "computer_act", "computer_keys", "computer_subtask"} <= names
     assert tools.classify("computer_use") == "act" and tools.classify("computer_act") == "read"
+
+
+def test_phone_status_reports_the_next_alarm():
+    import asyncio, datetime, zoneinfo
+    from app import phone
+    owner, zone = "u-alarm", zoneinfo.ZoneInfo("Asia/Kolkata")
+    at = datetime.datetime(2026, 10, 11, 6, 0, tzinfo=zone).timestamp() * 1000
+    asyncio.run(phone.save_status(owner, {"model": "S21", "android": "16", "next_alarm": at, "next_alarm_app": "Clock"}))
+    text = asyncio.run(phone.status_text(owner, zone))
+    assert "Next alarm: Sun 11 Oct, 06:00 (Clock)" in text
+    assert phone.action("alarms", None, None, "") == {"action": "alarms"}

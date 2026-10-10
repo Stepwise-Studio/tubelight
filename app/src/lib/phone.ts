@@ -29,6 +29,7 @@ export function phoneLabel(a: PhoneAction): string {
     case 'open_url': return 'Open link'
     case 'search': return `Search “${a.text}”`
     case 'settings': return `Open ${a.text ?? ''} settings`.replace('  ', ' ')
+    case 'alarms': return 'Open your alarms'
   }
 }
 

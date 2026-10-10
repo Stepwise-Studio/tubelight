@@ -123,6 +123,13 @@ class PhoneModule : Module() {
       caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
       else -> "online"
     }
+    // Android lets apps read only the next alarm (the one the status bar shows), never the whole list.
+    (context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager).nextAlarmClock?.let { n ->
+      out["next_alarm"] = n.triggerTime.toDouble()
+      out["next_alarm_app"] = n.showIntent?.creatorPackage?.let { pkg ->
+        try { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
+      }
+    }
     out["usage_access"] = usageAccess()
     if (Build.VERSION.SDK_INT >= 26 && usageAccess()) {
       try {
@@ -186,6 +193,7 @@ class PhoneModule : Module() {
         return "Directions opened"
       }
       "open_url" -> { start(Intent(Intent.ACTION_VIEW, Uri.parse(str(a, "url")))); return "Opened" }
+      "alarms" -> { start(Intent(AlarmClock.ACTION_SHOW_ALARMS)); return "Alarms opened" }
       "settings" -> {
         val page = str(a, "text").lowercase()
         start(Intent(when {

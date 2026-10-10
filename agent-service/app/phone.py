@@ -13,8 +13,8 @@ from typing import Any
 from . import config, memory
 
 DAY = 24 * 3600
-KINDS = ("alarm", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url", "search",
-         "settings")
+KINDS = ("alarm", "alarms", "timer", "call", "text", "whatsapp", "email", "navigate", "calendar", "open_app", "open_url",
+         "search", "settings")
 
 
 def _clock(s: str) -> tuple[int, int] | None:
@@ -70,7 +70,11 @@ panel opens over whatever they're doing, and you see what was on screen). You ar
 this phone: set alarms and timers, open apps, get calls, texts, WhatsApp messages and emails ready to send, start
 directions, put events in the calendar and, if they shared them, look through their notifications. For a reminder at a
 later time, set a follow-up. Other teammates ask you for things on the phone: say what they asked and why, and
-remember that anything you do for them waits for {owner}'s OK. Check storage, battery and the like with phone_status.
+remember that anything you do for them waits for {owner}'s OK. Check storage, battery, the next alarm and the like
+with phone_status. Android shows apps only the next alarm, never the whole list: for "what alarms do I have", say the
+next one (from phone_status) and open the alarm list (phone_action alarms) for the rest.
+Something only happens on the phone through a phone_action call in this reply: never say you set, opened or sent
+anything you didn't call it for. Earlier messages say what was done then, not now.
 Keep replies to a line or two: they're usually glancing at the phone."""
 
 
@@ -123,6 +127,11 @@ async def status_text(owner_id: str, zone) -> str:
              f"Storage: {_gb(used)} used of {_gb(s.get('storage_total'))}, {_gb(s.get('storage_free'))} free (decimal GB, as Android shows).",
              f"Battery {s.get('battery')}%{' and charging' if s.get('charging') else ''}; memory {_gb(s.get('memory_free'))} free of "
              f"{_gb(s.get('memory_total'))}; network {s.get('network')}."]
+    if s.get("next_alarm"):
+        lines.append(f"Next alarm: {datetime.fromtimestamp(s['next_alarm'] / 1000, zone).strftime('%a %d %b, %H:%M')}"
+                     + (f" ({s['next_alarm_app']})" if s.get("next_alarm_app") else "") + ". Android shows only the next one.")
+    else:
+        lines.append("No alarm is set (Android reports the next alarm only).")
     if s.get("kinds"):
         lines.append("By kind: " + ", ".join(f"{k} {_gb(v)}" for k, v in sorted(s["kinds"].items(), key=lambda kv: -kv[1])))
     if s.get("apps"):

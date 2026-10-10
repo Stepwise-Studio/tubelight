@@ -480,7 +480,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools.append(StructuredTool.from_function(
             coroutine=phone_action, name="phone_action",
             description=(
-                "Do something on their phone right now: alarm (when: HH:MM), timer (seconds), call / text / whatsapp "
+                "Do something on their phone right now: alarm (when: HH:MM), alarms (open their alarm list), timer (seconds), call / text / whatsapp "
                 "(number, text), email (to, title, text), navigate (place), calendar (title, when + end as date-times, "
                 "place), open_app (app name), open_url (url), search (text), settings (text: storage, battery, wifi, bluetooth, "
                 "display, apps, sound, location). For a reminder at a later time use a "

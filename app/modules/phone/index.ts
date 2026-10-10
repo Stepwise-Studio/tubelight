@@ -3,7 +3,7 @@
 import { requireOptionalNativeModule } from 'expo'
 
 export interface PhoneAction {
-  action: 'alarm' | 'timer' | 'call' | 'text' | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app' | 'settings'
+  action: 'alarm' | 'alarms' | 'timer' | 'call' | 'text' | 'whatsapp' | 'email' | 'navigate' | 'open_url' | 'search' | 'calendar' | 'open_app' | 'settings'
   title?: string; text?: string; number?: string; to?: string; place?: string; url?: string; app?: string
   hour?: number; minute?: number; seconds?: number; start?: number; end?: number
 }
