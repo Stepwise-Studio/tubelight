@@ -491,12 +491,24 @@ async def _batches(owner: str | None = None, force: bool = False) -> list[list[d
 
 
 async def _user_name(owner: str) -> str:
+    """The name the teammates call the user (their profile's display name); the account's full name becomes one of
+    the user entity's other names."""
+    full = ""
     try:
         r = await db.client().get(f"/auth/v1/admin/users/{owner}")
-        meta = r.json().get("user_metadata") or {} if r.is_success else {}
-        return meta.get("full_name") or meta.get("name") or "the user"
+        meta = (r.json().get("user_metadata") or {}) if r.is_success else {}
+        full = meta.get("full_name") or meta.get("name") or ""
     except Exception:
-        return "the user"
+        pass
+    try:
+        prof = await db.one("profiles", {"id": f"eq.{owner}", "select": "display_name"})
+    except Exception:
+        prof = None
+    name = (prof or {}).get("display_name") or full or "the user"
+    me = await user_entity(owner, name)
+    await _q("update mem_entities set name = %s, aliases = array(select distinct x from unnest(aliases || %s::text[]) x "
+             "where x <> %s and x <> '') where id = %s", name, [full] if full else [], name, me)
+    return name
 
 
 async def tick(owner: str | None = None, force: bool = False, max_batches: int = 3, names: dict | None = None) -> int:
