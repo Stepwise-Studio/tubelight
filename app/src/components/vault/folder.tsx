@@ -9,7 +9,7 @@ import Animated, { interpolate, useAnimatedStyle, useReducedMotion, useSharedVal
 import Svg, { Defs, Ellipse, Path, RadialGradient, Stop } from 'react-native-svg'
 import {
   Book02Icon, Briefcase01Icon, Camera01Icon, CodeIcon, File01Icon, Folder01Icon, Image02Icon, Invoice01Icon, LaptopIcon,
-  MusicNote01Icon, StarIcon, Video01Icon,
+  MusicNote01Icon, StarIcon, Tick02Icon, Video01Icon,
 } from '@hugeicons/core-free-icons'
 
 import { useTheme } from '@/theme'
@@ -69,7 +69,7 @@ function mix(hex: string, to: string, t: number, alpha = 1) {
 
 const SPRING = { stiffness: 260, damping: 24 }
 
-export const Folder = memo(function Folder({ size, label, count, color, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, accessibilityLabel }: {
+export const Folder = memo(function Folder({ size, label, count, color, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, selecting, accessibilityLabel }: {
   size: number
   label: string
   count?: string
@@ -85,6 +85,8 @@ export const Folder = memo(function Folder({ size, label, count, color, icon = '
   onPress: () => void
   onLongPress?: () => void
   selected?: boolean
+  /** Choosing several: every folder shows its check circle. */
+  selecting?: boolean
   accessibilityLabel?: string
 }) {
   const { c, scheme } = useTheme()
@@ -129,7 +131,7 @@ export const Folder = memo(function Folder({ size, label, count, color, icon = '
     <Pressable onPress={onPress} onLongPress={onLongPress} onPressIn={() => press(1)} onPressOut={() => press(0)} delayLongPress={380}
       accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? `${label}, folder${count ? `, ${count}` : ''}`} accessibilityState={{ selected }}
       style={{ width: w, alignItems: 'center', gap: 10 }}>
-      <View style={{ width: w, height: h }}>
+      <View style={{ width: w, height: h, opacity: selecting && !selected ? 0.55 : 1, transform: [{ scale: selected ? 0.94 : 1 }] }}>
         {/* ground shadow */}
         <Svg width={w} height={h * 0.3} style={{ position: 'absolute', left: 0, bottom: -h * 0.12 }}>
           <Defs>
@@ -160,12 +162,17 @@ export const Folder = memo(function Folder({ size, label, count, color, icon = '
         </Animated.View>
         {/* front pocket: frosted, carrying the icon */}
         <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, height: pocketH }, pocket]} pointerEvents="none">
-          <Squircle style={{ flex: 1, borderRadius: r, backgroundColor: tone.pocket, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
-            borderWidth: selected ? 2 : 0, borderColor: c.tube }}>
+          <Squircle style={{ flex: 1, borderRadius: r, backgroundColor: tone.pocket, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
             <View style={{ position: 'absolute', top: 0, left: r, right: r, height: 1.5, backgroundColor: 'rgba(255,255,255,0.55)', borderRadius: 1 }} />
             {iconGlyph && <Icon icon={iconGlyph} size={Math.round(w * 0.15)} color={tone.icon} strokeWidth={1.8} />}
           </Squircle>
         </Animated.View>
+        {selecting && (
+          <View style={{ position: 'absolute', right: -4, top: h * 0.13 - 8, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: selected ? c.tube : 'rgba(0,0,0,0.28)', borderWidth: 2, borderColor: selected ? c.tube : '#fff' }}>
+            {selected && <Icon icon={Tick02Icon} size={15} color="#fff" strokeWidth={2.6} />}
+          </View>
+        )}
       </View>
       <View style={{ alignItems: 'center', gap: 6, maxWidth: w + 16 }}>
         <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: '600', letterSpacing: -0.3 }}>{label}</Text>

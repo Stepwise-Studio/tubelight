@@ -8,8 +8,9 @@ import { formatSize, kindOf } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { Icon, IconButton, Press, Text } from '@/ui'
 
-import { FileIcon } from './file-icon'
+import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
+import { Folder } from './folder'
 
 export function OutsideRow({ name, mime = '', dir, size, date, thumb, meta, onPress, onMore }: {
   name: string; mime?: string; dir?: boolean; size?: number; date?: string | number; thumb?: string | null
@@ -38,3 +39,29 @@ export function OutsideRow({ name, mime = '', dir, size, date, thumb, meta, onPr
     </Press>
   )
 }
+
+/** The same, as a grid tile: a picture or a folder, otherwise the file's icon on a wash of its colour. */
+export function OutsideTile({ name, mime = '', dir, thumb, size, onPress, onMore }: {
+  name: string; mime?: string; dir?: boolean; thumb?: string | null; size: number; onPress: () => void; onMore?: () => void
+}) {
+  const { c, scheme } = useTheme()
+  const kind = kindOf(name, mime)
+  const picture = thumb && !dir && ['image', 'video', 'pdf'].includes(kind)
+  return (
+    // radius 0 and no wash: a rounded clip around the whole tile would cut into the name's first letter
+    dir ? <Folder size={size} label={name} peek={2} onPress={onPress} /> : (
+    <Press radius={0} wash={null} onPress={onPress} onLongPress={onMore} accessibilityLabel={name} style={{ width: size, gap: 6 }}>
+      <View style={{ width: size, height: size, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+        backgroundColor: dir ? c.panel2 : `${KIND_COLOR[kind]}${scheme === 'dark' ? '24' : '14'}` }}>
+        {dir ? <FolderGlyph size={size * 0.42} />
+          : picture ? <Image source={thumb} style={{ width: size, height: size }} contentFit="cover" recyclingKey={thumb} />
+            : <FileIcon name={name} mime={mime} size={Math.min(size * 0.5, 64)} glow={false} />}
+      </View>
+      <Text variant="footnote" numberOfLines={1} style={{ paddingHorizontal: 2 }}>{name}</Text>
+    </Press>
+    )
+  )
+}
+
+/** Rows of tiles for a FlatList (`chunk(items, 3)`). */
+export const chunk = <T,>(l: T[], n: number) => Array.from({ length: Math.ceil(l.length / n) }, (_, i) => l.slice(i * n, i * n + n))

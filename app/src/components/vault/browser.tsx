@@ -4,12 +4,12 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated'
 import {
   Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, Download04Icon,
-  File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GoogleDriveIcon, GridViewIcon, Image01Icon, LaptopIcon,
+  File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GridViewIcon, Image01Icon, LaptopIcon,
   LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
 
@@ -19,19 +19,20 @@ import {
 } from '@/lib/vault'
 import { useDriveAbout } from '@/lib/drive'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Squircle, Text, confirm, elevation, haptic, showMenu, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Squircle, Text, confirm, elevation, haptic, showContextMenu, showMenu, toast } from '@/ui'
 
-import { itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
+import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
 import { Folder, type FolderIconName } from './folder'
 import { usePhoneAccess } from './phone-files'
 import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
+import { DriveLogo } from './drive-logo'
 import { FilePreview } from './preview'
 
 const PHONE_ROOT = '/storage/emulated/0'
 
 type Row =
-  | { type: 'title'; key: string; label: string; controls?: boolean }
+  | { type: 'title'; key: string; label: string; controls?: boolean; add?: boolean }
   | { type: 'folders'; key: string; items: VaultItem[] }
   | { type: 'places'; key: string }
   | { type: 'tiles'; key: string; items: VaultItem[] }
@@ -61,6 +62,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
   const media = category === 'photos' || category === 'videos'
   const view = media ? 'grid' : prefs.view
 
+  const inSynced = !!parent && !!all.find((r) => r.id === parent && (r.meta?.source || r.meta?.rel !== undefined))
   const stats = useMemo(() => {
     const m = new Map<string, { n: number; bytes: number; thumbs: string[] }>()
     for (const r of all) {
@@ -91,7 +93,9 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
     const chunk = (l: VaultItem[], n: number, type: 'folders' | 'tiles') => {
       for (let i = 0; i < l.length; i += n) out.push({ type, key: `${type}-${l[i].id}`, items: l.slice(i, i + n) })
     }
-    if (folders.length) { out.push({ type: 'title', key: 't-f', label: 'Folders' }); chunk(folders, 2, 'folders') }
+    const own = !category && !q && !inSynced
+    if (folders.length || (root && !q)) out.push({ type: 'title', key: 't-f', label: 'Folders', add: own })
+    chunk(folders, 2, 'folders')
     if (root && !q && !category) out.push({ type: 'places', key: 'places' })
     const ups = q || category ? [] : uploads.filter((u) => u.parent === parent)
     if (files.length || ups.length) {
@@ -101,7 +105,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
       else for (const f of files) out.push({ type: 'file', key: f.id, item: f })
     }
     return out
-  }, [all, uploads, parent, category, query, prefs.sort, view, root])
+  }, [all, uploads, parent, category, query, prefs.sort, view, root, inSynced])
 
   const tile = Math.floor((width - 32 - 16) / 3)
   const card = Math.floor((width - 32 - 10) / 2)
@@ -137,6 +141,9 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 10, paddingTop: 20, paddingBottom: 6 }}>
                 <Text variant="overline" color="ink3" accessibilityRole="header" style={{ flex: 1 }}>{r.label}</Text>
+                {r.add && (
+                  <IconButton icon={Add01Icon} size={34} iconSize={18} color={c.ink2} accessibilityLabel="New folder" onPress={() => folderMenu(parent)} />
+                )}
                 {r.controls && (
                   <>
                     <Press radius={10} static onPress={() => showMenu({ title: 'Sort by', items: SORTS.map((s) => ({ label: s.label, value: s.id === prefs.sort ? '✓' : undefined, onPress: () => setPrefs({ sort: s.id }) })) })}
@@ -159,8 +166,8 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
               <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 6, marginBottom: 22 }}>
                 {r.items.map((f) => (
                   <View key={f.id} style={{ width: card, alignItems: 'center' }}>
-                    <FolderTile item={f} size={card - 22} stat={stats.get(f.id)} selected={selected.has(f.id)}
-                      onPress={() => press(f)} onHold={() => (selecting ? toggle(f) : itemMenu(f, { onSelect: () => toggle(f) }))} />
+                    <FolderTile item={f} size={card - 22} stat={stats.get(f.id)} selected={selected.has(f.id)} selecting={selecting}
+                      onPress={() => press(f)} onSelect={() => toggle(f)} />
                   </View>
                 ))}
               </View>
@@ -189,6 +196,18 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
       {selecting && <SelectionBar picked={picked} bottom={bottom} onClear={clear} />}
     </View>
   )
+}
+
+/** New folder: one on your server, or one kept in sync from your computer. */
+export function folderMenu(parent: string) {
+  haptic.tap()
+  showMenu({
+    title: 'New folder',
+    items: [
+      { label: 'New folder', value: 'On your server', icon: FolderAddIcon, onPress: () => newFolderSheet(parent) },
+      { label: 'Sync a folder from your computer', icon: FolderSyncIcon, onPress: () => router.push({ pathname: '/vault/sync', params: { parent } }) },
+    ],
+  })
 }
 
 /** The + menu: photos and videos, any file, the camera, a folder. */
@@ -319,17 +338,24 @@ function Browse({ items, width }: { items: VaultItem[]; width: number }) {
 }
 
 /** A folder as Stepwise's Folder, in its colour and icon; a synced one carries its computer's mark in the count. */
-function FolderTile({ item, size, stat, selected, onPress, onHold }: {
-  item: VaultItem; size: number; stat?: { n: number; bytes: number; thumbs: string[] }; selected: boolean; onPress: () => void; onHold: () => void
+function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }: {
+  item: VaultItem; size: number; stat?: { n: number; bytes: number; thumbs: string[] }; selected: boolean; selecting: boolean
+  onPress: () => void; onSelect: () => void
 }) {
+  const ref = useRef<View>(null)
   const n = stat?.n ?? 0
   const src = item.meta?.source
   const count = n === 0 ? (src && !src.last ? 'Syncing…' : 'Empty') : `${n} ${n === 1 ? 'item' : 'items'}`
+  const look = { size, label: item.name, count, color: item.meta?.look?.color, icon: (item.meta?.look?.icon as FolderIconName) ?? (src ? 'laptop' : 'folder'),
+    thumbs: stat?.thumbs, peek: n ? Math.min(n, 3) : 0,
+    badge: src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined } as const
+  // Long-press: the folder's menu in place (Select first), or while choosing, toggle it.
+  const hold = () => (selecting ? onSelect() : showContextMenu(ref.current, <Folder {...look} onPress={() => {}} />, itemActions(item, { onSelect })))
   return (
-    <Folder size={size} label={item.name} count={count} color={item.meta?.look?.color} icon={(item.meta?.look?.icon as FolderIconName) ?? (src ? 'laptop' : 'folder')}
-      thumbs={stat?.thumbs} peek={n ? Math.min(n, 3) : 0} selected={selected} onPress={onPress} onLongPress={onHold}
-      badge={src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined}
-      accessibilityLabel={`${item.name}, folder, ${count}${src ? `, synced from ${src.name}` : ''}`} />
+    <View ref={ref} collapsable={false}>
+      <Folder {...look} selected={selected} selecting={selecting} onPress={onPress} onLongPress={hold}
+        accessibilityLabel={`${item.name}, folder, ${count}${src ? `, synced from ${src.name}` : ''}`} />
+    </View>
   )
 }
 
@@ -342,8 +368,8 @@ function Places({ items, width }: { items: VaultItem[]; width: number }) {
   return (
     <View style={{ gap: 24, paddingTop: 4 }}>
       <Section title="Cloud drives">
-        <PlaceRow icon={GoogleDriveIcon} tint="#1fa463" title="Google Drive"
-          sub={about?.connected ? [about.email, about.quota ? `${formatSize(about.used ?? 0)} of ${formatSize(about.quota)}` : ''].filter(Boolean).join(' · ') : about ? 'Connect to browse your Drive here' : ' '}
+        <PlaceRow art={<DriveLogo size={22} />} title="Google Drive"
+          sub={about?.connected ? (about.quota ? `${formatSize(about.used ?? 0)} of ${formatSize(about.quota)} used` : `${formatSize(about.used ?? 0)} used`) : about ? 'Connect to browse your Drive here' : ' '}
           onPress={() => go('/vault/drive/[id]', { id: 'root' })} />
       </Section>
       <Section title="On this phone">
@@ -353,7 +379,7 @@ function Places({ items, width }: { items: VaultItem[]; width: number }) {
             <PlaceTile icon={File01Icon} title="Documents" width={width} onPress={() => go('/vault/phone', {})} />
           </View>
         ) : (
-          <PlaceRow icon={SmartPhone01Icon} tint={c.ink2} title="Files on this phone" sub="Downloads, documents and recent files" onPress={() => go('/vault/phone', {})} />
+          <PlaceRow art={<Icon icon={SmartPhone01Icon} size={20} color={c.ink2} strokeWidth={1.9} />} title="Files on this phone" sub="Downloads, documents and recent files" onPress={() => go('/vault/phone', {})} />
         )}
       </Section>
       {items.some((r) => r.kind === 'file') && <Browse items={items} width={width} />}
@@ -370,14 +396,12 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function PlaceRow({ icon, tint, title, sub, onPress }: { icon: Parameters<typeof Icon>[0]['icon']; tint: string; title: string; sub: string; onPress: () => void }) {
-  const { c, scheme } = useTheme()
+function PlaceRow({ art, title, sub, onPress }: { art: ReactNode; title: string; sub: string; onPress: () => void }) {
+  const { c } = useTheme()
   return (
     <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${sub}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
-      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: `${tint}${scheme === 'dark' ? '2b' : '1c'}` }}>
-        <Icon icon={icon} size={20} color={tint} strokeWidth={1.9} />
-      </View>
+      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
         <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{sub}</Text>
@@ -404,7 +428,7 @@ function Tile({ item, size, named, selected, selecting, onPress, onHold }: {
   item: VaultItem; size: number; named: boolean; selected: boolean; selecting: boolean; onPress: () => void; onHold: () => void
 }) {
   return (
-    <Press radius={14} static onPress={onPress} onLongPress={onHold} accessibilityLabel={item.name} accessibilityState={{ selected }} style={{ width: size, gap: 6 }}>
+    <Press radius={0} wash={null} onPress={onPress} onLongPress={onHold} accessibilityLabel={item.name} accessibilityState={{ selected }} style={{ width: size, gap: 6 }}>
       <View style={{ opacity: selecting && !selected ? 0.7 : 1 }}>
         <FilePreview item={item} width={size} height={size} radius={14} />
         {selecting && <Check on={selected} />}

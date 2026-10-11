@@ -3,17 +3,17 @@
 import * as DocumentPicker from 'expo-document-picker'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
-import { FlatList, RefreshControl, View } from 'react-native'
+import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, Delete02Icon, File01Icon, FolderAddIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, Delete02Icon, File01Icon, FolderAddIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { askName, shareItem } from '@/components/vault/actions'
 import { openOutside } from '@/components/vault/outside'
-import { OutsideRow } from '@/components/vault/outside-row'
+import { OutsideRow, OutsideTile, chunk } from '@/components/vault/outside-row'
 import { connectApp } from '@/lib/catalog'
 import { driveToVault, driveViewable, newDriveFolder, starDrive, trashDrive, uploadToDrive, useDriveAbout, useDriveFolder, type DriveItem } from '@/lib/drive'
-import { refreshVault } from '@/lib/vault'
+import { refreshVault, useVaultPrefs } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { Button, EmptyState, IconButton, SearchField, Segment, Skeleton, confirm, haptic, showMenu, toast } from '@/ui'
 
@@ -31,6 +31,11 @@ export default function DriveFolder() {
   const { about, reload: reloadAbout } = useDriveAbout()
   const { items, error, reload } = useDriveFolder(folder, query.trim())
   const parent = top ? 'root' : id
+  const [prefs, setPrefs] = useVaultPrefs()
+  const grid = prefs.view === 'grid'
+  const { width } = useWindowDimensions()
+  const tile = Math.floor((width - 32 - 16) / 3)
+  const more = (f: DriveItem) => { haptic.light(); showMenu({ title: f.name, items: menuItems(f) }) }
 
   const open = async (f: DriveItem) => {
     haptic.tap()
@@ -43,14 +48,25 @@ export default function DriveFolder() {
     }
   }
   const menuItems = (f: DriveItem, share?: () => void) => [
-    { label: f.starred ? 'Unstar in Drive' : 'Star in Drive', icon: f.starred ? StarOffIcon : StarIcon, onPress: () => starDrive(f.id, !f.starred).then(reload, fail('Unable to star it')) },
+    { label: f.starred ? 'Unstar in Drive' : 'Star in Drive', icon: f.starred ? StarOffIcon : StarIcon, onPress: () => starDrive(f.id, !f.starred).then(() => {
+      toast({ title: f.starred ? 'Unstarred in Drive' : 'Starred in Drive', body: f.name, tone: 'success' })
+      reload()
+    }, fail('Unable to star it')) },
     ...(f.kind === 'file' ? [
-      { label: 'Save to Vault', icon: VaultIcon, onPress: () => driveToVault(f.id).then(() => { refreshVault(); toast({ title: 'Saved to your vault', body: f.name, tone: 'success' }) }, fail('Unable to save it')) },
+      { label: 'Save to Vault', icon: VaultIcon, onPress: () => {
+        toast({ title: `Saving ${f.name} to your vault` })
+        driveToVault(f.id).then(() => { refreshVault(); toast({ title: 'Saved to your vault', body: f.name, tone: 'success' }) }, fail('Unable to save it'))
+      } },
       { label: 'Share', icon: Share08Icon, onPress: share ?? (() => driveViewable(f).then(shareItem, fail('Unable to share it'))) },
     ] : []),
     { label: 'Remove from Drive', icon: Delete02Icon, destructive: true, onPress: async () => {
       if (!await confirm({ title: `Remove ${f.name}?`, body: 'It goes to your Drive’s trash, where you can still restore it.', confirmLabel: 'Remove', destructive: true })) return
-      trashDrive(f.id).then(() => { haptic.success(); reload(); if (share) router.back() }, fail('Unable to remove it'))
+      trashDrive(f.id).then(() => {
+        haptic.success()
+        toast({ title: 'Moved to Drive’s trash', body: f.name, tone: 'success' })
+        reload()
+        if (share) router.back()
+      }, fail('Unable to remove it'))
     } },
   ]
   const add = () => showMenu({
@@ -61,10 +77,14 @@ export default function DriveFolder() {
         if (r.canceled) return
         toast({ title: r.assets.length === 1 ? `Uploading ${r.assets[0].name}` : `Uploading ${r.assets.length} files` })
         const up = await uploadToDrive(r.assets.map((a) => ({ uri: a.uri, name: a.name, mime: a.mimeType ?? undefined })), parent)
-        toast(up.failed ? { title: `${up.done} uploaded, ${up.failed} didn’t`, tone: 'error' } : { title: 'In your Drive', tone: 'success' })
+        toast(up.failed ? { title: `${up.done} uploaded, ${up.failed} didn’t`, tone: 'error' }
+          : { title: up.done === 1 ? `${r.assets[0].name} is in your Drive` : `${up.done} files are in your Drive`, tone: 'success' })
         reload()
       } },
-      { label: 'New folder', icon: FolderAddIcon, onPress: () => askName('New Drive folder', 'Create folder', (n) => newDriveFolder(n, parent).then(reload)) },
+      { label: 'New folder', icon: FolderAddIcon, onPress: () => askName('New Drive folder', 'Create folder', (n) => newDriveFolder(n, parent).then(() => {
+        toast({ title: `${n} is in your Drive`, tone: 'success' })
+        reload()
+      })) },
     ],
   })
 
@@ -80,10 +100,14 @@ export default function DriveFolder() {
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       <ScreenHeader title={top ? 'Google Drive' : name ?? 'Folder'} subtitle={top ? about?.email ?? 'Vault' : 'Google Drive'}
-        right={(top ? tab === 'root' : true) && <IconButton icon={Add01Icon} accessibilityLabel="Add to this Drive folder" onPress={add} />} />
+        right={<>
+          <IconButton icon={grid ? LeftToRightListBulletIcon : GridViewIcon} accessibilityLabel={grid ? 'Show as a list' : 'Show as a grid'}
+            onPress={() => { haptic.tap(); setPrefs({ view: grid ? 'list' : 'grid' }) }} />
+          {(top ? tab === 'root' : true) && <IconButton icon={Add01Icon} accessibilityLabel="Add to this Drive folder" onPress={add} />}
+        </>} />
       <FlatList
-        data={items ?? []}
-        keyExtractor={(f) => f.id}
+        data={grid ? chunk(items ?? [], 3) : (items ?? []).map((f) => [f])}
+        keyExtractor={(row) => row[0].id}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}
@@ -95,9 +119,13 @@ export default function DriveFolder() {
               options={[{ value: 'root', label: 'My Drive' }, { value: 'starred', label: 'Starred' }, { value: 'recent', label: 'Recent' }]} />}
           </View>
         }
-        renderItem={({ item: f }) => (
-          <OutsideRow name={f.name} mime={f.mime} dir={f.kind === 'folder'} size={f.size} date={f.updated_at} thumb={f.thumb}
-            onPress={() => open(f)} onMore={() => { haptic.light(); showMenu({ title: f.name, items: menuItems(f) }) }} />
+        renderItem={({ item: row }) => grid ? (
+          <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
+            {row.map((f) => <OutsideTile key={f.id} name={f.name} mime={f.mime} dir={f.kind === 'folder'} thumb={f.thumb} size={tile} onPress={() => open(f)} onMore={() => more(f)} />)}
+          </View>
+        ) : (
+          <OutsideRow name={row[0].name} mime={row[0].mime} dir={row[0].kind === 'folder'} size={row[0].size} date={row[0].updated_at} thumb={row[0].thumb}
+            onPress={() => open(row[0])} onMore={() => more(row[0])} />
         )}
         ListEmptyComponent={!items && !error
           ? <View style={{ paddingHorizontal: 16, gap: 10 }}>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={52} radius={12} />)}</View>

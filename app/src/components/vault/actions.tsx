@@ -13,7 +13,7 @@ import {
 
 import { deleteItem, editItem, kindOf, newFolder, pathTo, refreshVault, syncNow, syncedCopy, syncedRoot, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
+import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast, type MenuItem } from '@/ui'
 
 import { ColorSwatches } from '@/components/form-bits'
 
@@ -78,11 +78,14 @@ export function toggleStar(item: VaultItem) {
 
 export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; onSelect?: () => void } = {}) {
   haptic.light()
+  showMenu({ title: item.name, items: itemActions(item, opts) })
+}
+
+/** What can be done with an item, for the action sheet (itemMenu) or a menu in place (showContextMenu). */
+export function itemActions(item: VaultItem, opts: { onDeleted?: () => void; onSelect?: () => void } = {}): MenuItem[] {
   const media = ['image', 'video'].includes(kindOf(item.name, item.mime))
   const copy = syncedCopy(item) // the computer owns it: rename, move and delete happen there
-  showMenu({
-    title: item.name,
-    items: [
+  return [
       ...(opts.onSelect ? [{ label: 'Select', icon: CheckmarkCircle02Icon, onPress: opts.onSelect }] : []),
       { label: item.starred ? 'Unstar' : 'Star', icon: item.starred ? StarOffIcon : StarIcon, onPress: () => toggleStar(item) },
       ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(viewable(item)) }] : []),
@@ -94,8 +97,7 @@ export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; onSele
         { label: 'Move to…', icon: FolderExportIcon, onPress: () => moveItem(item) },
         { label: syncedRoot(item) ? 'Stop syncing' : 'Delete', icon: Delete02Icon, destructive: true, onPress: () => removeItem(item, opts.onDeleted) },
       ]),
-    ],
-  })
+  ]
 }
 
 async function syncFolderNow(item: VaultItem) {
