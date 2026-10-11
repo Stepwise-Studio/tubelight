@@ -96,6 +96,12 @@ class PhoneModule : Module() {
     AsyncFunction("pdfSearch") { path: String, query: String, limit: Int -> Pdf.search(path, query, limit) }
     Function("pdfClose") { Pdf.close() }
     AsyncFunction("openFile") { uri: String -> Opened.take(context, uri) }
+    Function("filesAllowed") { Files.allowed() }
+    Function("openFilesAccess") {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) start(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}")))
+    }
+    AsyncFunction("listFiles") { path: String -> Files.list(path) }
+    AsyncFunction("recentFiles") { kind: String, limit: Int -> Files.recent(context, kind, limit) }
     // The display's own corner radius in dp (Android 12+ reports it), so a glow can hug the screen's rounded edge.
     Function("screenRadius") {
       val insets = appContext.currentActivity?.window?.decorView?.rootWindowInsets

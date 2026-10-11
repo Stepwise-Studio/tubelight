@@ -31,9 +31,9 @@ export default function VaultFolder() {
   }
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
-      <ScreenHeader title={folder?.name ?? 'Folder'} subtitle={['Vault', ...trail].join(' / ')} right={folder && (
+      <ScreenHeader title={folder?.name ?? 'Folder'} subtitle={folder?.meta?.source ? `Synced from ${folder.meta.source.name}${folder.meta.source.error ? ' · needs a look' : ''}` : ['Vault', ...trail].join(' / ')} right={folder && (
         <>
-          <IconButton icon={Add01Icon} accessibilityLabel={`Add to ${folder.name}`} onPress={() => addMenu(folder.id)} />
+          {!folder.meta?.source && !folder.meta?.rel && <IconButton icon={Add01Icon} accessibilityLabel={`Add to ${folder.name}`} onPress={() => addMenu(folder.id)} />}
           <IconButton icon={MoreHorizontalIcon} accessibilityLabel={`More for ${folder.name}`} onPress={() => itemMenu(folder)} />
         </>
       )} />

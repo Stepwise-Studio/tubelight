@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { View } from 'react-native'
-import { Add01Icon, PieChart02Icon } from '@hugeicons/core-free-icons'
+import { router } from 'expo-router'
+import { PieChart02Icon, StarIcon } from '@hugeicons/core-free-icons'
 
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
-import { StorageSheet, VaultBrowser, addMenu } from '@/components/vault/browser'
+import { StorageSheet, VaultBrowser } from '@/components/vault/browser'
 import { IconButton } from '@/ui'
 
 export default function Vault() {
@@ -16,7 +17,7 @@ export default function Vault() {
         <TabHeader title="Vault" right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <IconButton icon={PieChart02Icon} variant="soft" round accessibilityLabel="Storage" onPress={() => setStorage(true)} />
-            <IconButton icon={Add01Icon} variant="soft" round accessibilityLabel="Add to your vault" onPress={() => addMenu('')} />
+            <IconButton icon={StarIcon} variant="soft" round accessibilityLabel="Starred files" onPress={() => router.push({ pathname: '/vault/[id]', params: { id: 'cat:starred' } })} />
           </View>
         } />
       } />

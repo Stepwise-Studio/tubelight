@@ -1,33 +1,39 @@
-// The Vault, as a file manager: at the top, what's stored (by kind), Browse (photos, videos, documents, audio,
-// starred, everything), Recent with real previews, then folders and files, sorted your way, as a list or a grid.
-// The same browser shows a folder or a category. Long-press to select several; tap ⋯ for one file's actions.
+// The Vault, as a file manager. At the top: your folders (Stepwise folders; ones synced from a computer carry its
+// mark), then cloud drives (Google Drive), the phone's own files, Browse by kind, and the files kept loose at the top.
+// The same browser shows a folder or a category. Long-press a file to select several; long-press a folder for its menu.
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
 import { useMemo, useState, type ReactNode } from 'react'
-import { FlatList, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
+import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated'
 import {
-  Add01Icon, ArrowDown01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, File01Icon, FolderAddIcon,
-  FolderExportIcon, GridViewIcon, Image01Icon, LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon,
-  Share08Icon, StarIcon,
+  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, Download04Icon,
+  File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GoogleDriveIcon, GridViewIcon, Image01Icon, LaptopIcon,
+  LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
 
 import {
-  CATEGORIES, SORTS, deleteItem, dismissUpload, editItem, formatSize, inCategory, kindOf, refreshVault, sorter, uploadFiles,
-  useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
+  CATEGORIES, SORTS, deleteItem, dismissUpload, editItem, fileUrl, formatSize, inCategory, kindOf, refreshVault, sorter,
+  uploadFiles, useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
 } from '@/lib/vault'
+import { useDriveAbout } from '@/lib/drive'
 import { motion, useTheme } from '@/theme'
 import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Squircle, Text, confirm, elevation, haptic, showMenu, toast } from '@/ui'
 
 import { itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
+import { Folder, type FolderIconName } from './folder'
+import { usePhoneAccess } from './phone-files'
 import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
 import { FilePreview } from './preview'
 
+const PHONE_ROOT = '/storage/emulated/0'
+
 type Row =
   | { type: 'title'; key: string; label: string; controls?: boolean }
   | { type: 'folders'; key: string; items: VaultItem[] }
+  | { type: 'places'; key: string }
   | { type: 'tiles'; key: string; items: VaultItem[] }
   | { type: 'file'; key: string; item: VaultItem }
   | { type: 'upload'; key: string; upload: Upload }
@@ -56,11 +62,12 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
   const view = media ? 'grid' : prefs.view
 
   const stats = useMemo(() => {
-    const m = new Map<string, { n: number; bytes: number }>()
+    const m = new Map<string, { n: number; bytes: number; thumbs: string[] }>()
     for (const r of all) {
-      const s = m.get(r.parent) ?? { n: 0, bytes: 0 }
+      const s = m.get(r.parent) ?? { n: 0, bytes: 0, thumbs: [] }
       s.n++
       s.bytes += r.size
+      if (r.thumb && s.thumbs.length < 3) s.thumbs.push(fileUrl(r.thumb)) // photos peek out of the folder
       m.set(r.parent, s)
     }
     return m
@@ -85,15 +92,16 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
       for (let i = 0; i < l.length; i += n) out.push({ type, key: `${type}-${l[i].id}`, items: l.slice(i, i + n) })
     }
     if (folders.length) { out.push({ type: 'title', key: 't-f', label: 'Folders' }); chunk(folders, 2, 'folders') }
+    if (root && !q && !category) out.push({ type: 'places', key: 'places' })
     const ups = q || category ? [] : uploads.filter((u) => u.parent === parent)
     if (files.length || ups.length) {
-      out.push({ type: 'title', key: 't-d', label: q ? 'Matches' : category ? `${files.length} ${files.length === 1 ? 'file' : 'files'}` : 'Files', controls: true })
+      out.push({ type: 'title', key: 't-d', label: q ? 'Matches' : category ? `${files.length} ${files.length === 1 ? 'file' : 'files'}` : root ? 'Loose files' : 'Files', controls: true })
       for (const u of ups) out.push({ type: 'upload', key: u.id, upload: u })
       if (view === 'grid') chunk(files, 3, 'tiles')
       else for (const f of files) out.push({ type: 'file', key: f.id, item: f })
     }
     return out
-  }, [all, uploads, parent, category, query, prefs.sort, view])
+  }, [all, uploads, parent, category, query, prefs.sort, view, root])
 
   const tile = Math.floor((width - 32 - 16) / 3)
   const card = Math.floor((width - 32 - 10) / 2)
@@ -122,8 +130,6 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
             <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: 2 }}>
               <SearchField value={query} onChangeText={setQuery} placeholder={category ? `Search ${CATEGORIES.find((x) => x.id === category)?.label.toLowerCase()}` : parent ? 'Search this folder' : 'Search your vault'} />
             </View>
-            {root && !query && items && all.some((r) => r.kind === 'file') && <Browse items={all} width={card} />}
-            {root && !query && items && <Recent items={all} onOpen={press} onHold={hold} selected={selected} />}
           </View>
         }
         renderItem={({ item: r }) => {
@@ -150,11 +156,17 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
           }
           if (r.type === 'folders') {
             return (
-              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 10 }}>
-                {r.items.map((f) => <FolderCard key={f.id} item={f} width={card} stat={stats.get(f.id)} selected={selected.has(f.id)} onPress={() => press(f)} onHold={() => hold(f)} />)}
+              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 6, marginBottom: 22 }}>
+                {r.items.map((f) => (
+                  <View key={f.id} style={{ width: card, alignItems: 'center' }}>
+                    <FolderTile item={f} size={card - 22} stat={stats.get(f.id)} selected={selected.has(f.id)}
+                      onPress={() => press(f)} onHold={() => (selecting ? toggle(f) : itemMenu(f, { onSelect: () => toggle(f) }))} />
+                  </View>
+                ))}
               </View>
             )
           }
+          if (r.type === 'places') return <Places items={all} width={card} />
           if (r.type === 'tiles') {
             return (
               <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
@@ -211,6 +223,7 @@ export function addMenu(parent: string) {
         if (!r.canceled) send(r.assets.map(fromPicker))
       } },
       { label: 'New folder', icon: FolderAddIcon, onPress: () => newFolderSheet(parent) },
+      { label: 'Sync a folder from your computer', icon: FolderSyncIcon, onPress: () => router.push({ pathname: '/vault/sync', params: { parent } }) },
     ],
   })
 }
@@ -277,10 +290,10 @@ export function StorageSheet({ open, onClose }: { open: boolean; onClose: () => 
 function Browse({ items, width }: { items: VaultItem[]; width: number }) {
   const { c, scheme } = useTheme()
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 22, gap: 10 }}>
+    <View style={{ paddingHorizontal: 16, gap: 10 }}>
       <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 4 }}>Browse</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        {CATEGORIES.map((cat) => {
+        {CATEGORIES.filter((cat) => cat.id !== 'starred').map((cat) => {
           const hits = items.filter((r) => inCategory(r, cat.id))
           const files = hits.filter((r) => r.kind === 'file')
           const look = CAT_LOOK[cat.id]
@@ -305,49 +318,84 @@ function Browse({ items, width }: { items: VaultItem[]; width: number }) {
   )
 }
 
-/** The newest files, as cards you can flick through. */
-function Recent({ items, onOpen, onHold, selected }: { items: VaultItem[]; onOpen: (r: VaultItem) => void; onHold: (r: VaultItem) => void; selected: Set<string> }) {
-  const recent = items.filter((r) => r.kind === 'file').sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 12)
-  if (!recent.length) return null
+/** A folder as Stepwise's Folder, in its colour and icon; a synced one carries its computer's mark in the count. */
+function FolderTile({ item, size, stat, selected, onPress, onHold }: {
+  item: VaultItem; size: number; stat?: { n: number; bytes: number; thumbs: string[] }; selected: boolean; onPress: () => void; onHold: () => void
+}) {
+  const n = stat?.n ?? 0
+  const src = item.meta?.source
+  const count = n === 0 ? (src && !src.last ? 'Syncing…' : 'Empty') : `${n} ${n === 1 ? 'item' : 'items'}`
   return (
-    <View style={{ paddingTop: 22, gap: 10 }}>
-      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 20 }}>Recent</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-        {recent.map((r) => (
-          <Press key={r.id} radius={16} static onPress={() => onOpen(r)} onLongPress={() => onHold(r)} accessibilityLabel={r.name} style={{ width: 128, gap: 8 }}>
-            <View>
-              <FilePreview item={r} width={128} height={160} radius={16} />
-              {selected.has(r.id) && <Check on />}
-            </View>
-            <View style={{ paddingHorizontal: 2 }}>
-              <Text variant="label" numberOfLines={1}>{r.name}</Text>
-              <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{formatSize(r.size)} · {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>
-            </View>
-          </Press>
-        ))}
-      </ScrollView>
+    <Folder size={size} label={item.name} count={count} color={item.meta?.look?.color} icon={(item.meta?.look?.icon as FolderIconName) ?? (src ? 'laptop' : 'folder')}
+      thumbs={stat?.thumbs} peek={n ? Math.min(n, 3) : 0} selected={selected} onPress={onPress} onLongPress={onHold}
+      badge={src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined}
+      accessibilityLabel={`${item.name}, folder, ${count}${src ? `, synced from ${src.name}` : ''}`} />
+  )
+}
+
+/** Below the folders on the vault's top: cloud drives, the phone's own files, and Browse by kind. */
+function Places({ items, width }: { items: VaultItem[]; width: number }) {
+  const { c } = useTheme()
+  const { about } = useDriveAbout()
+  const phone = usePhoneAccess()
+  const go = (pathname: '/vault/phone' | '/vault/drive/[id]', params: Record<string, string>) => { haptic.tap(); router.push({ pathname, params } as never) }
+  return (
+    <View style={{ gap: 24, paddingTop: 4 }}>
+      <Section title="Cloud drives">
+        <PlaceRow icon={GoogleDriveIcon} tint="#1fa463" title="Google Drive"
+          sub={about?.connected ? [about.email, about.quota ? `${formatSize(about.used ?? 0)} of ${formatSize(about.quota)}` : ''].filter(Boolean).join(' · ') : about ? 'Connect to browse your Drive here' : ' '}
+          onPress={() => go('/vault/drive/[id]', { id: 'root' })} />
+      </Section>
+      <Section title="On this phone">
+        {phone ? (
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <PlaceTile icon={Download04Icon} title="Downloads" width={width} onPress={() => go('/vault/phone', { path: `${PHONE_ROOT}/Download`, name: 'Downloads' })} />
+            <PlaceTile icon={File01Icon} title="Documents" width={width} onPress={() => go('/vault/phone', {})} />
+          </View>
+        ) : (
+          <PlaceRow icon={SmartPhone01Icon} tint={c.ink2} title="Files on this phone" sub="Downloads, documents and recent files" onPress={() => go('/vault/phone', {})} />
+        )}
+      </Section>
+      {items.some((r) => r.kind === 'file') && <Browse items={items} width={width} />}
     </View>
   )
 }
 
-function FolderCard({ item, width, stat, selected, onPress, onHold }: {
-  item: VaultItem; width: number; stat?: { n: number; bytes: number }; selected: boolean; onPress: () => void; onHold: () => void
-}) {
-  const { c } = useTheme()
-  const n = stat?.n ?? 0
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Press radius={18} onPress={onPress} onLongPress={onHold} accessibilityLabel={`${item.name}, folder, ${n} items`} accessibilityState={{ selected }}
-      outerStyle={{ width }} style={{ borderWidth: 1, borderColor: selected ? c.tube : c.line, backgroundColor: selected ? c.tubeSoft : c.panel, padding: 14, gap: 14 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <FolderGlyph size={40} />
-        {selected ? <Icon icon={CheckmarkCircle02Icon} size={20} color="tube" strokeWidth={2} />
-          : item.starred ? <Icon icon={StarIcon} size={15} color="#e5a50a" strokeWidth={2.2} />
-            : <IconButton icon={MoreHorizontalIcon} size={30} iconSize={16} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} style={{ marginTop: -4, marginRight: -6 }} />}
+    <View style={{ paddingHorizontal: 16, gap: 10 }}>
+      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 4 }}>{title}</Text>
+      {children}
+    </View>
+  )
+}
+
+function PlaceRow({ icon, tint, title, sub, onPress }: { icon: Parameters<typeof Icon>[0]['icon']; tint: string; title: string; sub: string; onPress: () => void }) {
+  const { c, scheme } = useTheme()
+  return (
+    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${sub}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
+      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: `${tint}${scheme === 'dark' ? '2b' : '1c'}` }}>
+        <Icon icon={icon} size={20} color={tint} strokeWidth={1.9} />
       </View>
-      <View style={{ gap: 2 }}>
-        <Text variant="bodyMedium" numberOfLines={1}>{item.name}</Text>
-        <Text variant="footnote" color="ink3" tabular>{n === 0 ? 'Empty' : `${n} ${n === 1 ? 'item' : 'items'}${stat?.bytes ? ` · ${formatSize(stat.bytes)}` : ''}`}</Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
+        <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{sub}</Text>
       </View>
+      <Icon icon={ArrowRight01Icon} size={16} color="ink4" />
+    </Press>
+  )
+}
+
+function PlaceTile({ icon, title, width, onPress }: { icon: Parameters<typeof Icon>[0]['icon']; title: string; width: number; onPress: () => void }) {
+  const { c } = useTheme()
+  return (
+    <Press radius={18} onPress={onPress} accessibilityLabel={title} outerStyle={{ width }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
+      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
+        <Icon icon={icon} size={20} color="ink2" strokeWidth={1.9} />
+      </View>
+      <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{title}</Text>
     </Press>
   )
 }

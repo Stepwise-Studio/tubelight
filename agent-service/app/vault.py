@@ -319,6 +319,8 @@ def preview_of(name: str, data: bytes) -> dict[str, Any]:
         return {"type": "sheets", "sheets": [{"name": name, "rows": [r[:MAX_COLS] for r in rows[:MAX_ROWS]], "total": len(rows)}]}
     if ext == ".pptx":
         return {"type": "slides", "slides": _slides(data)}
+    if ext in (".md", ".markdown", ".txt"):  # for tile covers; the viewer reads these files itself
+        return {"type": "markdown", "text": data[:20000].decode("utf-8", "replace")}
     return {"type": "none"}
 
 

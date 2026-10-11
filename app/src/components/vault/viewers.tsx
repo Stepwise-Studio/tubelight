@@ -2,6 +2,7 @@
 // players, PDFs drawn page by page by Android itself, Markdown and text, Word as formatted text, spreadsheets as a
 // grid with their sheets, slide decks as slides. Anything else: what it is, and Share to open it elsewhere.
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
+import { File } from 'expo-file-system'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -191,8 +192,9 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   const tooBig = item.size > 2_000_000
   useEffect(() => {
     if (tooBig) return
-    fetch(item.src).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`Couldn’t open it (${r.status})`))))
-      .then(setText, (e) => setError((e as Error).message))
+    const read = item.src.startsWith('file:') ? new File(item.src).text() // a file on the phone
+      : fetch(item.src).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`Couldn’t open it (${r.status})`))))
+    read.then(setText, (e) => setError((e as Error).message))
   }, [item.id, tooBig]) // eslint-disable-line react-hooks/exhaustive-deps
   if (tooBig) return <Other item={item} note="It’s too big to show here. Share it to open it in another app." />
   if (error) return <Other item={item} note={error} />

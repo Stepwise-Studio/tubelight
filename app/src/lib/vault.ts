@@ -13,7 +13,15 @@ export interface VaultItem {
   parent: string
   mime: string
   size: number
-  meta: { width?: number; height?: number; pages?: number; thumb?: boolean; duration?: number }
+  meta: {
+    width?: number; height?: number; pages?: number; thumb?: boolean; duration?: number
+    /** A folder's colour and icon (folder.tsx). */
+    look?: { color?: string; icon?: string }
+    /** A folder kept in sync with a computer (sync.py): which, where, and how the last look went. */
+    source?: { computer: string; name: string; path: string; last?: number; files?: number; error?: string | null }
+    /** Inside a synced folder: its path there (the computer owns it). */
+    rel?: string
+  }
   starred: boolean
   created_at: string
   updated_at: string
@@ -103,9 +111,9 @@ export async function newFolder(name: string, parent: string) {
   return row
 }
 
-export async function editItem(id: string, changes: Partial<Pick<VaultItem, 'name' | 'parent' | 'starred'>>) {
+export async function editItem(id: string, changes: Partial<Pick<VaultItem, 'name' | 'parent' | 'starred'>> & { look?: VaultItem['meta']['look'] }) {
   const before = items
-  items = (items ?? []).map((r) => (r.id === id ? { ...r, ...changes } : r))
+  items = (items ?? []).map((r) => (r.id === id ? { ...r, ...changes, meta: changes.look ? { ...r.meta, look: changes.look } : r.meta } : r))
   emit()
   try {
     put(await api<VaultItem>(`/vault/${id}`, { method: 'PATCH', json: changes }))
@@ -258,4 +266,25 @@ export function useVaultPrefs() {
     AsyncStorage.setItem('tl.vault.prefs', JSON.stringify(prefs)).catch(() => {})
   }
   return [p, set] as const
+}
+
+// ------------------------------------------------------------------ folders synced from a computer (sync.py)
+/** A synced folder, or something inside one (whose copies the computer owns). */
+export const syncedRoot = (r: VaultItem) => !!r.meta?.source
+export const syncedCopy = (r: VaultItem) => r.meta?.rel !== undefined
+
+export function syncDirs(computer: string, path = '') {
+  return api<{ path: string; parent?: string; dirs: string[] }>(`/vault/sync/dirs?computer=${encodeURIComponent(computer)}&path=${encodeURIComponent(path)}`)
+}
+
+export async function startSync(computer: string, path: string, parent = '') {
+  const row = await api<VaultItem>('/vault/sync', { method: 'POST', json: { computer, path, parent } })
+  put(row)
+  return row
+}
+
+export async function syncNow(id: string) {
+  const r = await api<{ added?: number; removed?: number; error?: string | null; busy?: boolean }>(`/vault/sync/${id}/now`, { method: 'POST' })
+  await refreshVault()
+  return r
 }

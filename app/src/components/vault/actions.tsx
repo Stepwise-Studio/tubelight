@@ -7,14 +7,18 @@ import { Asset, requestPermissionsAsync } from 'expo-media-library'
 import { useState, useSyncExternalStore } from 'react'
 import { ScrollView, View } from 'react-native'
 import {
-  Delete02Icon, Download03Icon, Edit02Icon, FolderExportIcon, Share08Icon, StarIcon, StarOffIcon,
+  CheckmarkCircle02Icon, Delete02Icon, Download03Icon, Edit02Icon, FolderExportIcon, PaintBrush02Icon, RefreshIcon, Share08Icon,
+  StarIcon, StarOffIcon,
 } from '@hugeicons/core-free-icons'
 
-import { deleteItem, editItem, kindOf, newFolder, pathTo, refreshVault, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
+import { deleteItem, editItem, kindOf, newFolder, pathTo, refreshVault, syncNow, syncedCopy, syncedRoot, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { Button, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
+import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
+
+import { ColorSwatches } from '@/components/form-bits'
 
 import { FolderGlyph } from './file-tile'
+import { FOLDER_COLORS, FOLDER_ICONS, Folder, type FolderIconName } from './folder'
 
 export function openItem(item: VaultItem) {
   haptic.tap()
@@ -32,7 +36,7 @@ export async function localCopy(item: Pick<Viewable, 'id' | 'name' | 'size' | 's
   return File.downloadFileAsync(item.src, file)
 }
 
-export async function shareItem(item: Viewable) {
+export async function shareItem(item: Pick<Viewable, 'id' | 'name' | 'size' | 'src' | 'mime'>) {
   try {
     const f = await localCopy(item)
     await Sharing.shareAsync(f.uri, { mimeType: item.mime || undefined, dialogTitle: item.name })
@@ -55,6 +59,12 @@ export async function saveToPhotos(item: Viewable) {
 }
 
 export async function removeItem(item: VaultItem, after?: () => void) {
+  if (syncedRoot(item)) {
+    if (!await confirm({ title: `Stop syncing ${item.name}?`, body: `Its copies leave your vault. Nothing changes on ${item.meta.source!.name}.`, confirmLabel: 'Stop syncing', destructive: true })) return
+    after?.()
+    deleteItem(item.id).then(() => haptic.success(), (e) => toast({ title: 'Unable to stop syncing', body: (e as Error).message, tone: 'error' }))
+    return
+  }
   const what = item.kind === 'folder' ? 'this folder and everything in it' : item.name
   if (!await confirm({ title: `Delete ${item.kind === 'folder' ? item.name : 'this file'}?`, body: `This removes ${what} from your server for good.`, confirmLabel: 'Delete', destructive: true })) return
   after?.()
@@ -66,26 +76,44 @@ export function toggleStar(item: VaultItem) {
   editItem(item.id, { starred: !item.starred }).catch((e) => toast({ title: 'Unable to save', body: (e as Error).message, tone: 'error' }))
 }
 
-export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; hideOpen?: boolean } = {}) {
+export function itemMenu(item: VaultItem, opts: { onDeleted?: () => void; onSelect?: () => void } = {}) {
   haptic.light()
   const media = ['image', 'video'].includes(kindOf(item.name, item.mime))
+  const copy = syncedCopy(item) // the computer owns it: rename, move and delete happen there
   showMenu({
     title: item.name,
     items: [
+      ...(opts.onSelect ? [{ label: 'Select', icon: CheckmarkCircle02Icon, onPress: opts.onSelect }] : []),
       { label: item.starred ? 'Unstar' : 'Star', icon: item.starred ? StarOffIcon : StarIcon, onPress: () => toggleStar(item) },
       ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(viewable(item)) }] : []),
       ...(media ? [{ label: 'Save to photos', icon: Download03Icon, onPress: () => saveToPhotos(viewable(item)) }] : []),
-      { label: 'Rename', icon: Edit02Icon, onPress: () => renameItem(item) },
-      { label: 'Move to…', icon: FolderExportIcon, onPress: () => moveItem(item) },
-      { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: () => removeItem(item, opts.onDeleted) },
+      ...(item.kind === 'folder' ? [{ label: 'Customise', icon: PaintBrush02Icon, onPress: () => customiseFolder(item) }] : []),
+      ...(syncedRoot(item) ? [{ label: 'Sync now', icon: RefreshIcon, onPress: () => syncFolderNow(item) }] : []),
+      ...(copy ? [] : [
+        { label: 'Rename', icon: Edit02Icon, onPress: () => renameItem(item) },
+        { label: 'Move to…', icon: FolderExportIcon, onPress: () => moveItem(item) },
+        { label: syncedRoot(item) ? 'Stop syncing' : 'Delete', icon: Delete02Icon, destructive: true, onPress: () => removeItem(item, opts.onDeleted) },
+      ]),
     ],
   })
+}
+
+async function syncFolderNow(item: VaultItem) {
+  try {
+    const r = await syncNow(item.id)
+    if (r.busy) toast({ title: 'Already syncing', body: 'New files show up as they arrive.' })
+    else if (r.error) toast({ title: 'Synced, with a problem', body: r.error, tone: 'error' })
+    else toast({ title: r.added || r.removed ? `${r.added ?? 0} added, ${r.removed ?? 0} removed` : 'Already up to date', tone: 'success' })
+  } catch (e) {
+    toast({ title: 'Unable to sync', body: (e as Error).message, tone: 'error' })
+  }
 }
 
 // ------------------------------------------------------------------ sheets
 type Req =
   | { kind: 'name'; title: string; value: string; label: string; confirm: string; submit: (name: string) => Promise<unknown> }
   | { kind: 'move'; items: VaultItem[] }
+  | { kind: 'look'; item: VaultItem }
 let req: Req | null = null
 let shown = false
 const subs = new Set<() => void>()
@@ -96,9 +124,14 @@ const set = (r: Req | null, s: boolean) => { if (r) { req = r; n++ } shown = s; 
 export function newFolderSheet(parent: string) {
   set({ kind: 'name', title: 'New folder', value: '', label: 'Name', confirm: 'Create folder', submit: (name) => newFolder(name, parent) }, true)
 }
+/** Asks for a name in the vault's name sheet (new Drive folders and the like). */
+export function askName(title: string, confirmLabel: string, submit: (name: string) => Promise<unknown>) {
+  set({ kind: 'name', title, value: '', label: 'Name', confirm: confirmLabel, submit }, true)
+}
 export function renameItem(item: VaultItem) {
   set({ kind: 'name', title: item.kind === 'folder' ? 'Rename folder' : 'Rename file', value: item.name, label: 'Name', confirm: 'Rename', submit: (name) => editItem(item.id, { name }) }, true)
 }
+export function customiseFolder(item: VaultItem) { set({ kind: 'look', item }, true) }
 export function moveItem(item: VaultItem) { set({ kind: 'move', items: [item] }, true) }
 export function moveItems(items: VaultItem[]) { if (items.length) set({ kind: 'move', items }, true) }
 
@@ -109,6 +142,7 @@ export function VaultSheetsHost() {
     <>
       <NameSheet key={`n${s.n}`} open={s.shown && s.req?.kind === 'name'} req={s.req?.kind === 'name' ? s.req : null} onClose={close} />
       <MoveSheet open={s.shown && s.req?.kind === 'move'} moving={s.req?.kind === 'move' ? s.req.items : null} onClose={close} />
+      <LookSheet key={`l${s.n}`} open={s.shown && s.req?.kind === 'look'} item={s.req?.kind === 'look' ? s.req.item : null} onClose={close} />
     </>
   )
 }
@@ -178,5 +212,41 @@ function MoveRow({ label, depth, current, onPress }: { label: string; depth: num
       <Text variant="bodyMedium" style={{ flex: 1 }} numberOfLines={1}>{label}</Text>
       {current && <Text variant="footnote" color="ink3">Here now</Text>}
     </Press>
+  )
+}
+
+/** A folder's colour and icon, with the folder itself as the preview (like Stepwise UI's Colors & icon demo). */
+function LookSheet({ open, item, onClose }: { open: boolean; item: VaultItem | null; onClose: () => void }) {
+  const { c } = useTheme()
+  const [color, setColor] = useState(item?.meta.look?.color ?? '')
+  const [icon, setIcon] = useState<FolderIconName | ''>((item?.meta.look?.icon as FolderIconName) ?? 'folder')
+  if (!item) return null
+  const save = () => {
+    onClose()
+    editItem(item.id, { look: { color, icon } }).then(() => haptic.success(), (e) => toast({ title: 'Unable to save', body: (e as Error).message, tone: 'error' }))
+  }
+  return (
+    <Sheet open={open} onClose={onClose} title="Customise folder">
+      <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 20 }}>
+        <View style={{ alignItems: 'center', paddingTop: 8 }} pointerEvents="none">
+          <Folder size={170} label={item.name} color={color} icon={icon} onPress={() => {}} />
+        </View>
+        <ColorSwatches colors={FOLDER_COLORS.map((x) => ({ ...x, value: x.value || c.panel3 }))} value={color || c.panel3}
+          onChange={(v) => setColor(v === c.panel3 ? '' : v)} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }} accessibilityRole="radiogroup" accessibilityLabel="Icon">
+          {(['', ...Object.keys(FOLDER_ICONS)] as (FolderIconName | '')[]).map((k) => {
+            const on = k === icon
+            return (
+              <Press key={k || 'none'} radius={12} onPress={() => { haptic.tap(); setIcon(k) }} accessibilityRole="radio" accessibilityState={{ checked: on }}
+                accessibilityLabel={k ? `${k} icon` : 'No icon'}
+                style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : c.panel2, borderWidth: 1, borderColor: on ? c.tube : c.line }}>
+                {k ? <Icon icon={FOLDER_ICONS[k]} size={20} color={on ? 'tube' : 'ink2'} strokeWidth={1.8} /> : <Text variant="footnote" color={on ? 'tube' : 'ink3'}>None</Text>}
+              </Press>
+            )
+          })}
+        </View>
+        <Button label="Save" fullWidth size="lg" onPress={save} />
+      </View>
+    </Sheet>
   )
 }

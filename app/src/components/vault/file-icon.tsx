@@ -3,7 +3,7 @@
 // colour underneath. One shape, one colour per kind, so a folder of mixed files reads at a glance.
 import { memo } from 'react'
 import { View } from 'react-native'
-import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, RadialGradient, Rect, Stop } from 'react-native-svg'
+import Svg, { Circle, ClipPath, Defs, Ellipse, G, LinearGradient, Path, RadialGradient, Rect, Stop } from 'react-native-svg'
 
 import { kindOf, type FileKind } from '@/lib/vault'
 
@@ -87,7 +87,7 @@ export const FileIcon = memo(function FileIcon({ name, mime = '', size = 44, glo
             <Stop offset="1" stopColor={bottom} />
           </LinearGradient>
           <LinearGradient id={`${id}h`} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#fff" stopOpacity={0.5} />
+            <Stop offset="0" stopColor="#fff" stopOpacity={0.55} />
             <Stop offset="0.35" stopColor="#fff" stopOpacity={0} />
           </LinearGradient>
           {shadow && (
@@ -96,17 +96,22 @@ export const FileIcon = memo(function FileIcon({ name, mime = '', size = 44, glo
               <Stop offset="1" stopColor={bottom} stopOpacity={0} />
             </RadialGradient>
           )}
+          <ClipPath id={`${id}c`}><Path d={PAGE} /></ClipPath>
         </Defs>
         {shadow && <Ellipse cx={24} cy={57} rx={19} ry={5} fill={`url(#${id}s)`} />}
         <Path d={PAGE} fill={`url(#${id})`} />
-        {/* a hairline edge and a soft top light, the way Stepwise buttons sit */}
-        <Path d={PAGE} fill="none" stroke={`url(#${id}h)`} strokeWidth={1.2} />
-        <Path d={PAGE} fill="none" stroke="#000" strokeOpacity={0.1} strokeWidth={0.6} />
-        <Path d="M31.5 0v8.5a8 8 0 0 0 8 8H48z" fill="#fff" opacity={0.3} />
+        {/* a hairline edge, a soft top light and the folded corner, all kept inside the page (strokes drawn on its
+            outline get cut flat by the icon's own edges) */}
+        <G clipPath={`url(#${id}c)`}>
+          <Path d={PAGE} fill="none" stroke={`url(#${id}h)`} strokeWidth={2.4} />
+          <Path d={PAGE} fill="none" stroke="#000" strokeOpacity={0.12} strokeWidth={1.2} />
+          <Path d="M31 -2V8.5a8 8 0 0 0 8 8H50V-2z" fill="#fff" opacity={0.3} />
+        </G>
         <G transform="translate(0 6)">{GLYPH[kind]}</G>
       </Svg>
     </View>
   )
 })
 
-const PAGE = 'M10 0h21.5L48 16.5V46a10 10 0 0 1-10 10H10A10 10 0 0 1 0 46V10A10 10 0 0 1 10 0z'
+// The page: rounded corners, and the fold's two joins rounded too (no hard points where it meets the top and side).
+const PAGE = 'M10 0H29.4Q31.5 0 33 1.5L46.5 15Q48 16.5 48 18.6V46A10 10 0 0 1 38 56H10A10 10 0 0 1 0 46V10A10 10 0 0 1 10 0Z'
