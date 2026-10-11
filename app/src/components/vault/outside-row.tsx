@@ -56,7 +56,7 @@ export function OutsideTile({ name, mime = '', dir, thumb, size, onPress, onMore
   const picture = thumb && !dir && ['image', 'video', 'pdf'].includes(kind)
   return (
     // radius 0 and no wash: a rounded clip around the whole tile would cut into the name's first letter
-    dir ? <Folder size={size} label={name} peek={2} onPress={onPress} onLongPress={onHold ?? onMore} /> : (
+    dir ? <Folder size={size} label={name} peek={2} compact onPress={onPress} onLongPress={onHold ?? onMore} /> : (
     <Press radius={0} wash={null} onPress={onPress} onLongPress={onHold ?? onMore} accessibilityLabel={name} accessibilityState={{ selected }} style={{ width: size, gap: 6 }}>
       <View style={{ width: size, height: size, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
         backgroundColor: dir ? c.panel2 : `${KIND_COLOR[kind]}${scheme === 'dark' ? '24' : '14'}`, opacity: selecting && !selected ? 0.7 : 1 }}>

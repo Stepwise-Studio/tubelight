@@ -70,7 +70,7 @@ function mix(hex: string, to: string, t: number, alpha = 1) {
 
 const SPRING = { stiffness: 260, damping: 24 }
 
-export const Folder = memo(function Folder({ size, label, count, color = DEFAULT_COLOR, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, selecting, accessibilityLabel }: {
+export const Folder = memo(function Folder({ size, label, count, color = DEFAULT_COLOR, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, selecting, compact, accessibilityLabel }: {
   size: number
   label: string
   count?: string
@@ -88,6 +88,8 @@ export const Folder = memo(function Folder({ size, label, count, color = DEFAULT
   selected?: boolean
   /** Choosing several: every folder shows its check circle. */
   selecting?: boolean
+  /** A small label, for folders shown as grid tiles among files. */
+  compact?: boolean
   accessibilityLabel?: string
 }) {
   const { c, scheme } = useTheme()
@@ -173,7 +175,7 @@ export const Folder = memo(function Folder({ size, label, count, color = DEFAULT
         )}
       </View>
       <View style={{ alignItems: 'center', gap: 6, maxWidth: w + 16 }}>
-        <Text variant="bodyMedium" numberOfLines={1} style={{ fontWeight: '600', letterSpacing: -0.3 }}>{label}</Text>
+        <Text variant={compact ? 'footnote' : 'bodyMedium'} numberOfLines={1} style={compact ? { fontWeight: '500' } : { fontWeight: '600', letterSpacing: -0.3 }}>{label}</Text>
         {!!count && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 2, borderRadius: 999, backgroundColor: c.panel2 }}>
             {badge}

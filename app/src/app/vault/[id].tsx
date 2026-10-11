@@ -2,11 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect } from 'react'
 import { View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, MoreHorizontalIcon } from '@hugeicons/core-free-icons'
+import { MoreHorizontalIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { itemMenu } from '@/components/vault/actions'
-import { VaultBrowser, addMenu } from '@/components/vault/browser'
+import { VaultBrowser } from '@/components/vault/browser'
 import { CATEGORIES, pathTo, useVault, type Category } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { IconButton } from '@/ui'
@@ -33,11 +33,10 @@ export default function VaultFolder() {
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       <ScreenHeader title={folder?.name ?? 'Folder'} subtitle={folder?.meta?.source ? `Synced from ${folder.meta.source.name}${folder.meta.source.error ? ' · needs a look' : ''}` : ['Vault', ...trail].join(' / ')} right={folder && (
         <>
-          {!folder.meta?.source && !folder.meta?.rel && <IconButton icon={Add01Icon} accessibilityLabel={`Add to ${folder.name}`} onPress={() => addMenu(folder.id)} />}
           <IconButton icon={MoreHorizontalIcon} accessibilityLabel={`More for ${folder.name}`} onPress={() => itemMenu(folder)} />
         </>
       )} />
-      <VaultBrowser parent={id} header={<View style={{ height: 12 }} />} bottom={insets.bottom + 12} />
+      <VaultBrowser parent={id} fab={!!folder && !folder.meta?.source && folder.meta?.rel === undefined} header={<View style={{ height: 12 }} />} bottom={insets.bottom + 12} />
     </View>
   )
 }

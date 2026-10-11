@@ -20,7 +20,7 @@ import {
 import { useDriveAbout } from '@/lib/drive'
 import { Phone } from '@/lib/phone'
 import { useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, haptic, showContextMenu, showMenu, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, elevation, type MenuItem, haptic, showContextMenu, showMenu, toast } from '@/ui'
 
 import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, renameItem, shareItem } from './actions'
 import { Folder, type FolderIconName } from './folder'
@@ -32,7 +32,7 @@ import { SelectBar } from './select-bar'
 import { useDragSelect } from './drag-select'
 
 type Row =
-  | { type: 'title'; key: string; label: string; controls?: boolean; add?: boolean }
+  | { type: 'title'; key: string; label: string; controls?: boolean }
   | { type: 'folders'; key: string; items: VaultItem[] }
   | { type: 'places'; key: string }
   | { type: 'tiles'; key: string; items: VaultItem[] }
@@ -45,8 +45,10 @@ const CAT_LOOK: Record<Category, { icon: Parameters<typeof Icon>[0]['icon']; col
   starred: { icon: StarIcon, color: '#e5a50a' }, all: { icon: FolderAddIcon, color: '#8b8b93' },
 }
 
-export function VaultBrowser({ parent = '', category, header, root, bottom = 24 }: {
+export function VaultBrowser({ parent = '', category, header, root, bottom = 24, fab }: {
   parent?: string; category?: Category; header: ReactNode; root?: boolean
+  /** The floating + (adds to this folder); hidden while choosing several. */
+  fab?: boolean
   /** Space under the content (and where the selection bar floats). */
   bottom?: number
 }) {
@@ -62,7 +64,6 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
   const media = category === 'photos' || category === 'videos'
   const view = media ? 'grid' : prefs.view
 
-  const inSynced = !!parent && !!all.find((r) => r.id === parent && (r.meta?.source || r.meta?.rel !== undefined))
   const stats = useMemo(() => {
     const m = new Map<string, { n: number; bytes: number; thumbs: string[] }>()
     for (const r of all) {
@@ -93,8 +94,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
     const chunk = (l: VaultItem[], n: number, type: 'folders' | 'tiles') => {
       for (let i = 0; i < l.length; i += n) out.push({ type, key: `${type}-${l[i].id}`, items: l.slice(i, i + n) })
     }
-    const own = !category && !q && !inSynced
-    if (folders.length || (root && !q)) out.push({ type: 'title', key: 't-f', label: 'Folders', add: own })
+    if (folders.length) out.push({ type: 'title', key: 't-f', label: 'Folders' })
     chunk(folders, 2, 'folders')
     if (root && !q && !category) out.push({ type: 'places', key: 'places' })
     const ups = q || category ? [] : uploads.filter((u) => u.parent === parent)
@@ -105,7 +105,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
       else for (const f of files) out.push({ type: 'file', key: f.id, item: f })
     }
     return out
-  }, [all, uploads, parent, category, query, prefs.sort, view, root, inSynced])
+  }, [all, uploads, parent, category, query, prefs.sort, view, root])
 
   const tile = Math.floor((width - 32 - 16) / 3)
   // Hold a file, then slide over others to choose them all (tiles: which column from x).
@@ -140,7 +140,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
         keyExtractor={(r) => r.key}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: bottom + (selecting ? 96 : 40), flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: bottom + (selecting || fab ? 96 : 40), flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshVault(); setRefreshing(false) }}
           tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
         ListHeaderComponent={
@@ -156,9 +156,6 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 10, paddingTop: 20, paddingBottom: 6 }}>
                 <Text variant="overline" color="ink3" accessibilityRole="header" style={{ flex: 1 }}>{r.label}</Text>
-                {r.add && (
-                  <IconButton icon={Add01Icon} size={34} iconSize={18} color={c.ink2} accessibilityLabel="New folder" onPress={() => folderMenu(parent)} />
-                )}
                 {r.controls && (
                   <>
                     <Press radius={10} static onPress={() => showMenu({ title: 'Sort by', items: SORTS.map((s) => ({ label: s.label, value: s.id === prefs.sort ? '✓' : undefined, onPress: () => setPrefs({ sort: s.id }) })) })}
@@ -212,26 +209,13 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
       />
       </View>
       </GestureDetector>
-      {selecting && <SelectionBar picked={picked} bottom={bottom} onClear={clear} />}
+      {selecting ? <SelectionBar picked={picked} bottom={bottom} onClear={clear} /> : fab && <AddFab parent={parent} bottom={bottom + 12} />}
     </View>
   )
 }
 
-/** New folder: one on your server, or one kept in sync from your computer. */
-export function folderMenu(parent: string) {
-  haptic.tap()
-  showMenu({
-    title: 'New folder',
-    items: [
-      { label: 'New folder', value: 'On your server', icon: FolderAddIcon, onPress: () => newFolderSheet(parent) },
-      { label: 'Sync a folder from your computer', icon: FolderSyncIcon, onPress: () => router.push({ pathname: '/vault/sync', params: { parent } }) },
-    ],
-  })
-}
-
-/** The + menu: photos and videos, any file, the camera, a folder. */
-export function addMenu(parent: string) {
-  haptic.tap()
+/** Everything that adds to a folder: photos and videos, any file, the camera, a new folder, one synced from a computer. */
+export function addItems(parent: string): MenuItem[] {
   const send = async (files: { uri: string; name: string; mime?: string; size?: number }[]) => {
     if (!files.length) return
     const r = await uploadFiles(files, parent)
@@ -243,9 +227,7 @@ export function addMenu(parent: string) {
     const ext = (a.mimeType?.split('/')[1] ?? (a.type === 'video' ? 'mp4' : 'jpg')).replace('jpeg', 'jpg').replace('quicktime', 'mov')
     return { uri: a.uri, name: a.fileName ?? `${a.type === 'video' ? 'Video' : 'Photo'} ${stamp()}${i ? ` ${i + 1}` : ''}.${ext}`, mime: a.mimeType ?? undefined, size: a.fileSize ?? undefined }
   }
-  showMenu({
-    title: 'Add to your vault',
-    items: [
+  return [
       { label: 'Photos & videos', icon: Image01Icon, onPress: async () => {
         const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: 0, quality: 1 })
         if (!r.canceled) send(r.assets.map(fromPicker))
@@ -261,9 +243,14 @@ export function addMenu(parent: string) {
         if (!r.canceled) send(r.assets.map(fromPicker))
       } },
       { label: 'New folder', icon: FolderAddIcon, onPress: () => newFolderSheet(parent) },
-      { label: 'Sync a folder from your computer', icon: FolderSyncIcon, onPress: () => router.push({ pathname: '/vault/sync', params: { parent } }) },
-    ],
-  })
+      { label: 'Sync from your computer', icon: FolderSyncIcon, onPress: () => router.push({ pathname: '/vault/sync', params: { parent } }) },
+  ]
+}
+
+/** The same as an action sheet. */
+export function addMenu(parent: string) {
+  haptic.tap()
+  showMenu({ title: 'Add to your vault', items: addItems(parent) })
 }
 
 /** What the vault holds, by kind, against its 20 GB: the bar is the whole allowance, so the empty part is what's free. */
@@ -324,38 +311,6 @@ export function StorageSheet({ open, onClose }: { open: boolean; onClose: () => 
   )
 }
 
-/** Browse by kind: each a tile with its count and size. */
-function Browse({ items, width }: { items: VaultItem[]; width: number }) {
-  const { c, scheme } = useTheme()
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 10 }}>
-      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 4 }}>Browse</Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        {CATEGORIES.filter((cat) => cat.id !== 'starred').map((cat) => {
-          const hits = items.filter((r) => inCategory(r, cat.id))
-          const files = hits.filter((r) => r.kind === 'file')
-          const look = CAT_LOOK[cat.id]
-          return (
-            <Press key={cat.id} radius={18} onPress={() => { haptic.tap(); router.push({ pathname: '/vault/[id]', params: { id: `cat:${cat.id}` } }) }}
-              accessibilityLabel={`${cat.label}, ${hits.length}`} outerStyle={{ width }}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
-              <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: `${look.color}${scheme === 'dark' ? '2b' : '1c'}` }}>
-                <Icon icon={look.icon} size={20} color={look.color} strokeWidth={1.9} />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text variant="bodyMedium" numberOfLines={1}>{cat.label}</Text>
-                <Text variant="footnote" color="ink3" tabular numberOfLines={1}>
-                  {hits.length ? `${hits.length}${files.length ? ` · ${formatSize(files.reduce((s, r) => s + r.size, 0))}` : ''}` : 'None yet'}
-                </Text>
-              </View>
-            </Press>
-          )
-        })}
-      </View>
-    </View>
-  )
-}
-
 /** A folder as Stepwise's Folder, in its colour and icon; a synced one carries its computer's mark in the count. */
 function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }: {
   item: VaultItem; size: number; stat?: { n: number; bytes: number; thumbs: string[] }; selected: boolean; selecting: boolean
@@ -397,7 +352,6 @@ function Places({ items, width }: { items: VaultItem[]; width: number }) {
           used={phone ? phone.total - phone.free : undefined} total={phone?.total} note={phone ? undefined : 'Downloads, documents and recent files'}
           onPress={() => go('/vault/phone', {})} />
       </View>
-      {items.some((r) => r.kind === 'file') && <Browse items={items} width={width} />}
     </View>
   )
 }
@@ -520,6 +474,31 @@ function Loading({ tile }: { tile: number }) {
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {[0, 1, 2].map((i) => <Skeleton key={i} width={tile} height={tile} radius={14} />)}
       </View>
+    </View>
+  )
+}
+
+// ------------------------------------------------------------------ the floating +
+// Above the nav on the right (as WhatsApp's); its menu grows out of it in place.
+const SIZE = 56
+
+function Face() {
+  const { c } = useTheme()
+  return (
+    <View style={{ width: SIZE, height: SIZE, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: c.solidTo, borderWidth: 1, borderColor: c.solidEdge }}>
+      <Icon icon={Add01Icon} size={24} color={c.solidInk} strokeWidth={2} />
+    </View>
+  )
+}
+
+function AddFab({ parent, bottom }: { parent: string; bottom: number }) {
+  const { scheme } = useTheme()
+  const ref = useRef<View>(null)
+  return (
+    <View ref={ref} collapsable={false} style={[{ position: 'absolute', right: 16, bottom, borderRadius: 18 }, elevation(scheme)]}>
+      <Press radius={18} onPress={() => { haptic.tap(); showContextMenu(ref.current, <Face />, addItems(parent)) }} accessibilityLabel="Add to the vault">
+        <Face />
+      </Press>
     </View>
   )
 }
