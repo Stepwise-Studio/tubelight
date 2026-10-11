@@ -125,6 +125,12 @@ async def test_a_fuller_name_joins_the_known_nickname(m):
     assert len(rows) == 1 and rows[0]["name"] == "Vikram Rao" and "Vik" in rows[0]["aliases"]
 
 
+def test_a_new_name_is_not_a_restatement():
+    assert mem._new_words("Meera works at Swiggy", "Meera works at Zomato") == {"swiggy"}
+    assert not mem._new_words("Saqlain is at Razorpay.", "Saqlain works at Razorpay")
+    assert mem._new_words("The demo is on 14/10", "The demo is on 12/10") == {"14/10"}
+
+
 async def test_restated_fact_adds_a_source_not_a_copy(m):
     _, owner = m
     a, b = await episode(owner, "Saqlain is at Razorpay"), await episode(owner, "yeah Saqlain is at Razorpay", days=3)
@@ -165,3 +171,15 @@ async def test_extract_end_to_end_and_worker_waits_for_quiet(m):
     assert "Known entities" in fake.calls[-1][0].content and "#1 [" in fake.calls[-1][1].content
     assert await facts(owner) == ["Saqlain is Razorpay's partner engineer"]
     assert (await mem._q("select extracted from mem_episodes where owner = %s", owner))[0]["extracted"] == mem.VERSION
+
+
+async def test_a_fact_about_a_name_instead_of_an_id_still_lands(m):
+    _, owner = m
+    a = await episode(owner, "Rahul will send the contract")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Rahul", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Rahul will send the contract", "episode": 1, "quote": "send the contract"}]})
+    b = await episode(owner, "Rahul's contract is for the Pune lease", days=1)
+    out = await run(owner, [b], {"facts": [{"about": "Rahul", "text": "Rahul's contract is for the Pune lease", "episode": 1,
+                                            "quote": "contract is for the Pune lease"}]})
+    assert out["facts"] == 1
+    assert len(await mem._q("select id from mem_entities where owner = %s and kind = 'person'", owner)) == 1

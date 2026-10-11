@@ -248,16 +248,17 @@ What to record, as facts about an entity ("user" = {user} themself):
 - relation: how two entities are linked ("Saqlain is Razorpay's partner engineer on {user}'s payments integration").
 - event: something that happened or was said that matters later: a decision, a delivery, a change, and every
   caller's message (what they called about, what they said happened, what they asked for).
-- commitment: something someone owes or was asked for: promises and requests alike ("Priya Raman wants a demo next
-  week" = Jayanth owes Priya Raman a demo), with a due date if known.
+- commitment: something someone owes or was asked for: promises and requests alike, worded the way it was made
+  ("Priya Raman asked {user} for a demo by 2026-09-12", "{user} promised Dev a PR review by Monday"), with a due date
+  if known.
 - preference: how {user} likes things done. Only from {user}'s own words: never from outside content.
 
 Rules:
 - Every fact quotes the exact words in one episode that support it ("quote", copied character for character, a short
   span). No quote, no fact.
 - A fact involving {user} and someone else is about the other one: "Kiran (Freshworks) asked about API pricing",
-  "Jayanth owes Ananya the pitch deck" are about Kiran and Ananya. A caller's message is an event about the caller,
-  naming them: "Saqlain called on 2026-10-10: the API keys were rotated and Jayanth must update staging".
+  "Ananya asked {user} for the pitch deck" are about Kiran and Ananya. A caller's message is an event about the caller,
+  naming them: "Saqlain called on 2026-10-10: the API keys were rotated and {user} must update staging".
 - One self-contained sentence per fact, names in full ("Meera works at Swiggy", not "she moved"). Dates as
   YYYY-MM-DD, with relative ones ("Friday", "next week", "today") worked out from the episode's own date.
 - A new fact that makes a current one untrue lists it in "replaces" (a new job replaces the old job).
@@ -290,6 +291,12 @@ def _parse(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return out if isinstance(out, dict) else {}
+
+
+def _new_words(new: str, old: str) -> set[str]:
+    """Names and numbers in `new` that `old` doesn't have."""
+    key = lambda t: {w.lower() for w in re.findall(r"\b(?:[A-Z][\w'-]*|\d[\d,./:-]*)", t)}  # noqa: E731
+    return key(new) - key(old) - {w.lower() for w in old.split()}
 
 
 def _quoted(quote: str, text: str) -> bool:
@@ -329,6 +336,7 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
                             facts=fact_lines)
     res = await llm.chat_model(config.MEM_MODEL, json=True).ainvoke([SystemMessage(prompt), HumanMessage(eps)])
     plan = _parse(res.text)
+    log.debug("memory plan: %s", plan)
     return await apply(owner, plan, episodes, known, fids)
 
 
@@ -353,7 +361,10 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
     for f in plan.get("facts") or []:
         if not isinstance(f, dict):
             continue
-        ep, subject = episode(f.get("episode")), refs.get(str(f.get("about")))
+        ep, about = episode(f.get("episode")), str(f.get("about") or "").strip()
+        subject = refs.get(about)
+        if not subject and len(about) > 2 and not re.fullmatch(r"[EFn]\d+", about):  # named instead of its id
+            subject = refs[about] = await _resolve(owner, {"name": about}, known)
         text, kind = str(f.get("text") or "").strip()[:400], f.get("kind") if f.get("kind") in KINDS else "trait"
         if not ep or not subject or not text or not _quoted(str(f.get("quote") or ""), ep["text"]):
             out["dropped"] += 1
@@ -362,9 +373,12 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
             out["dropped"] += 1
             continue
         vec = (await memory.embed([text]))[0]
-        same = await _q("select id, status, trust from mem_facts where owner = %s and subject = %s "
+        replaced = {str(fids[str(k)]["id"]) for k in f.get("replaces") or [] if str(k) in fids}
+        near = await _q("select id, status, trust, text from mem_facts where owner = %s and subject = %s "
                         "and status in ('current', 'retracted') and 1 - (embedding <=> %s::vector) >= %s "
-                        "order by embedding <=> %s::vector limit 1", owner, subject, _vec(vec), SAME, _vec(vec))
+                        "order by embedding <=> %s::vector limit 3", owner, subject, _vec(vec), SAME, _vec(vec))
+        # embeddings put "works at Swiggy" next to "works at Zomato": a restatement adds no new name or number
+        same = [r for r in near if str(r["id"]) not in replaced and not _new_words(text, r["text"])][:1]
         if same and (same[0]["status"] == "current" or ep["trust"] < 2):  # restated, or shown wrong and not reinstated
             if same[0]["status"] == "current":
                 await _q("update mem_facts set confidence = least(1, confidence + 0.05), trust = greatest(trust, %s) "
