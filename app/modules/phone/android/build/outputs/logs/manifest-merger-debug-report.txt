@@ -1,7 +1,7 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-22:12
-INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-22:12
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-39:12
+INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:1:1-39:12
 	package
 		INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml
 	xmlns:tools
@@ -22,36 +22,88 @@ uses-permission#android.permission.USE_FULL_SCREEN_INTENT
 ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:7:3-79
 	android:name
 		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:7:20-76
+uses-permission#android.permission.READ_CONTACTS
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:3-70
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:20-67
+uses-permission#android.permission.CALL_PHONE
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:3-67
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:20-64
+uses-permission#android.permission.READ_CALL_LOG
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:3-70
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:20-67
+uses-permission#android.permission.READ_CALENDAR
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:13:3-70
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:13:20-67
+uses-permission#android.permission.SEND_SMS
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:14:3-65
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:14:20-62
+uses-permission#android.permission.ACCESS_NOTIFICATION_POLICY
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:3-83
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:20-80
+uses-permission#android.permission.WRITE_SETTINGS
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:3-107
+	tools:ignore
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:69-104
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:20-68
 queries
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:9:3-14:13
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:20:3-25:13
 intent#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:5-13:14
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:21:5-24:14
 action#android.intent.action.MAIN
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:7-59
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:22:7-59
 	android:name
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:15-56
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:22:15-56
 category#android.intent.category.LAUNCHER
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:7-67
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:23:7-67
 	android:name
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:17-64
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:23:17-64
 application
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:15:3-21:17
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:26:3-38:17
 service#studio.stepwise.phone.NotificationsService
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:5-20:15
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:5-31:15
 	android:label
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:7-32
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:29:7-32
 	android:exported
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:72-96
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:72-96
 	android:permission
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:33-107
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:29:33-107
 	android:name
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:14-71
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:14-71
 intent-filter#action:name:android.service.notification.NotificationListenerService
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:7-120
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:7-120
 action#android.service.notification.NotificationListenerService
-ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:22-104
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:22-104
 	android:name
-		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:30-101
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:30-101
+service#studio.stepwise.phone.AppsService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:5-37:15
+	android:label
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:88-113
+	android:exported
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:63-87
+	android:permission
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:34:7-73
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:14-62
+intent-filter#action:name:android.accessibilityservice.AccessibilityService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:7-113
+action#android.accessibilityservice.AccessibilityService
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:22-97
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:30-94
+meta-data#android.accessibilityservice
+ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:7-103
+	android:resource
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:62-100
+	android:name
+		ADDED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:18-61
 uses-sdk
 INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml

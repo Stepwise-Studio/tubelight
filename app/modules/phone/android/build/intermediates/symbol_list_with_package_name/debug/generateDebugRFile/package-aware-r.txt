@@ -1,1 +1,3 @@
 studio.stepwise.phone
+string tubelight_apps_description
+xml tubelight_apps

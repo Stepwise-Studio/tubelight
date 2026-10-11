@@ -1,2 +1,4 @@
 R_DEF: Internal format may change without notice
 local
+string tubelight_apps_description
+xml tubelight_apps

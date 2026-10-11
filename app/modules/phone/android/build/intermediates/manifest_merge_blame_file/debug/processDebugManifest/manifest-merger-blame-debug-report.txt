@@ -19,42 +19,97 @@
 14    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 14-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:7:3-79
 14-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:7:20-76
-15    <!-- Find installed apps by name to open them. -->
-16    <queries>
-16-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:9:3-14:13
-17        <intent>
-17-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:5-13:14
-18            <action android:name="android.intent.action.MAIN" />
-18-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:7-59
-18-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:15-56
-19
-20            <category android:name="android.intent.category.LAUNCHER" />
-20-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:7-67
-20-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:17-64
-21        </intent>
-22    </queries>
-23
-24    <application>
-24-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:15:3-21:17
-25
-26        <!-- Opt-in: the user turns on notification access for Tubelight in settings. -->
-27        <service
-27-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:5-20:15
-28            android:name="studio.stepwise.phone.NotificationsService"
-28-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:14-71
-29            android:exported="false"
-29-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:17:72-96
-30            android:label="Tubelight"
-30-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:7-32
-31            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" >
-31-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:33-107
-32            <intent-filter>
-32-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:7-120
-33                <action android:name="android.service.notification.NotificationListenerService" />
-33-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:22-104
-33-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:19:30-101
-34            </intent-filter>
-35        </service>
-36    </application>
-37
-38</manifest>
+15    <!--
+16       Opt-in, asked in Profile → Phone assistant: call and text people by name, call straight away, recent calls,
+17       the next day's calendar, and SMS sent after the user's OK.
+18    -->
+19    <uses-permission android:name="android.permission.READ_CONTACTS" />
+19-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:3-70
+19-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:10:20-67
+20    <uses-permission android:name="android.permission.CALL_PHONE" />
+20-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:3-67
+20-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:11:20-64
+21    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+21-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:3-70
+21-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:12:20-67
+22    <uses-permission android:name="android.permission.READ_CALENDAR" />
+22-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:13:3-70
+22-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:13:20-67
+23    <uses-permission android:name="android.permission.SEND_SMS" />
+23-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:14:3-65
+23-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:14:20-62
+24    <!-- Do Not Disturb on/off (the user grants policy access in settings). -->
+25    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+25-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:3-83
+25-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:16:20-80
+26    <!-- Brightness (the user allows "modify system settings"). -->
+27    <uses-permission
+27-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:3-107
+28        android:name="android.permission.WRITE_SETTINGS"
+28-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:20-68
+29        tools:ignore="ProtectedPermissions" />
+29-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:18:69-104
+30    <!-- Find installed apps by name to open them. -->
+31    <queries>
+31-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:20:3-25:13
+32        <intent>
+32-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:21:5-24:14
+33            <action android:name="android.intent.action.MAIN" />
+33-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:22:7-59
+33-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:22:15-56
+34
+35            <category android:name="android.intent.category.LAUNCHER" />
+35-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:23:7-67
+35-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:23:17-64
+36        </intent>
+37    </queries>
+38
+39    <application>
+39-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:26:3-38:17
+40
+41        <!-- Opt-in: the user turns on notification access for Tubelight in settings. -->
+42        <service
+42-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:5-31:15
+43            android:name="studio.stepwise.phone.NotificationsService"
+43-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:14-71
+44            android:exported="false"
+44-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:28:72-96
+45            android:label="Tubelight"
+45-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:29:7-32
+46            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" >
+46-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:29:33-107
+47            <intent-filter>
+47-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:7-120
+48                <action android:name="android.service.notification.NotificationListenerService" />
+48-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:22-104
+48-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:30:30-101
+49            </intent-filter>
+50        </service>
+51        <!-- Opt-in (Settings → Accessibility): using apps for the user, one OK'd task at a time (Apps.kt). -->
+52        <service
+52-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:5-37:15
+53            android:name="studio.stepwise.phone.AppsService"
+53-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:14-62
+54            android:exported="false"
+54-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:63-87
+55            android:label="Tubelight"
+55-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:33:88-113
+56            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" >
+56-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:34:7-73
+57            <intent-filter>
+57-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:7-113
+58                <action android:name="android.accessibilityservice.AccessibilityService" />
+58-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:22-97
+58-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:35:30-94
+59            </intent-filter>
+60
+61            <meta-data
+61-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:7-103
+62                android:name="android.accessibilityservice"
+62-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:18-61
+63                android:resource="@xml/tubelight_apps" />
+63-->/home/akhil/tubelight/app/modules/phone/android/src/main/AndroidManifest.xml:36:62-100
+64        </service>
+65    </application>
+66
+67</manifest>
