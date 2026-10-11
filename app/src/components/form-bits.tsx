@@ -86,7 +86,7 @@ export function GroupIconPicker({ color, value, onChange }: { color: string; val
             accessibilityLabel={`${k} icon`}
             accessibilityState={{ checked: on }}
             onPress={() => { if (!on) { haptic.tap(); onChange(k) } }}
-            style={{ padding: 2, borderRadius: 16, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
+            style={{ padding: 2, borderRadius: 24, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
             hitSlop={2}
           >
             <GroupAvatar color={color} icon={k} size={40} />

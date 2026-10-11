@@ -7,7 +7,7 @@ import {
 
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
-import { Icon, Squircle, TeammateAvatar } from '@/ui'
+import { Icon, TeammateAvatar } from '@/ui'
 
 /** A group chat's picture: one of these on the project colour (until hand-drawn emblems replace them). */
 export const GROUP_ICONS = {
@@ -18,15 +18,15 @@ export const GROUP_ICONS = {
 } as const
 export type GroupIcon = keyof typeof GROUP_ICONS
 
-/** The group picture by itself (also the tiles in the icon picker). Squircle = group, circle = person. */
+/** The group picture by itself (also the tiles in the icon picker). */
 export function GroupAvatar({ color, icon, size = 48, working = false }: { color: string; icon: string | null; size?: number; working?: boolean }) {
   const { c } = useTheme()
   return (
     <View style={{ width: size, height: size }}>
-      <Squircle style={{ width: size, height: size, borderRadius: size * 0.3, backgroundColor: color || c.panel2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.imageOutline }}>
+      <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color || c.panel2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.imageOutline }}>
         <Icon icon={GROUP_ICONS[icon as GroupIcon] ?? GROUP_ICONS.group} size={Math.round(size * 0.46)} color="#18181b" strokeWidth={1.75} />
-      </Squircle>
-      {working && <View pointerEvents="none" style={{ position: 'absolute', inset: -3, borderRadius: size * 0.36, borderWidth: 2, borderColor: c.tube }} />}
+      </View>
+      {working && <View pointerEvents="none" style={{ position: 'absolute', inset: -3, borderRadius: size, borderWidth: 2, borderColor: c.tube }} />}
     </View>
   )
 }
