@@ -2,10 +2,10 @@
 // the phone shares with teammates (opt-in) synced to the server when the app opens or a message goes out.
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useEffect } from 'react'
-import { AppState } from 'react-native'
 
 import { Phone, type PhoneAction } from '../../modules/phone'
 import { api } from './api'
+import { onReturn } from './app-state'
 import type { ChatMessage } from './use-thread'
 import { toast } from '@/ui'
 
@@ -128,7 +128,7 @@ const SYNCED = 'tubelight.phone.notesSynced'
  *  notification access, the notifications since the last sync. */
 export async function syncNotifications() {
   if (!Phone) return
-  await api('/phone/status', { method: 'POST', json: { status: Phone.status() } }).catch(() => {})
+  await api('/phone/status', { method: 'POST', json: { status: await Phone.status() } }).catch(() => {})
   if (!Phone.notificationAccess()) return
   const last = Number((await AsyncStorage.getItem(SYNCED).catch(() => null)) ?? 0)
   const items = Phone.recentNotifications(last)
@@ -141,7 +141,6 @@ export function useNotificationSync(signedIn: boolean) {
   useEffect(() => {
     if (!signedIn) return
     syncNotifications().catch(() => {})
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') syncNotifications().catch(() => {}) })
-    return () => sub.remove()
+    return onReturn(() => { syncNotifications().catch(() => {}) })
   }, [signedIn])
 }

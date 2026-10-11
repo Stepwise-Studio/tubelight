@@ -46,7 +46,7 @@ interface PhoneModule {
   usageAccess(): boolean
   openUsageAccess(): void
   /** Storage, battery, memory, network (and storage by kind and by app, with usage access). */
-  status(): Record<string, unknown>
+  status(): Promise<Record<string, unknown>>
   /** The screen's corner radius in dp (0 if the phone doesn't say). */
   screenRadius(): number
   /** A local PDF (file:// URI): page count and each page's size in points. */

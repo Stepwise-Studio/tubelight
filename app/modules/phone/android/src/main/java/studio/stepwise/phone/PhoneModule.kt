@@ -82,7 +82,7 @@ class PhoneModule : Module() {
     Function("recentNotifications") { since: Double -> Notes.since(context, since.toLong()) }
     Function("usageAccess") { usageAccess() }
     Function("openUsageAccess") { start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
-    Function("status") { status() }
+    AsyncFunction("status") { status() } // off the JS thread: it reads storage, the calendar and the call log
     AsyncFunction("pdfInfo") { path: String -> Pdf.info(path) }
     AsyncFunction("pdfPage") { path: String, page: Int, width: Int -> Pdf.render(context, path, page, width) }
     AsyncFunction("pdfSearch") { path: String, query: String, limit: Int -> Pdf.search(path, query, limit) }

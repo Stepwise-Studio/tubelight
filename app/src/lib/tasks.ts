@@ -7,6 +7,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { AppState } from 'react-native'
 
 import { ApiError, api } from '@/lib/api'
+import { onReturn } from '@/lib/app-state'
 import { toast } from '@/ui'
 
 export type TodoStatus = 'backlog' | 'todo' | 'doing' | 'done' | 'canceled'
@@ -135,7 +136,8 @@ const persist = () => AsyncStorage.multiSet([[CACHE, JSON.stringify(server)], [O
 let boot: Promise<void> | null = null
 function load() {
   if (boot) return boot
-  AppState.addEventListener('change', (st) => { if (st === 'active') syncTodos() })
+  onReturn(() => { syncTodos() })
+  AppState.addEventListener('change', (st) => { if (st === 'active' && outbox.length) syncTodos() }) // unsent changes: at once
   boot = AsyncStorage.multiGet([CACHE, OUTBOX]).then(([[, c], [, o]]) => {
     if (server === null && c) server = JSON.parse(c)
     outbox = [...(o ? (JSON.parse(o) as Op[]) : []), ...outbox] // anything queued before the load came back goes after

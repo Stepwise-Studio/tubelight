@@ -1,6 +1,6 @@
 import { createContext, use, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AppState } from 'react-native'
 
+import { onReturn } from './app-state'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Message, Project, ProjectMember, Run, Teammate, Thread } from '@/lib/types'
 
@@ -155,11 +155,11 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
         .subscribe()
     })()
 
-    // Catch up on anything missed while backgrounded.
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active' && loaded.current) refresh() })
+    // Catch up on anything missed while away (not after a dialog's blip: see onReturn).
+    const stop = onReturn(() => { if (loaded.current) refresh() })
     return () => {
       cancelled = true
-      sub.remove()
+      stop()
       if (channel) supabase.removeChannel(channel)
     }
   }, [userId, refresh])
