@@ -18,6 +18,7 @@ import { motion, useTheme } from '@/theme'
 import { Button, Icon, IconButton, Sheet, Skeleton, Squircle, Text, TextField, elevation, haptic } from '@/ui'
 
 import { localCopy } from './actions'
+import { FileIcon } from './file-icon'
 
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
 const GAP = 12
@@ -52,17 +53,23 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   const [landing, setLanding] = useState<{ x: number; y: number } | null>(null)
   const key = `tl.pdf.page.${item.id}`
   const drawable = !!Phone?.pdfInfo
+  const [locked, setLocked] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
     if (!drawable) return
-    Promise.all([localCopy(item).then((f) => Phone!.pdfInfo(f.uri).then((info) => ({ uri: f.uri, sizes: info.sizes }))), AsyncStorage.getItem(key).catch(() => null)])
+    let uri = ''
+    Promise.all([localCopy(item).then((f) => { uri = f.uri; return Phone!.pdfInfo(f.uri).then((info) => ({ uri: f.uri, sizes: info.sizes })) }), AsyncStorage.getItem(key).catch(() => null)])
       .then(([d, saved]) => {
         if (!live) return
         const start = Math.min(Math.max(Number(saved) || 1, 1), d.sizes.length)
         setDoc({ ...d, start })
         setPage(start)
-      }, (e) => live && setError((e as Error).message))
+      }, (e) => {
+        if (!live) return
+        if (/password/i.test((e as Error).message) && uri) setLocked(uri) // a locked PDF: ask for its password
+        else setError((e as Error).message)
+      })
     return () => { live = false; Phone?.pdfClose() }
   }, [item.id, drawable]) // eslint-disable-line react-hooks/exhaustive-deps
   // Remember the page, a moment after you settle on it.
@@ -175,6 +182,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
 
   if (!drawable) return fallback('This build can’t draw PDFs yet: update the app.')
   if (error) return fallback(error)
+  if (locked && !doc) return <Locked name={item.name} onUnlock={async (pw) => { const info = await Phone!.pdfUnlock!(locked, pw); setDoc({ uri: locked, sizes: info.sizes, start: 1 }); setPage(1) }} />
   if (!doc) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={c.ink3} /></View>
   const pages = doc.sizes.length
   const go = (n: number) => {
@@ -396,5 +404,32 @@ function PageJump({ open, pages, page, onGo, onClose }: { open: boolean; pages: 
         <Button label="Go" fullWidth size="lg" disabled={!ok} onPress={() => onGo(n)} />
       </View>
     </Sheet>
+  )
+}
+
+/** A password-protected PDF: its password, typed here, opens it (kept only while the app runs). */
+function Locked({ name, onUnlock }: { name: string; onUnlock: (password: string) => Promise<void> }) {
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const go = async () => {
+    if (!pw) return
+    setBusy(true)
+    try { await onUnlock(pw) } catch (e) {
+      setErr(/wrong/i.test((e as Error).message) ? 'That password didn’t open it. Try again.' : (e as Error).message)
+      setBusy(false)
+    }
+  }
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 16 }}>
+      <View style={{ alignItems: 'center', gap: 8 }}>
+        <FileIcon name={name} mime="application/pdf" size={72} />
+        <Text variant="headline" align="center">This PDF is locked</Text>
+        <Text variant="caption" color="ink3" align="center">Type its password to read it here. It stays on this phone.</Text>
+      </View>
+      <TextField label="Password" value={pw} onChangeText={(v) => { setPw(v); setErr(null) }} secureTextEntry autoFocus error={err}
+        returnKeyType="go" onSubmitEditing={go} autoCapitalize="none" autoCorrect={false} />
+      <Button label="Open" size="lg" fullWidth loading={busy} disabled={!pw} onPress={go} />
+    </View>
   )
 }

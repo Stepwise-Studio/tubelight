@@ -6,16 +6,17 @@ import { useState } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, Delete02Icon, File01Icon, FolderAddIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, Delete02Icon, Edit02Icon, File01Icon, FolderAddIcon, FolderExportIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { askName, shareItem } from '@/components/vault/actions'
 import { openOutside } from '@/components/vault/outside'
 import { useDragSelect } from '@/components/vault/drag-select'
+import { FolderPicker, type PickerDir } from '@/components/vault/folder-picker'
 import { OutsideRow, OutsideTile, chunk } from '@/components/vault/outside-row'
 import { SelectBar } from '@/components/vault/select-bar'
 import { connectApp } from '@/lib/catalog'
-import { driveToVault, driveViewable, newDriveFolder, starDrive, trashDrive, uploadToDrive, useDriveAbout, useDriveFolder, type DriveItem } from '@/lib/drive'
+import { driveFolders, driveToVault, driveViewable, editDrive, newDriveFolder, starDrive, trashDrive, uploadToDrive, useDriveAbout, useDriveFolder, type DriveItem } from '@/lib/drive'
 import { refreshVault, useVaultPrefs } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { Button, EmptyState, IconButton, SearchField, Segment, Skeleton, confirm, haptic, showMenu, toast } from '@/ui'
@@ -40,6 +41,15 @@ export default function DriveFolder() {
   const tile = Math.floor((width - 32 - 16) / 3)
   const more = (f: DriveItem) => { haptic.light(); showMenu({ title: f.name, items: menuItems(f) }) }
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [moving, setMoving] = useState<DriveItem[] | null>(null)
+  const moveTo = async (dir: PickerDir) => {
+    const list = moving ?? []
+    toast({ title: `Moving ${list.length === 1 ? list[0].name : `${list.length} items`} to ${dir.name}` })
+    const r = await Promise.allSettled(list.map((f) => editDrive(f.id, { parent: dir.id })))
+    const failed = r.filter((x) => x.status === 'rejected').length
+    toast(failed ? { title: `${list.length - failed} moved, ${failed} didn’t`, tone: 'error' } : { title: `Moved to ${dir.name}`, tone: 'success' })
+    reload()
+  }
   const selecting = selected.size > 0
   const files = (items ?? []).filter((f) => f.kind === 'file')
   const rows = grid ? chunk(items ?? [], 3) : (items ?? []).map((f) => [f])
@@ -87,6 +97,12 @@ export default function DriveFolder() {
       } },
       { label: 'Share', icon: Share08Icon, onPress: share ?? (() => driveViewable(f).then(shareItem, fail('Unable to share it'))) },
     ] : []),
+    { label: 'Rename', icon: Edit02Icon, onPress: () => askName(f.kind === 'folder' ? 'Rename folder' : 'Rename file', 'Rename', (n) => editDrive(f.id, { name: n }).then(() => {
+      toast({ title: `Renamed to ${n}`, tone: 'success' })
+      reload()
+      if (share) router.back()
+    }), f.name) },
+    { label: 'Move to…', icon: FolderExportIcon, onPress: () => setMoving([f]) },
     { label: 'Remove from Drive', icon: Delete02Icon, destructive: true, onPress: async () => {
       if (!await confirm({ title: `Remove ${f.name}?`, body: 'It goes to your Drive’s trash, where you can still restore it.', confirmLabel: 'Remove', destructive: true })) return
       trashDrive(f.id).then(() => {
@@ -153,7 +169,7 @@ export default function DriveFolder() {
         renderItem={({ item: row }) => grid ? (
           <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
             {row.map((f) => <OutsideTile key={f.id} name={f.name} mime={f.mime} dir={f.kind === 'folder'} thumb={f.thumb} size={tile} onPress={() => tap(f)}
-              onHold={() => drag.begin(f.id)} selecting={selecting} selected={selected.has(f.id)} />)}
+              onHold={f.kind === 'file' ? () => drag.begin(f.id) : () => more(f)} selecting={selecting} selected={selected.has(f.id)} />)}
           </View>
         ) : (
           <OutsideRow name={row[0].name} mime={row[0].mime} dir={row[0].kind === 'folder'} size={row[0].size} date={row[0].updated_at} thumb={row[0].thumb}
@@ -171,6 +187,8 @@ export default function DriveFolder() {
       {selecting && (
         <SelectBar count={selected.size} bottom={insets.bottom + 8} onClear={() => setSelected(new Set())} actions={[
           { icon: StarIcon, label: 'Star them in Drive', onPress: () => bulk('Starring', (f) => starDrive(f.id, true), 'Starred in Drive') },
+          ...(picked.length === 1 ? [{ icon: Edit02Icon, label: 'Rename it', onPress: () => { const f = picked[0]; setSelected(new Set()); askName('Rename file', 'Rename', (n) => editDrive(f.id, { name: n }).then(() => { toast({ title: `Renamed to ${n}`, tone: 'success' }); reload() }), f.name) } }] : []),
+          { icon: FolderExportIcon, label: 'Move them', onPress: () => { setMoving(picked); setSelected(new Set()) } },
           { icon: VaultIcon, label: 'Save them to the vault', onPress: () => bulk('Saving', (f) => driveToVault(f.id), 'Saved to your vault').then(() => refreshVault()) },
           { icon: Delete02Icon, label: 'Remove them from Drive', color: c.danger, onPress: async () => {
             if (!await confirm({ title: `Remove ${picked.length} ${picked.length === 1 ? 'file' : 'files'}?`, body: 'They go to your Drive’s trash, where you can still restore them.', confirmLabel: 'Remove', destructive: true })) return
@@ -178,6 +196,8 @@ export default function DriveFolder() {
           } },
         ]} />
       )}
+      <FolderPicker open={!!moving} title={moving?.length === 1 ? `Move “${moving[0].name}”` : `Move ${moving?.length ?? 0} items`} root={{ id: 'root', name: 'My Drive' }}
+        load={driveFolders} disabled={(d) => !!moving?.some((m) => m.id === d)} onPick={moveTo} onClose={() => setMoving(null)} />
     </View>
   )
 }

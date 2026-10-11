@@ -127,8 +127,8 @@ export function newFolderSheet(parent: string) {
   set({ kind: 'name', title: 'New folder', value: '', label: 'Name', confirm: 'Create folder', submit: (name) => newFolder(name, parent) }, true)
 }
 /** Asks for a name in the vault's name sheet (new Drive folders and the like). */
-export function askName(title: string, confirmLabel: string, submit: (name: string) => Promise<unknown>) {
-  set({ kind: 'name', title, value: '', label: 'Name', confirm: confirmLabel, submit }, true)
+export function askName(title: string, confirmLabel: string, submit: (name: string) => Promise<unknown>, value = '') {
+  set({ kind: 'name', title, value, label: 'Name', confirm: confirmLabel, submit }, true)
 }
 export function renameItem(item: VaultItem) {
   set({ kind: 'name', title: item.kind === 'folder' ? 'Rename folder' : 'Rename file', value: item.name, label: 'Name', confirm: 'Rename', submit: (name) => editItem(item.id, { name }) }, true)

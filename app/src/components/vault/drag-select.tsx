@@ -26,7 +26,7 @@ interface Props {
 type Scroller = { scrollToOffset: (o: { offset: number; animated?: boolean }) => void }
 
 /** The drag's state lives outside React (it changes every frame); the hook hands it the latest props. */
-function controller(setDragging: (on: boolean) => void) {
+function controller() {
   const cells = new Map<number, { y: number; h: number }>()
   const st = { scrollY: 0, height: 0, props: null as Props | null }
   const pan: { current: GestureType | undefined } = { current: undefined }
@@ -54,18 +54,17 @@ function controller(setDragging: (on: boolean) => void) {
     if (!drag) return
     if (drag.timer) clearInterval(drag.timer)
     drag = null
-    setDragging(false)
   }
 
   /** A file was held: choose it and follow the finger from here. */
   const begin = (key: string) => {
     const p = st.props
     const anchor = p ? p.order.indexOf(key) : -1
-    if (!p || anchor < 0 || drag) return
+    if (!p || anchor < 0) return
+    stop() // a leftover from a touch that never ended cleanly
     drag = { anchor, base: new Set(p.selected), last: anchor, x: -1, y: -1, live: false }
     const chosen = new Set([...drag.base, key])
     p.setSelected(() => chosen)
-    setDragging(true)
     haptic.light()
   }
   const follow = (x: number, y: number) => {
@@ -88,10 +87,8 @@ function controller(setDragging: (on: boolean) => void) {
 
   const gesture = Gesture.Pan().activateAfterLongPress(HOLD_MS).withRef(pan).runOnJS(true)
     .onStart((e) => {
-      if (!drag) { // moved right after the hold, before the file's own long-press: start here
-        const key = st.props ? hit(e.x, e.y) : null
-        if (key) begin(key)
-      }
+      const key = st.props ? hit(e.x, e.y) : null
+      if (key && (!drag || st.props!.order[drag.anchor] !== key)) begin(key) // moved right after the hold, before the file's own long-press
       follow(e.x, e.y)
     })
     .onUpdate((e) => follow(e.x, e.y))
@@ -125,18 +122,16 @@ function controller(setDragging: (on: boolean) => void) {
 }
 
 export function useDragSelect(props: Props) {
-  const [dragging, setDragging] = useState(false)
-  const [ctl] = useState(() => controller(setDragging))
+  const [ctl] = useState(controller)
   useLayoutEffect(() => { ctl.setProps(props) })
   return {
     /** Call from a file's long-press. */
     begin: ctl.begin,
-    dragging,
     /** For a GestureDetector around the list. */
     gesture: ctl.gesture,
     /** Spread onto a View between the GestureDetector and the list (it measures the list's height). */
     wrapProps: ctl.wrapProps,
     /** Spread onto the list (gesture handler's FlatList). */
-    listProps: { ...ctl.listProps, scrollEnabled: !dragging },
+    listProps: ctl.listProps,
   }
 }

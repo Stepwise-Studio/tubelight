@@ -3,18 +3,18 @@
 // The same browser shows a folder or a category. Long-press a file to select several; long-press a folder for its menu.
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
-import { router } from 'expo-router'
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { router, useFocusEffect } from 'expo-router'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import {
-  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, Delete02Icon,
+  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, Delete02Icon, Edit02Icon,
   File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GridViewIcon, Image01Icon, LaptopIcon,
   LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
 
 import {
-  CATEGORIES, SORTS, deleteItem, dismissUpload, editItem, fileUrl, formatSize, inCategory, kindOf, refreshVault, sorter,
+  CATEGORIES, SORTS, deleteItem, syncedCopy, dismissUpload, editItem, fileUrl, formatSize, inCategory, kindOf, refreshVault, sorter,
   uploadFiles, useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
 } from '@/lib/vault'
 import { useDriveAbout } from '@/lib/drive'
@@ -22,7 +22,7 @@ import { Phone } from '@/lib/phone'
 import { useTheme } from '@/theme'
 import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, haptic, showContextMenu, showMenu, toast } from '@/ui'
 
-import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
+import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, renameItem, shareItem } from './actions'
 import { Folder, type FolderIconName } from './folder'
 import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
@@ -381,8 +381,10 @@ function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }
 /** Below the folders on the vault's top: Google Drive and this phone, each with how full it is, then Browse. */
 function Places({ items, width }: { items: VaultItem[]; width: number }) {
   const { c } = useTheme()
-  const { about } = useDriveAbout()
-  const [phone] = useState(() => Phone?.storage?.() ?? null)
+  const { about, reload } = useDriveAbout()
+  const [phone, setPhone] = useState(() => Phone?.storage?.() ?? null)
+  // Fresh numbers each time the Vault comes into view (and a retry if Drive didn't answer before).
+  useFocusEffect(useCallback(() => { reload(); setPhone(Phone?.storage?.() ?? null) }, [reload]))
   const go = (pathname: '/vault/phone' | '/vault/drive/[id]', params: Record<string, string>) => { haptic.tap(); router.push({ pathname, params } as never) }
   return (
     <View style={{ gap: 24, paddingTop: 4 }}>
@@ -400,27 +402,27 @@ function Places({ items, width }: { items: VaultItem[]; width: number }) {
   )
 }
 
-/** A place with storage: its mark and name, "x of y used", and a bar of how full it is. */
+/** A place with storage: its mark and name, a bar of how full it is (zinc; yellow past 70%, red past 85%), and
+ * "x of y used". */
 function PlaceCard({ art, title, used, total, note, onPress }: { art: ReactNode; title: string; used?: number; total?: number; note?: string; onPress: () => void }) {
   const { c } = useTheme()
   const pct = used !== undefined && total ? Math.min(100, (used / total) * 100) : null
   const line = note ?? (used === undefined ? ' ' : total ? `${formatSize(used)} of ${formatSize(total)} used` : `${formatSize(used)} used`)
+  const fill = pct === null ? c.ink3 : pct > 85 ? c.danger : pct > 70 ? c.warning : c.ink3
   return (
-    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${line}${total && used !== undefined ? `, ${formatSize(total - used)} free` : ''}`}
-      style={{ padding: 12, paddingBottom: pct === null ? 12 : 14, gap: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
-          <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{line}</Text>
-        </View>
-        {total && used !== undefined ? <Text variant="footnote" color="ink3" tabular>{formatSize(total - used)} free</Text> : <Icon icon={ArrowRight01Icon} size={16} color="ink4" />}
+    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${line}${pct !== null ? `, ${Math.round(pct)} percent full` : ''}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
+      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
+      <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+        <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
+        {pct !== null && (
+          <View style={{ height: 4, borderRadius: 2, backgroundColor: c.panel3, overflow: 'hidden' }}>
+            <View style={{ width: `${Math.max(pct, 1.5)}%`, height: 4, borderRadius: 2, backgroundColor: fill }} />
+          </View>
+        )}
+        <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{line}</Text>
       </View>
-      {pct !== null && (
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: c.panel2, overflow: 'hidden' }}>
-          <View style={{ width: `${Math.max(pct, 1.5)}%`, height: 6, borderRadius: 3, backgroundColor: pct > 90 ? c.danger : c.tube }} />
-        </View>
-      )}
+      <Icon icon={ArrowRight01Icon} size={16} color="ink4" />
     </Press>
   )
 }
@@ -457,7 +459,7 @@ function FileRow({ item, selected, selecting, onPress, onHold }: { item: VaultIt
         <Text variant="footnote" color="ink3" tabular numberOfLines={1}>{meta}</Text>
       </View>
       {selecting
-        ? <View style={{ width: 40, alignItems: 'center' }}><SelectDot on={selected} size={22} /></View>
+        ? <View style={{ width: 40, alignItems: 'center' }}><SelectDot on={selected} size={18} /></View>
         : <IconButton icon={MoreHorizontalIcon} size={40} iconSize={18} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} />}
     </Press>
   )
@@ -477,6 +479,7 @@ function SelectionBar({ picked, bottom, onClear }: { picked: VaultItem[]; bottom
       { icon: StarIcon, label: starAll ? 'Star them' : 'Unstar them', color: starAll ? undefined : '#e5a50a',
         onPress: () => Promise.all(picked.map((r) => editItem(r.id, { starred: starAll }))).catch(() => toast({ title: 'Unable to save', tone: 'error' })) },
       { icon: FolderExportIcon, label: 'Move them', onPress: () => { moveItems(picked); onClear() } },
+      ...(picked.length === 1 && !syncedCopy(picked[0]) ? [{ icon: Edit02Icon, label: 'Rename it', onPress: () => { renameItem(picked[0]); onClear() } }] : []),
       ...(one ? [{ icon: Share08Icon, label: 'Share it', onPress: () => shareItem(viewable(one)) }] : []),
       { icon: Delete02Icon, label: 'Delete them', color: c.danger, onPress: async () => {
         if (!await confirm({ title: `Delete ${picked.length} ${picked.length === 1 ? 'item' : 'items'}?`, body: 'They leave your server for good, with everything inside any folder.', confirmLabel: 'Delete', destructive: true })) return

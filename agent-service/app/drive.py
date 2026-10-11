@@ -117,8 +117,20 @@ async def trash(owner_id: str, file_id: str) -> None:
     await _proxy(owner_id, "PATCH", f"{API}/files/{quote(file_id)}", {"trashed": True})
 
 
-async def star(owner_id: str, file_id: str, on: bool) -> None:
-    await _proxy(owner_id, "PATCH", f"{API}/files/{quote(file_id)}", {"starred": on})
+async def update(owner_id: str, file_id: str, starred: bool | None = None, name: str | None = None, parent: str | None = None) -> dict[str, Any]:
+    """Star, rename, or move into another folder (Drive moves by swapping the file's parents)."""
+    body: dict[str, Any] = {}
+    if starred is not None:
+        body["starred"] = starred
+    if name:
+        body["name"] = vault.clean_name(name)
+    query = f"fields={FIELDS}"
+    if parent:
+        meta = (await _proxy(owner_id, "GET", f"{API}/files/{quote(file_id)}?fields=parents")).data or {}
+        old = ",".join(meta.get("parents") or [])
+        query += f"&addParents={quote(parent)}" + (f"&removeParents={quote(old)}" if old else "")
+    r = await _proxy(owner_id, "PATCH", f"{API}/files/{quote(file_id)}?{query}", body)
+    return _row(r.data or {})
 
 
 async def new_folder(owner_id: str, name: str, parent: str = "root") -> dict[str, Any]:

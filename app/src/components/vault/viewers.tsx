@@ -199,6 +199,7 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   if (tooBig) return <Other item={item} note="It’s too big to show here. Share it to open it in another app." />
   if (error) return <Other item={item} note={error} />
   if (text === null) return <Loading />
+  if (!text.trim()) return <Other item={item} note="This file is empty." />
   if (markdown) {
     return (
       <ScrollView contentContainerStyle={{ paddingTop: chrome.top + 16, paddingBottom: chrome.bottom + 40, paddingHorizontal: 20 }}>
@@ -226,7 +227,8 @@ function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bott
   const [p, setP] = useState<PreviewData | null>(null)
   useEffect(() => {
     const load = item.preview.startsWith('upload:')
-      ? (() => { const form = new FormData(); form.append('file', { uri: item.src, name: item.name, type: item.mime || 'application/octet-stream' } as unknown as Blob); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
+      // Expo's fetch takes a file-system File as a form part (React Native's { uri } objects it refuses)
+      ? (() => { const form = new FormData(); form.append('file', new File(item.src) as unknown as Blob, item.name); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
       : api<PreviewData>(item.preview)
     load.then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
   }, [item.preview, item.src, item.name, item.mime])

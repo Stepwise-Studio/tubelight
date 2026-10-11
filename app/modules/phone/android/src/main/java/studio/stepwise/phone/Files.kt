@@ -1,6 +1,7 @@
 package studio.stepwise.phone
 
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -48,5 +49,73 @@ object Files {
       }
     }
     return out
+  }
+
+  private fun inside(f: File): File {
+    val root = Environment.getExternalStorageDirectory().canonicalPath
+    if (!f.canonicalPath.startsWith(root)) throw IllegalArgumentException("Outside the phone's storage")
+    return f
+  }
+
+  /** Tells Android's media index what changed, so galleries and recent-file lists don't show stale files. */
+  private fun rescan(context: Context, paths: List<String>) {
+    MediaScannerConnection.scanFile(context, paths.toTypedArray(), null, null)
+  }
+
+  private fun clean(name: String): String {
+    val n = name.trim().replace(Regex("[/\\u0000]"), "_")
+    if (n.isEmpty() || n == "." || n == "..") throw IllegalArgumentException("Give it a name.")
+    return n
+  }
+
+  /** Renames a file or folder; returns its new row. */
+  fun rename(context: Context, path: String, name: String): Map<String, Any> {
+    val f = inside(File(path))
+    val to = File(f.parentFile, clean(name))
+    if (to.exists()) throw IllegalStateException("Something called ${to.name} is already there.")
+    if (!f.renameTo(to)) throw IllegalStateException("Android didn't allow renaming ${f.name}.")
+    rescan(context, listOf(f.absolutePath, to.absolutePath))
+    return row(to)
+  }
+
+  /** Deletes files and folders (with everything inside) for good. */
+  fun delete(context: Context, paths: List<String>): Int {
+    var n = 0
+    for (p in paths) {
+      val f = inside(File(p))
+      if (f.isDirectory) f.deleteRecursively() else f.delete()
+      if (!f.exists()) n++
+    }
+    rescan(context, paths)
+    return n
+  }
+
+  /** Moves files and folders into a folder (a copy and delete when renaming can't, e.g. to an SD card). */
+  fun move(context: Context, paths: List<String>, dir: String): Int {
+    val dest = inside(File(dir))
+    if (!dest.isDirectory) throw IllegalArgumentException("That folder is gone.")
+    var n = 0
+    val changed = ArrayList<String>()
+    for (p in paths) {
+      val f = inside(File(p))
+      if (f.parentFile?.canonicalPath == dest.canonicalPath) continue
+      if (f.isDirectory && dest.canonicalPath.startsWith(f.canonicalPath + "/")) throw IllegalArgumentException("A folder can't go inside itself.")
+      var to = File(dest, f.name)
+      var i = 2
+      while (to.exists()) { to = File(dest, if (f.isDirectory || !f.name.contains('.')) "${f.name} ($i)" else "${f.nameWithoutExtension} ($i).${f.extension}"); i++ }
+      if (!f.renameTo(to)) { f.copyRecursively(to); f.deleteRecursively() }
+      changed += listOf(f.absolutePath, to.absolutePath)
+      n++
+    }
+    rescan(context, changed)
+    return n
+  }
+
+  /** A new folder; returns its row. */
+  fun mkdir(parent: String, name: String): Map<String, Any> {
+    val d = File(inside(File(parent.ifEmpty { Environment.getExternalStorageDirectory().absolutePath })), clean(name))
+    if (d.exists()) throw IllegalStateException("${d.name} is already there.")
+    if (!d.mkdirs()) throw IllegalStateException("Android didn't allow making ${d.name}.")
+    return row(d)
   }
 }

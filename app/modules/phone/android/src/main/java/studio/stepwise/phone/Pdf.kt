@@ -16,16 +16,31 @@ object Pdf {
   private var openPath: String? = null
   private var fd: ParcelFileDescriptor? = null
   private var renderer: PdfRenderer? = null
+  /** Passwords the user typed for locked PDFs, while the app runs (never stored). */
+  private val passwords = HashMap<String, String>()
 
   @Synchronized
   private fun open(path: String): PdfRenderer {
     if (openPath == path) renderer?.let { return it }
     renderer?.close(); fd?.close()
-    val file = File(Uri.parse(path).path ?: path)
+    renderer = null; openPath = null
+    val file = File(if (path.startsWith("/")) path else Uri.parse(path).path ?: path)
     val f = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     fd = f
+    val pw = passwords[path]
+    val r = if (pw != null && android.os.Build.VERSION.SDK_INT >= 35)
+      PdfRenderer(f, android.graphics.pdf.LoadParams.Builder().setPassword(pw).build()) else PdfRenderer(f)
     openPath = path
-    return PdfRenderer(f).also { renderer = it }
+    return r.also { renderer = it }
+  }
+
+  /** A locked PDF opened with its password (Android 15+). Throws if the password is wrong. */
+  @Synchronized
+  fun unlock(path: String, password: String): Map<String, Any> {
+    if (android.os.Build.VERSION.SDK_INT < 35) throw UnsupportedOperationException("Opening locked PDFs needs Android 15 or later.")
+    passwords[path] = password
+    if (openPath == path) close()
+    return try { info(path) } catch (e: SecurityException) { passwords.remove(path); close(); throw SecurityException("Wrong password") }
   }
 
   /** Page count and every page's size in points. */

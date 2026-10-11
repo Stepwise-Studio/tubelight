@@ -92,6 +92,7 @@ class PhoneModule : Module() {
     Function("openUsageAccess") { start(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
     AsyncFunction("status") { status() } // off the JS thread: it reads storage, the calendar and the call log
     AsyncFunction("pdfInfo") { path: String -> Pdf.info(path) }
+    AsyncFunction("pdfUnlock") { path: String, password: String -> Pdf.unlock(path, password) }
     AsyncFunction("pdfPage") { path: String, page: Int, width: Int -> Pdf.render(context, path, page, width) }
     AsyncFunction("pdfSearch") { path: String, query: String, limit: Int -> Pdf.search(path, query, limit) }
     Function("pdfClose") { Pdf.close() }
@@ -107,6 +108,10 @@ class PhoneModule : Module() {
     }
     AsyncFunction("listFiles") { path: String -> Files.list(path) }
     AsyncFunction("recentFiles") { kind: String, limit: Int -> Files.recent(context, kind, limit) }
+    AsyncFunction("renameFile") { path: String, name: String -> Files.rename(context, path, name) }
+    AsyncFunction("deleteFiles") { paths: List<String> -> Files.delete(context, paths) }
+    AsyncFunction("moveFiles") { paths: List<String>, dir: String -> Files.move(context, paths, dir) }
+    AsyncFunction("makeFolder") { parent: String, name: String -> Files.mkdir(parent, name) }
     // The display's own corner radius in dp (Android 12+ reports it), so a glow can hug the screen's rounded edge.
     Function("screenRadius") {
       val insets = appContext.currentActivity?.window?.decorView?.rootWindowInsets

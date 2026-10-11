@@ -61,6 +61,8 @@ interface PhoneModule {
   screenRadius(): number
   /** A local PDF (file:// URI): page count and each page's size in points. */
   pdfInfo(path: string): Promise<{ pages: number; sizes: [number, number][] }>
+  /** A locked PDF with its password (Android 15+): like pdfInfo; rejects on a wrong password. */
+  pdfUnlock?(path: string, password: string): Promise<{ pages: number; sizes: [number, number][] }>
   /** One page drawn at `width` px into the cache (JPEG): its file URI and pixel size. */
   pdfPage(path: string, page: number, width: number): Promise<{ uri: string; width: number; height: number }>
   /** Matches of `query` (Android 15+): page index, boxes in page points [l, t, r, b], and a line of text around it.
@@ -79,6 +81,14 @@ interface PhoneModule {
   listFiles?(path: string): Promise<{ path: string; root: string; items: PhoneFile[] }>
   /** The newest documents anywhere on the phone: kind "docs" or one extension ("pdf"). */
   recentFiles?(kind: string, limit: number): Promise<PhoneFile[]>
+  /** Renames a file or folder on the phone; its new row. */
+  renameFile?(path: string, name: string): Promise<PhoneFile>
+  /** Deletes for good (folders with everything inside); how many went. */
+  deleteFiles?(paths: string[]): Promise<number>
+  /** Moves into a folder (names that clash get " (2)"); how many moved. */
+  moveFiles?(paths: string[], dir: string): Promise<number>
+  /** A new folder ("" = the top of the phone's storage). */
+  makeFolder?(parent: string, name: string): Promise<PhoneFile>
 }
 
 export interface PhoneFile { name: string; path: string; dir: boolean; size: number; modified: number; mime: string }

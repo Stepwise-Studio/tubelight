@@ -1629,17 +1629,18 @@ async def drive_trash(file_id: str, user: User = Depends(current_user)):
     return {"ok": True}
 
 
-class DriveStar(BaseModel):
-    starred: bool
+class DriveEdit(BaseModel):
+    starred: bool | None = None
+    name: str | None = None
+    parent: str | None = None  # move into this folder
 
 
 @app.patch("/drive/files/{file_id}")
-async def drive_star(file_id: str, body: DriveStar, user: User = Depends(current_user)):
+async def drive_edit(file_id: str, body: DriveEdit, user: User = Depends(current_user)):
     try:
-        await drive.star(user["id"], file_id, body.starred)
+        return await drive.update(user["id"], file_id, body.starred, body.name, body.parent)
     except Exception as e:
         raise _drive_error(e)
-    return {"ok": True}
 
 
 class DriveFolder(BaseModel):

@@ -58,7 +58,10 @@ export async function driveViewable(f: DriveItem): Promise<Viewable> {
 }
 
 export const trashDrive = (id: string) => api(`/drive/files/${id}`, { method: 'DELETE' })
-export const starDrive = (id: string, starred: boolean) => api(`/drive/files/${id}`, { method: 'PATCH', json: { starred } })
+export const editDrive = (id: string, changes: { starred?: boolean; name?: string; parent?: string }) => api<DriveItem>(`/drive/files/${id}`, { method: 'PATCH', json: changes })
+export const starDrive = (id: string, starred: boolean) => editDrive(id, { starred })
+/** The folders inside a Drive folder (for Move to…). */
+export const driveFolders = (id: string) => api<{ items: DriveItem[] }>(`/drive/files?folder=${encodeURIComponent(id)}`).then((r) => r.items.filter((f) => f.kind === 'folder'))
 export const newDriveFolder = (name: string, parent: string) => api<DriveItem>('/drive/folders', { method: 'POST', json: { name, parent } })
 export const driveToVault = (id: string, parent = '') => api<VaultItem>(`/drive/files/${id}/vault`, { method: 'POST', json: { parent } })
 

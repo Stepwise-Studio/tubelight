@@ -169,7 +169,7 @@ export const Folder = memo(function Folder({ size, label, count, color = DEFAULT
           </Squircle>
         </Animated.View>
         {selecting && (
-          <View style={{ position: 'absolute', right: -4, top: h * 0.13 - 8 }}><SelectDot on={!!selected} size={26} onImage /></View>
+          <View style={{ position: 'absolute', right: -4, top: h * 0.13 - 8 }}><SelectDot on={!!selected} size={22} onImage /></View>
         )}
       </View>
       <View style={{ alignItems: 'center', gap: 6, maxWidth: w + 16 }}>

@@ -7,7 +7,7 @@ import { useTheme } from '@/theme'
 
 import { Icon } from './icon'
 
-export function SelectDot({ on, size = 24, onImage }: { on: boolean; size?: number; onImage?: boolean }) {
+export function SelectDot({ on, size = 20, onImage }: { on: boolean; size?: number; onImage?: boolean }) {
   const { c } = useTheme()
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center',
