@@ -1,10 +1,10 @@
 // Navigation: a floating capsule of five places with a pill that slides to the one you're on.
 import { Pressable, View, useWindowDimensions } from 'react-native'
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { CircleCheckIcon, InboxIcon, UserCircleIcon, VaultIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons'
 
 import { isUnread } from '@/lib/format'
@@ -43,25 +43,37 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const badge = (name: string) => (name === 'activity' ? waiting : 0)
   const dot = (name: string) => name === 'index' && unread
 
+  const slot = (screen - 32 - 12) / PLACES.length
+  const at = Math.max(0, PLACES.findIndex((p) => p.name === current))
+
+  // The pill (transitions.dev tabs sliding) runs on the UI thread and starts on the press itself, before React renders
+  // the new page; the render only catches it up when the tab changed some other way (a link, a notification).
+  const x = useSharedValue(6 + at * slot)
+  const target = useRef(6 + at * slot)
+  const slide = (to: number) => {
+    if (to === target.current) return
+    target.current = to
+    x.value = withTiming(to, { duration: motion.duration.fast, easing: ease })
+  }
+  useEffect(() => { slide(6 + at * slot) })
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }))
+
+  // Every tab mounts once the app has settled, so the first visit slides in a ready page instead of building one.
+  useEffect(() => {
+    const t = setTimeout(() => PLACES.forEach((p) => p.name !== current && navigation.preload(p.name)), 1500)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const go = (name: string) => {
     if (name === current) return
     const route = state.routes.find((r) => r.name === name)
     if (!route) return
     haptic.tap()
+    slide(6 + PLACES.findIndex((p) => p.name === name) * slot)
     const e = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true })
     if (!e.defaultPrevented) navigation.navigate(name)
   }
 
-  const slot = (screen - 32 - 12) / PLACES.length
-  const at = Math.max(0, PLACES.findIndex((p) => p.name === current))
-
-  // The pill: placed without animation the first time, then slides (transitions.dev tabs sliding, 250ms).
-  const [placed, setPlaced] = useState(false)
-  useEffect(() => { const t = requestAnimationFrame(() => setPlaced(true)); return () => cancelAnimationFrame(t) }, [])
-  const pillX = 6 + at * slot
-  const pill = useAnimatedStyle(() => ({
-    transform: [{ translateX: placed ? withTiming(pillX, { duration: motion.duration.fast, easing: ease }) : pillX }],
-  }), [pillX, placed])
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: Math.max(insets.bottom, 12), zIndex: 2 }}>
