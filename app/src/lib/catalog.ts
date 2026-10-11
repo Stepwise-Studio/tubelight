@@ -67,7 +67,7 @@ export const COLORS = [
   { value: '#8b9cf7', name: 'Periwinkle' },
   { value: '#8bd4f7', name: 'Sky' },
   { value: '#8bf7c9', name: 'Mint' },
-  { value: '#c9e98b', name: 'Lime' },
+  { value: '#fafafa', name: 'Zinc' },
   { value: '#f7e08b', name: 'Butter' },
   { value: '#f7b58b', name: 'Peach' },
   { value: '#f79a9a', name: 'Coral' },
