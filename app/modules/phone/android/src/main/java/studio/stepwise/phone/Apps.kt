@@ -72,6 +72,9 @@ object Apps {
     val lines = mutableListOf<String>()
     fun walk(n: AccessibilityNodeInfo?, depth: Int) {
       if (n == null || depth > 40 || nodes.size >= MAX) return
+      // Fresh from the app: some apps change text without telling accessibility (Samsung's Calculator display), and
+      // the service's cached copy would show the old value.
+      n.refresh()
       if (n.isVisibleToUser) {
         // What it shows and what it's called, when they differ ("C" is Clear), plus the app's own id for it
         // ({btn_clear}): models find the right element far more reliably with all three.
