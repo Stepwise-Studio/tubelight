@@ -82,7 +82,9 @@ DESKTOP = {"device": "a Linux computer", "actions": "CLICK|TYPE|SET_VALUE|FOCUS|
 PHONE = {"device": "an Android phone", "actions": "CLICK|TYPE|SCROLL|SUBMIT|KEYS", "key": "back", "rules": """- CLICK, TYPE, SCROLL, SUBMIT: an element id from the screen below (SCROLL a list: value "down" or "up").
 - TYPE replaces the field's text with "value", which must be one of the allowed texts; SUBMIT presses the keyboard's
   send/search/go in that field.
-- KEYS: one of "back", "home", "recents", "notifications".
+- KEYS: one of "back", "home", "recents", "notifications". Stay in the app: only press home or recents when the
+  goal says to leave it; if you're lost, press back.
+- If a field or display still holds something from before (an old number, old text), clear it first.
 - Things you can't see may be further down: scroll before giving up."""}
 
 

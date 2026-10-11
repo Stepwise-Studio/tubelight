@@ -76,3 +76,11 @@ def test_reply_parts_get_a_space_between_them():
     assert said(AIMessage(content=[{"type": "text", "text": "Timer stopped."}, {"type": "text", "text": "Opened your timers."}])) \
         == "Timer stopped. Opened your timers."
     assert said(AIMessage(content="plain")) == "plain"
+
+
+def test_glued_sentences_are_split_but_names_and_links_stay():
+    from langchain_core.messages import AIMessage
+    from app.graph import said
+    assert said(AIMessage(content="Do Not Disturb turned off.All set! Anything else?")) == "Do Not Disturb turned off. All set! Anything else?"
+    for keep in ("Deploy on ASP.NET today.", "See example.com/Docs now.", "Mail a.b@Example.com please.", "Use `x.Y` here."):
+        assert said(AIMessage(content=keep)) == keep

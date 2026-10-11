@@ -436,18 +436,30 @@ def looping(text: str) -> bool:
     return bool(m) and len(set(m.group(1))) > 1
 
 
+_GLUED = re.compile(r"(?<=[a-z\)][.!?])(?=[A-Z][a-z])")
+
+
+def _unglue(text: str) -> str:
+    """'turned off.All set!' -> 'turned off. All set!': streamed Gemini parts meet without a space. Only in plain words
+    (never inside links, paths, emails or code) and only where a lowercase word ends a sentence and a capitalised
+    one starts the next, so 'ASP.NET' and 'example.com' stay as they are."""
+    if "```" in text:
+        return text
+    return " ".join(w if any(c in w for c in "/:@`") else _GLUED.sub(" ", w) for w in text.split(" "))
+
+
 def said(m: BaseMessage) -> str:
     """A reply's text. Gemini can answer in several text parts, which `.text` runs together ("Timer stopped.Timer
     cancelled."): parts that meet without a space get one."""
     if not isinstance(m.content, list):
-        return m.text
+        return _unglue(m.text)
     out = ""
     for b in m.content:
         t = b if isinstance(b, str) else b.get("text", "") if isinstance(b, dict) and b.get("type", "text") == "text" else ""
         if out and t and not out[-1].isspace() and not t[0].isspace():
             out += " "
         out += t
-    return out
+    return _unglue(out)
 
 
 async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], stream_id: str) -> AIMessage:

@@ -28,7 +28,11 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   }
   if (!res.ok) {
     const body = await res.json().catch(() => null)
-    throw new ApiError(body?.detail ?? `Request failed (${res.status})`, res.status)
+    // FastAPI's validation errors are a list ({loc, msg}): say them, never "[object Object]".
+    const detail = Array.isArray(body?.detail)
+      ? body.detail.map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).slice(1).join('.')}: ${d.msg}`).join('; ')
+      : body?.detail
+    throw new ApiError(typeof detail === 'string' && detail ? detail : `Request failed (${res.status})`, res.status)
   }
   return res.status === 204 ? (undefined as T) : res.json()
 }

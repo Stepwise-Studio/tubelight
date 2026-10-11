@@ -80,16 +80,18 @@ async function workInApp(a: PhoneAction, threadId?: string) {
       })
       if (['DONE', 'BLOCKED', 'NEEDS_INPUT'].includes(d.action)) {
         toast({ title: d.action === 'DONE' ? `Done in ${a.app}` : `Stopped in ${a.app}`, body: d.why, tone: d.action === 'DONE' ? 'success' : 'error' })
-        return finish(`${d.action === 'DONE' ? 'Done' : d.action === 'BLOCKED' ? 'Couldn’t finish' : 'Needs something from you'} in ${screen.app}: ${d.why ?? ''}`)
+        return finish(`${d.action === 'DONE' ? 'Done' : d.action === 'BLOCKED' ? 'Couldn’t finish' : 'Needs something from you'} in ${screen.app}: ${d.why ?? ''}`
+          + (d.action === 'DONE' ? '' : `\nSteps: ${steps.join('; ') || 'none'}`))
       }
       if (d.action === 'KEYS') screen = await Phone!.appKey(String(d.keys?.[0] ?? 'back'))
       else screen = await Phone!.appAct(screen.snapshot ?? '', d.element ?? '', d.action, d.value ?? '')
-      steps.push(`${d.action.toLowerCase()} ${d.element ?? d.keys?.join(' ') ?? ''}: ${screen.did ?? screen.status ?? ''}${screen.status === 'stale' ? ` (${screen.why})` : ''}`)
+      steps.push(`${d.action.toLowerCase()} ${d.element ?? d.keys?.join(' ') ?? ''}${d.value ? ` "${d.value}"` : ''}: ${screen.did ?? screen.status ?? ''}${screen.status === 'stale' ? ` (${screen.why})` : ''} [${d.why ?? ''}]`)
+      if (__DEV__) console.log('[app task]', steps[steps.length - 1])
     }
     return finish(`Stopped after 20 steps in ${a.app} without finishing. Steps: ${steps.join('; ')}`)
   } catch (e) {
     toast({ title: `Couldn’t finish in ${a.app}`, body: (e as Error).message, tone: 'error' })
-    return finish(`Couldn't finish in ${a.app}: ${(e as Error).message}`)
+    return finish(`Couldn't finish in ${a.app}: ${(e as Error).message}\nSteps: ${steps.join('; ') || 'none'}`)
   }
 }
 

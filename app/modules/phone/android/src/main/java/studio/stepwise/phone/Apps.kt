@@ -42,7 +42,9 @@ object Apps {
     val mine = s.packageName
     s.windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }.sortedByDescending { it.layer }
       .firstNotNullOfOrNull { w -> w.root?.takeIf { it.packageName?.toString() != mine } }?.let { return it }
-    return s.rootInActiveWindow?.takeIf { it.packageName?.toString() != mine } ?: throw CodedException("No app is open in front.")
+    return s.rootInActiveWindow?.takeIf { it.packageName?.toString() != mine }
+      ?: s.windows.firstNotNullOfOrNull { it.root?.takeIf { r -> r.packageName?.toString() != mine } }
+      ?: throw CodedException("No app is open in front.")
   }
 
   private fun role(n: AccessibilityNodeInfo): String {
@@ -152,7 +154,8 @@ object Apps {
     }
     s.performGlobalAction(g)
     settle()
-    return (if ("home" in k || "screenshot" in k) emptyMap() else look(c)) + mapOf("status" to "done", "did" to "pressed $k")
+    // Always the screen afterwards (after home: the launcher), so the next step sees where it is.
+    return look(c) + mapOf("status" to "done", "did" to "pressed $k")
   }
 
   /** After opening an app: wait until it's the one in front (5 s at most), then look. */
