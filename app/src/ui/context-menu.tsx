@@ -1,7 +1,7 @@
 // A context menu in place: the long-pressed thing stays lit where it is over a dim, and a Stepwise dropdown grows out
 // of it (below when there's room, else above). For things on a page (folders); the action sheet (showMenu) stays for
 // rows and headers.
-import { type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { BackHandler, Pressable, StyleSheet, View, type View as RNView, useWindowDimensions } from 'react-native'
 import Animated, { Easing, FadeIn, FadeOut, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -22,19 +22,37 @@ const MENU_W = 236
 const ROW = 46
 const ease = Easing.bezier(0.22, 1, 0.36, 1)
 
+/** What stays lit in place: a node, or one drawn by open state (it changes when the menu opens and as it closes). */
+type Preview = ReactNode | ((open: boolean) => ReactNode)
+
 /** Opens a menu at `target` (the pressed view), showing `preview` lifted in its place. */
-export function showContextMenu(target: RNView | null, preview: ReactNode, items: MenuItem[]) {
+export function showContextMenu(target: RNView | null, preview: Preview, items: MenuItem[]) {
   if (!target) return
   target.measureInWindow((x, y, w, h) => {
     haptic.light()
-    let sub: { remove: () => void } | null = null
-    const close = () => { sub?.remove(); setPortal(KEY, null) }
-    sub = BackHandler.addEventListener('hardwareBackPress', () => { close(); return true })
-    setPortal(KEY, <Layer at={{ x, y, w, h }} preview={preview} items={items} close={close} />)
+    setPortal(KEY, <Layer at={{ x, y, w, h }} preview={preview} items={items} close={() => setPortal(KEY, null)} />)
   })
 }
 
-function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: number; h: number }; preview: ReactNode; items: MenuItem[]; close: () => void }) {
+const CLOSE_MS = 180
+
+function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: number; h: number }; preview: Preview; items: MenuItem[]; close: () => void }) {
+  // Opened a frame after mounting (so the preview can animate into its open look); closing plays out before removal.
+  const [open, setOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
+  useEffect(() => {
+    const t = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(t)
+  }, [])
+  const shut = () => {
+    if (closing) return
+    setClosing(true)
+    setTimeout(close, CLOSE_MS)
+  }
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => { shut(); return true })
+    return () => sub.remove()
+  })
   const { c, scheme } = useTheme()
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
@@ -50,14 +68,18 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
       animations: { opacity: withTiming(1, { duration: 160, easing: ease }), transform: [{ scale: withTiming(1, { duration: 300, easing: ease }) }] },
     }
   }
-  const pick = (it: MenuItem) => { close(); it.onPress() }
+  const pick = (it: MenuItem) => { shut(); it.onPress() }
   return (
     <View style={StyleSheet.absoluteFill}>
-      <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(140)} style={StyleSheet.absoluteFill}>
-        <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(9,9,11,0.28)' }]} onPress={close} accessibilityLabel="Close the menu" />
-      </Animated.View>
-      <View pointerEvents="none" style={{ position: 'absolute', left: at.x, top: at.y, width: at.w, height: at.h }}>{preview}</View>
-      <Animated.View entering={grow} exiting={FadeOut.duration(120)}
+      {!closing && (
+        <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(CLOSE_MS)} style={StyleSheet.absoluteFill}>
+          <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(9,9,11,0.28)' }]} onPress={shut} accessibilityLabel="Close the menu" />
+        </Animated.View>
+      )}
+      <View pointerEvents="none" style={{ position: 'absolute', left: at.x, top: at.y, width: at.w, height: at.h }}>
+        {typeof preview === 'function' ? preview(open && !closing) : preview}
+      </View>
+      {!closing && <Animated.View entering={grow} exiting={FadeOut.duration(120)}
         style={[{ position: 'absolute', left, top, width: MENU_W, borderRadius: 20, transformOrigin: origin }, elevation(scheme)]}>
         <Squircle style={{ borderRadius: 20, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 6 }}>
           {items.map((it) => (
@@ -68,7 +90,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
             </Press>
           ))}
         </Squircle>
-      </Animated.View>
+      </Animated.View>}
     </View>
   )
 }
