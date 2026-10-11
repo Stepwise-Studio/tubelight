@@ -78,6 +78,11 @@ export default function PhoneFiles() {
     },
     selected,
     setSelected,
+    onHold: (i, x) => {
+      const r = blocks[i]?.items
+      const f = grid ? r?.[Math.min(2, Math.max(0, Math.floor((x - 16) / (tile + 8))))] : r?.[0]
+      if (f) more(f)
+    },
   })
   const toggle = (f: PhoneFile) => { haptic.tap(); setSelected((s) => { const n = new Set(s); if (n.has(f.path)) n.delete(f.path); else n.add(f.path); return n }) }
   const picked = files.filter((f) => selected.has(f.path))

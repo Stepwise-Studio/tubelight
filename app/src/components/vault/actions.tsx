@@ -7,11 +7,11 @@ import { Asset, requestPermissionsAsync } from 'expo-media-library'
 import { useState, useSyncExternalStore } from 'react'
 import { ScrollView, View } from 'react-native'
 import {
-  CheckmarkCircle02Icon, Delete02Icon, Download03Icon, Edit02Icon, FolderExportIcon, PaintBrush02Icon, RefreshIcon, Share08Icon,
+  CheckmarkCircle02Icon, Delete02Icon, InformationCircleIcon, Download03Icon, Edit02Icon, FolderExportIcon, PaintBrush02Icon, RefreshIcon, Share08Icon,
   StarIcon, StarOffIcon,
 } from '@hugeicons/core-free-icons'
 
-import { deleteItem, editItem, kindOf, newFolder, pathTo, refreshVault, syncNow, syncedCopy, syncedRoot, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
+import { deleteItem, editItem, formatSize, kindOf, newFolder, pathTo, refreshVault, syncNow, syncedCopy, syncedRoot, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
 import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast, type MenuItem } from '@/ui'
 
@@ -87,6 +87,7 @@ export function itemActions(item: VaultItem, opts: { onDeleted?: () => void; onS
   const copy = syncedCopy(item) // the computer owns it: rename, move and delete happen there
   return [
       ...(opts.onSelect ? [{ label: 'Select', icon: CheckmarkCircle02Icon, onPress: opts.onSelect }] : []),
+      { label: 'Info', icon: InformationCircleIcon, onPress: () => itemInfo(item) },
       { label: item.starred ? 'Unstar' : 'Star', icon: item.starred ? StarOffIcon : StarIcon, onPress: () => toggleStar(item) },
       ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(viewable(item)) }] : []),
       ...(media ? [{ label: 'Save to photos', icon: Download03Icon, onPress: () => saveToPhotos(viewable(item)) }] : []),
@@ -116,6 +117,7 @@ type Req =
   | { kind: 'name'; title: string; value: string; label: string; confirm: string; submit: (name: string) => Promise<unknown> }
   | { kind: 'move'; items: VaultItem[] }
   | { kind: 'look'; item: VaultItem }
+  | { kind: 'info'; item: VaultItem }
 let req: Req | null = null
 let shown = false
 const subs = new Set<() => void>()
@@ -134,6 +136,7 @@ export function renameItem(item: VaultItem) {
   set({ kind: 'name', title: item.kind === 'folder' ? 'Rename folder' : 'Rename file', value: item.name, label: 'Name', confirm: 'Rename', submit: (name) => editItem(item.id, { name }) }, true)
 }
 export function customiseFolder(item: VaultItem) { set({ kind: 'look', item }, true) }
+export function itemInfo(item: VaultItem) { set({ kind: 'info', item }, true) }
 export function moveItem(item: VaultItem) { set({ kind: 'move', items: [item] }, true) }
 export function moveItems(items: VaultItem[]) { if (items.length) set({ kind: 'move', items }, true) }
 
@@ -144,6 +147,7 @@ export function VaultSheetsHost() {
     <>
       <NameSheet key={`n${s.n}`} open={s.shown && s.req?.kind === 'name'} req={s.req?.kind === 'name' ? s.req : null} onClose={close} />
       <MoveSheet open={s.shown && s.req?.kind === 'move'} moving={s.req?.kind === 'move' ? s.req.items : null} onClose={close} />
+      <InfoSheet open={s.shown && s.req?.kind === 'info'} item={s.req?.kind === 'info' ? s.req.item : null} onClose={close} />
       <LookSheet key={`l${s.n}`} open={s.shown && s.req?.kind === 'look'} item={s.req?.kind === 'look' ? s.req.item : null} onClose={close} />
     </>
   )
@@ -249,6 +253,56 @@ function LookSheet({ open, item, onClose }: { open: boolean; item: VaultItem | n
         </View>
         <Button label="Save" fullWidth size="lg" onPress={save} />
       </View>
+    </Sheet>
+  )
+}
+
+const KIND_NAME: Record<string, string> = {
+  pdf: 'PDF document', word: 'Word document', sheet: 'Spreadsheet', slides: 'Presentation', image: 'Photo', video: 'Video',
+  audio: 'Audio', markdown: 'Markdown note', text: 'Text file', code: 'Code', archive: 'Archive', other: 'File',
+}
+
+/** Everything about one item: what and where it is, its size, dates, where it syncs from, and where it's kept on the
+ * server (files by id under the vault's folder; folders exist only in the vault's index). */
+function InfoSheet({ open, item, onClose }: { open: boolean; item: VaultItem | null; onClose: () => void }) {
+  const { c } = useTheme()
+  const { items } = useVault()
+  if (!item) return null
+  const all = items ?? []
+  const live = all.find((r) => r.id === item.id) ?? item
+  const where = ['Vault', ...pathTo(live.parent, all).map((p) => p.name)].join(' / ')
+  const inside = live.kind === 'folder' ? all.filter((r) => pathTo(r.id, all).some((p) => p.id === live.id) && r.id !== live.id) : []
+  const files = inside.filter((r) => r.kind === 'file')
+  const owner = live.url?.match(/\/vault\/f\/([^/]+)\//)?.[1] ?? all.find((r) => r.url)?.url?.match(/\/vault\/f\/([^/]+)\//)?.[1]
+  const disk = `~/tubelight/data/vault/${owner ?? '<you>'}/`
+  const when = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const m = live.meta ?? {}
+  const src = m.source
+  const rootOf = m.rel !== undefined ? pathTo(live.id, all).find((p) => p.meta?.source) : undefined
+  const rows: [string, string][] = [
+    ['Kind', live.kind === 'folder' ? (src ? 'Synced folder' : 'Folder') : KIND_NAME[kindOf(live.name, live.mime)] ?? 'File'],
+    ['Where', where],
+    ['Size', live.kind === 'folder' ? `${inside.length} ${inside.length === 1 ? 'item' : 'items'} · ${formatSize(files.reduce((t, r) => t + r.size, 0))}` : formatSize(live.size)],
+    ...(m.width && m.height ? [['Dimensions', `${m.width} × ${m.height}`] as [string, string]] : []),
+    ...(m.pages ? [['Pages', String(m.pages)] as [string, string]] : []),
+    ...(m.duration ? [['Length', `${Math.floor(m.duration / 60)}:${String(Math.round(m.duration % 60)).padStart(2, '0')}`] as [string, string]] : []),
+    ['Added', when(live.created_at)],
+    ['Changed', when(live.updated_at)],
+    ...(src ? [['Synced from', `${src.name}: ${src.path}`] as [string, string], ['Last synced', src.last ? when(new Date(src.last * 1000).toISOString()) : 'Not yet'] as [string, string]] : []),
+    ...(src?.error ? [['Sync problem', src.error] as [string, string]] : []),
+    ...(rootOf?.meta?.source ? [['From', `${rootOf.meta.source.name}: ${rootOf.meta.source.path}/${m.rel}`] as [string, string]] : []),
+    ['On the server', live.kind === 'folder' ? `Kept in the vault's index; its files are stored by id in ${disk}` : `${disk}${live.id}`],
+  ]
+  return (
+    <Sheet open={open} onClose={onClose} title={live.name}>
+      <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}>
+        {rows.map(([k, v], i) => (
+          <View key={k} style={{ flexDirection: 'row', gap: 16, paddingVertical: 11, borderTopWidth: i ? 1 : 0, borderTopColor: c.line }}>
+            <Text variant="caption" color="ink3" style={{ width: 96 }}>{k}</Text>
+            <Text variant="caption" selectable style={{ flex: 1 }}>{v}</Text>
+          </View>
+        ))}
+      </ScrollView>
     </Sheet>
   )
 }

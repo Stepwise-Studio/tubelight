@@ -63,6 +63,10 @@ export default function DriveFolder() {
     },
     selected,
     setSelected,
+    onHold: (i, x) => {
+      const f = grid ? rows[i]?.[Math.min(2, Math.max(0, Math.floor((x - 16) / (tile + 8))))] : rows[i]?.[0]
+      if (f) more(f)
+    },
   })
   const toggle = (f: DriveItem) => { haptic.tap(); setSelected((s) => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n }) }
   const tap = (f: DriveItem) => (selecting && f.kind === 'file' ? toggle(f) : open(f))

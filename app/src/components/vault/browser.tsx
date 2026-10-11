@@ -4,7 +4,7 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { router, useFocusEffect } from 'expo-router'
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import {
@@ -95,7 +95,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24,
     const chunk = (l: VaultItem[], n: number, type: 'folders' | 'tiles') => {
       for (let i = 0; i < l.length; i += n) out.push({ type, key: `${type}-${l[i].id}`, items: l.slice(i, i + n) })
     }
-    if (folders.length) out.push({ type: 'title', key: 't-f', label: 'Folders' })
+    if (folders.length && !(root && !q)) out.push({ type: 'title', key: 't-f', label: 'Folders' }) // the top shows folders without a heading
     chunk(folders, 2, 'folders')
     if (root && !q && !category) out.push({ type: 'places', key: 'places' })
     const ups = q || category ? [] : uploads.filter((u) => u.parent === parent)
@@ -120,6 +120,10 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24,
     },
     selected,
     setSelected,
+    onHold: (i, x) => {
+      const r = rows[i]
+      if (r?.type === 'folders') folderHolds.get(r.items[x < 16 + card + 5 ? 0 : 1]?.id ?? '')?.()
+    },
   })
   const card = Math.floor((width - 32 - 10) / 2)
   const picked = all.filter((r) => selected.has(r.id))
@@ -147,7 +151,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24,
         ListHeaderComponent={
           <View>
             {header}
-            <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: 2 }}>
+            <View style={{ paddingHorizontal: 16, gap: 14, paddingBottom: root && !query ? 18 : 2 }}>
               <SearchField value={query} onChangeText={setQuery} placeholder={category ? `Search ${CATEGORIES.find((x) => x.id === category)?.label.toLowerCase()}` : parent ? 'Search this folder' : 'Search your vault'} />
             </View>
           </View>
@@ -313,6 +317,8 @@ export function StorageSheet({ open, onClose }: { open: boolean; onClose: () => 
 }
 
 /** A folder as Stepwise's Folder, in its colour and icon; a synced one carries its computer's mark in the count. */
+const folderHolds = new Map<string, () => void>()
+
 function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }: {
   item: VaultItem; size: number; stat?: { n: number; bytes: number; thumbs: string[] }; selected: boolean; selecting: boolean
   onPress: () => void; onSelect: () => void
@@ -326,6 +332,8 @@ function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }
     badge: src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined } as const
   // Long-press: the folder's menu in place (Select first), or while choosing, toggle it.
   const hold = () => (selecting ? onSelect() : showContextMenu(ref.current, <Folder {...look} onPress={() => {}} />, itemActions(item, { onSelect })))
+  // The list's drag gesture takes a held touch before the folder's own long-press fires, so it calls this instead.
+  useEffect(() => { folderHolds.set(item.id, hold); return () => { folderHolds.delete(item.id) } })
   return (
     <View ref={ref} collapsable={false}>
       <Folder {...look} selected={selected} selecting={selecting} onPress={onPress} onLongPress={hold}
@@ -365,7 +373,7 @@ function PlaceCard({ art, title, used, total, note, onPress }: { art: ReactNode;
   const line = note ?? (used === undefined ? ' ' : total ? `${formatSize(used)} of ${formatSize(total)} used` : `${formatSize(used)} used`)
   const fill = pct === null ? c.ink3 : pct > 85 ? c.danger : pct > 70 ? c.warning : c.ink3
   return (
-    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${line}${pct !== null ? `, ${Math.round(pct)} percent full` : ''}`}
+    <Press radius={24} onPress={onPress} accessibilityLabel={`${title}. ${line}${pct !== null ? `, ${Math.round(pct)} percent full` : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
       <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
       <View style={{ flex: 1, minWidth: 0, gap: 6 }}>

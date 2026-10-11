@@ -22,6 +22,9 @@ interface Props {
   order: string[]
   selected: Set<string>
   setSelected: (f: (s: Set<string>) => Set<string>) => void
+  /** A hold on something that isn't a choosable file (a folder): the gesture took the touch, so it runs that
+   * thing's own long-press here. */
+  onHold?: (index: number, x: number) => void
 }
 type Scroller = { scrollToOffset: (o: { offset: number; animated?: boolean }) => void }
 
@@ -85,9 +88,15 @@ function controller() {
     }
   }
 
+  const holdOther = (x: number, y: number) => {
+    const at = y + st.scrollY
+    for (const [index, c] of cells) if (at >= c.y && at < c.y + c.h) { st.props?.onHold?.(index, x); return }
+  }
+
   const gesture = Gesture.Pan().activateAfterLongPress(HOLD_MS).withRef(pan).runOnJS(true)
     .onStart((e) => {
       const key = st.props ? hit(e.x, e.y) : null
+      if (!key && !drag) { holdOther(e.x, e.y); return }
       if (key && (!drag || st.props!.order[drag.anchor] !== key)) begin(key) // moved right after the hold, before the file's own long-press
       follow(e.x, e.y)
     })
