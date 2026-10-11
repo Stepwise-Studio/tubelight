@@ -29,6 +29,7 @@ async def m(env, monkeypatch):
     pool = AsyncConnectionPool(os.environ["TL_TEST_PG"], open=False, kwargs={"autocommit": True, "row_factory": dict_row})
     await pool.open()
     await mem.setup(pool)
+    monkeypatch.setattr(mem, "_model", lambda: env[1])  # the scripted model
     yield env[1], str(uuid.uuid4())
     mem._pool = None
     await pool.close()
@@ -206,3 +207,17 @@ async def test_two_full_names_sharing_a_first_name_stay_two_people(m):
                            "facts": [{"about": "n1", "text": "Priya Shah is Jayanth's sister", "episode": 1, "quote": "my sister Priya Shah"}]})
     rows = await mem._q("select name from mem_entities where owner = %s and kind = 'person' order by name", owner)
     assert [r["name"] for r in rows] == ["Priya Raman", "Priya Shah"]
+
+
+async def test_overview_has_you_open_loops_and_recent(m):
+    _, owner = m
+    a = await episode(owner, "Ananya asked me for the deck. I like a warm tone")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Ananya", "kind": "person"}],
+                           "facts": [{"about": "n1", "kind": "commitment", "text": "Ananya asked Jayanth for the deck",
+                                      "episode": 1, "quote": "asked me for the deck"},
+                                     {"about": "user", "kind": "preference", "text": "Jayanth likes a warm tone",
+                                      "episode": 1, "quote": "I like a warm tone"}]})
+    o = await mem.overview(owner)
+    assert [f["text"] for f in o["open"]] == ["Ananya asked Jayanth for the deck"]
+    assert [f["text"] for f in o["preferences"]] == ["Jayanth likes a warm tone"]
+    assert o["counts"]["people"] == 1 and o["recent"][0]["origin"]["source"] == "chat"

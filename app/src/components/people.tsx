@@ -11,9 +11,9 @@ import type { Person } from '@/lib/types'
 import { useTheme } from '@/theme'
 import { EmptyState, Icon, ListRow, SearchField, Skeleton, Text, toast } from '@/ui'
 
-const KIND_ICON = { org: Building03Icon, project: Folder01Icon, place: Location01Icon, thing: CubeIcon }
+const KIND_ICON = { org: Building03Icon, project: Folder01Icon, place: Location01Icon, thing: CubeIcon } as const
 export const KIND_LABEL: Record<Person['kind'], string> = {
-  person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', thing: 'Thing',
+  user: 'You', person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', thing: 'Thing',
 }
 
 export function PersonMark({ person, size = 40 }: { person: Pick<Person, 'kind' | 'name'>; size?: number }) {
@@ -21,7 +21,7 @@ export function PersonMark({ person, size = 40 }: { person: Pick<Person, 'kind' 
   const initials = person.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('')
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-      {person.kind === 'person'
+      {person.kind === 'person' || person.kind === 'user'
         ? <Text variant={size > 48 ? 'heading' : 'label'} color="ink2" style={{ fontWeight: '600' }}>{initials}</Text>
         : <Icon icon={KIND_ICON[person.kind]} size={size * 0.45} color="ink2" />}
     </View>
@@ -71,4 +71,15 @@ export function PeopleList({ bottom }: { bottom: number }) {
       ListEmptyComponent={<Text variant="caption" color="ink3" style={{ padding: 8 }}>Nothing matches.</Text>}
     />
   )
+}
+
+/** Where a fact was first heard, in a few words: "you, in a chat", "Shelby", "Saqlain on a call", "earlier notes". */
+export function heardFrom(o: { source: string; speaker: string } | null, you: string) {
+  if (!o) return ''
+  if (o.source === 'import') return 'earlier notes'
+  if (o.source === 'note') return o.speaker === 'the user' ? 'your correction' : `${o.speaker}'s note`
+  const who = o.speaker.replace(/^caller /, '').replace(/ \(.*\)$/, '').replace(/^app /, '')
+  if (o.source === 'call') return `${who} on a call`
+  if (o.speaker.startsWith('app ')) return `an app (${who.toLowerCase()})`
+  return who === you ? 'you, in a chat' : `${who}, in a chat`
 }

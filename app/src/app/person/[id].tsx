@@ -66,7 +66,7 @@ export default function PersonScreen() {
   }
 
   const header = (
-    <ScreenHeader title={p?.name ?? ''} right={p ? (
+    <ScreenHeader title={p?.name ?? ''} right={p && p.kind !== 'user' ? (
       <IconButton icon={MoreHorizontalIcon} accessibilityLabel="More" onPress={() => showMenu({
         items: [{ label: `Forget ${p.name}`, icon: Delete02Icon, destructive: true, onPress: forget }],
       })} />

@@ -452,6 +452,12 @@ async def list_people(user: User = Depends(current_user)):
     return await mem.entities(user["id"])
 
 
+@app.get("/memory/overview")
+async def memory_overview(user: User = Depends(current_user)):
+    _mem_on()
+    return await mem.overview(user["id"])
+
+
 @app.get("/people/{eid}")
 async def get_person(eid: str, user: User = Depends(current_user)):
     _mem_on()

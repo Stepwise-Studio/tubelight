@@ -23,7 +23,7 @@ import { connectApp, randomHex, toolkitName, useConnections, useToolkits, type T
 import { useSession } from '@/lib/session'
 import { google, identities } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
-import type { MemoryItem, Profile } from '@/lib/types'
+import type { MemoryOverview, Profile } from '@/lib/types'
 import { isPhone, useWorkspace } from '@/lib/workspace'
 import { useTheme, type ThemePreference } from '@/theme'
 import {
@@ -438,16 +438,17 @@ function ComputersSection() {
   )
 }
 
-/** What the teammates have learned, in one row: open to-dos, people, preferences. */
+/** What memory holds, in one row: open loops, people, facts, and whether it's still learning. */
 function MemorySection() {
-  const [items, setItems] = useState<MemoryItem[] | null>(null)
-  useFocusEffect(useCallback(() => { api<MemoryItem[]>('/memories/all').then(setItems, () => setItems([])) }, []))
-  const count = (k: MemoryItem['kind']) => (items ?? []).filter((m) => m.kind === k && !m.done).length
-  const summary = items === null ? 'Loading…' : items.length === 0 ? 'Nothing yet: it fills in as you chat'
-    : [[count('commitment'), 'to do'], [count('person'), count('person') === 1 ? 'person' : 'people'], [count('preference'), count('preference') === 1 ? 'preference' : 'preferences']]
-      .filter(([n]) => n).map(([n, w]) => `${n} ${w}`).join(' · ') || `${items.length} things`
+  const [o, setO] = useState<MemoryOverview | null | undefined>(undefined)
+  useFocusEffect(useCallback(() => { api<MemoryOverview>('/memory/overview').then(setO, () => setO(null)) }, []))
+  const n = o?.counts
+  const plural = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`
+  const summary = o === undefined ? 'Loading…' : !n || (!n.facts && !n.waiting) ? 'Nothing yet: it fills in as you chat'
+    : [o!.open.length ? `${o!.open.length} open` : null, plural(n.people, 'person', 'people'), plural(n.facts, 'fact', 'facts'),
+      n.waiting ? 'still learning' : null].filter(Boolean).join(' · ')
   return (
-    <FormSection title="Memory" hint="People, to-dos and preferences your teammates pick up as you work together.">
+    <FormSection title="Memory" hint="Who is who, what\u2019s open and how you like things, learned from your chats and calls, with where each fact came from.">
       <Surface style={{ overflow: 'hidden' }}>
         <ListRow title="Open memory" subtitle={summary} icon={Brain02Icon} chevron onPress={() => router.push('/memory')} />
       </Surface>

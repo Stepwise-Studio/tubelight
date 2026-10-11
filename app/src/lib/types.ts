@@ -210,7 +210,7 @@ export interface MemoryItem {
 /** Memory v2: someone or something the teammates know about (agent-service mem.py). */
 export interface Person {
   id: string
-  kind: 'person' | 'org' | 'project' | 'place' | 'thing'
+  kind: 'user' | 'person' | 'org' | 'project' | 'place' | 'thing'
   name: string
   aliases: string[]
   profile: string
@@ -247,4 +247,28 @@ export interface Fact {
 export interface PersonDetail extends Omit<Person, 'facts'> {
   ids: { type: 'phone' | 'email' | 'handle'; value: string }[]
   facts: Fact[]
+}
+
+/** A fact as the Memory overview lists it: who it's about and where it was first heard. */
+export interface OverviewFact {
+  id: string
+  kind: Fact['kind']
+  text: string
+  valid_from: string | null
+  learned_at: string
+  trust: 0 | 1 | 2
+  due: string | null
+  done: boolean | null
+  entity: string
+  about: string
+  origin: { source: FactSource['source']; speaker: string; occurred_at: string } | null
+}
+
+export interface MemoryOverview {
+  you: { id: string; name: string; aliases: string[]; profile: string }
+  preferences: OverviewFact[]
+  open: OverviewFact[]
+  recent: OverviewFact[]
+  people: Person[]
+  counts: { facts: number; people: number; waiting: number; episodes: number; last_learned: string | null }
 }

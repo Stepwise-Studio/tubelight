@@ -296,6 +296,12 @@ Reply with JSON only:
  "wrong": [{{"fact": "F3", "episode": 1, "quote": "..."}}]}}"""
 
 
+def _model():
+    """MEM_MODEL alone, no fallback chain: a weaker fallback quietly answers 'nothing to record' and the moment is lost
+    for good, while a rate limit just means trying again on a later tick."""
+    return llm._one(config.MEM_MODEL, retries=1).bind(response_format={"type": "json_object"})
+
+
 def _parse(text: str) -> dict[str, Any]:
     m = re.search(r"\{.*\}", text, re.S)
     try:
@@ -353,7 +359,7 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
                       for i, e in enumerate(episodes))
     prompt = EXTRACT.format(user=user_name, roster=", ".join(await _roster(owner)) or "(none)", today=f"{datetime.now(UTC):%Y-%m-%d}", entities=ent_lines or "(none yet)",
                             facts=fact_lines)
-    res = await llm.chat_model(config.MEM_MODEL, json=True).ainvoke([SystemMessage(prompt), HumanMessage(eps)])
+    res = await _model().ainvoke([SystemMessage(prompt), HumanMessage(eps)])
     plan = _parse(res.text)
     log.debug("memory plan: %s", plan)
     return await apply(owner, plan, episodes, known, fids)
@@ -470,7 +476,7 @@ async def consolidate(owner: str, user_name: str, limit: int = 8) -> int:
         blocks.append(f"## {e['id']} | {e['kind']} | {e['name']}" + (f" (also {', '.join(e['aliases'])})" if e["aliases"] else "")
                       + "\n" + "\n".join(f"- {f['text']}" + (" (done)" if f["done"] else f" (due {f['due']})" if f["due"] else "")
                                          for f in facts))
-    res = await llm.chat_model(config.MEM_MODEL, json=True).ainvoke(
+    res = await _model().ainvoke(
         [SystemMessage(PROFILE.format(user=user_name)), HumanMessage("\n\n".join(blocks))])
     plan = _parse(res.text)
     for e in stale:
@@ -544,10 +550,12 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
             log.info("memory: %d episodes -> %s", len(batch), res)
             done += 1
         except Exception as e:
+            limited = "429" in str(e) or "rate" in str(e).lower() or "quota" in str(e).lower()
             log.warning("memory: extraction failed (%s)", str(e)[:200])
-            await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then -1 "
-                     "else extracted end where id = any(%s)", ids)
-            break  # likely a rate limit: try again next tick
+            if not limited:  # a rate limit isn't the batch's fault: don't count it against its attempts
+                await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then -1 "
+                         "else extracted end where id = any(%s)", ids)
+            break  # try again next tick
     for o in owners if len(batches) <= max_batches else ():  # profiles once the backlog is through
         try:
             await consolidate(o, names[o])
@@ -710,6 +718,31 @@ async def entities(owner: str) -> list[dict[str, Any]]:
     return await _q("select e.id, e.kind, e.name, e.aliases, e.profile, e.touched_at, "
                     "(select count(*) from mem_facts f where f.subject = e.id and f.status = 'current') as facts "
                     "from mem_entities e where e.owner = %s and e.kind <> 'user' order by e.touched_at desc", owner)
+
+
+async def overview(owner: str) -> dict[str, Any]:
+    """The Memory page: you, what's open, what was learned lately (and from where), and how far learning has got."""
+    me = await user_entity(owner)
+    you = (await _q("select id, name, aliases, profile from mem_entities where id = %s", me))[0]
+    cols = ("f.id, f.kind, f.text, f.valid_from, f.learned_at, f.trust, f.due, f.done, e.id as entity, e.name as about, "
+            "(select row_to_json(x) from (select ep.source, ep.speaker, ep.occurred_at from mem_fact_sources s join "
+            "mem_episodes ep on ep.id = s.episode where s.fact = f.id and s.role = 'says' order by ep.occurred_at "
+            "limit 1) x) as origin")
+    prefs = await _q(f"select {cols} from mem_facts f join mem_entities e on e.id = f.subject where f.subject = %s "
+                     "and f.kind = 'preference' and f.status = 'current' order by f.learned_at desc limit 20", me)
+    open_ = await _q(f"select {cols} from mem_facts f join mem_entities e on e.id = f.subject where f.owner = %s "
+                     "and f.kind = 'commitment' and f.status = 'current' and f.done is not true "
+                     "order by f.due nulls last, f.learned_at desc limit 20", owner)
+    recent = await _q(f"select {cols} from mem_facts f join mem_entities e on e.id = f.subject where f.owner = %s "
+                      "and f.status = 'current' order by f.learned_at desc limit 15", owner)
+    counts = (await _q("select (select count(*) from mem_facts where owner = %s and status = 'current') as facts, "
+                       "(select count(*) from mem_entities where owner = %s and kind <> 'user') as people, "
+                       "(select count(*) from mem_episodes where owner = %s and extracted = 0 and attempts < 4) as waiting, "
+                       "(select count(*) from mem_episodes where owner = %s) as episodes, "
+                       "(select max(learned_at) from mem_facts where owner = %s) as last_learned",
+                       owner, owner, owner, owner, owner))[0]
+    return {"you": you, "preferences": prefs, "open": open_, "recent": recent, "counts": counts,
+            "people": await entities(owner)}
 
 
 async def entity(owner: str, eid: str) -> dict[str, Any] | None:
