@@ -22,7 +22,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, todos, usage, vault
+from . import automations, computers, config, connectors, db, drive, events, files, followups, images, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1186,6 +1186,7 @@ async def runner_claim(body: RunnerClaim):
 
 @app.post("/runner/poll")
 async def runner_poll(request: Request, who: tuple[str, str] = Depends(runner_auth)):
+    sync.due(*who)
     job = await computers.poll(who[1], await request.json())
     return job if job else Response(status_code=204)
 
@@ -1518,9 +1519,169 @@ async def edit_vault_item(item_id: str, body: dict[str, Any], user: User = Depen
 
 @app.delete("/vault/{item_id}")
 async def delete_vault_item(item_id: str, user: User = Depends(current_user)):
-    if not await vault.remove(user["id"], item_id):
-        raise HTTPException(404, "That item is gone.")
+    try:
+        if not await vault.remove(user["id"], item_id):
+            raise HTTPException(404, "That item is gone.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ vault: folders synced from the user's computers
+@app.get("/vault/sync/dirs")
+async def sync_dirs(computer: str, path: str = "", user: User = Depends(current_user)):
+    """The folders on a computer, for picking one to keep in sync."""
+    if not any(c["id"] == computer for c in await computers.listing(user["id"])):
+        raise HTTPException(404, "That computer isn't linked.")
+    try:
+        return await computers.call(computer, "sync_dirs", {"path": path}, timeout_s=30)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+class SyncIn(BaseModel):
+    computer: str
+    path: str
+    parent: str = ""
+
+
+@app.post("/vault/sync")
+async def start_sync(body: SyncIn, user: User = Depends(current_user)):
+    try:
+        return vault.public(user["id"], await sync.start(user["id"], body.computer, body.path, body.parent))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/vault/sync/{folder_id}/now")
+async def sync_now(folder_id: str, user: User = Depends(current_user)):
+    row = await vault.get(user["id"], folder_id)
+    if not row or not (row.get("meta") or {}).get("source"):
+        raise HTTPException(404, "That folder isn't synced.")
+    try:
+        return await sync.sync_root(user["id"], row)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/runner/sync/{folder_id}")
+async def runner_sync_piece(folder_id: str, request: Request, p: str, m: int = 0, off: int = 0, end: int = 0,
+                            who: tuple[str, str] = Depends(runner_auth)):
+    """A piece of a file from a synced folder (the runner sends files in pieces of under 100 MB)."""
+    try:
+        await sync.receive(who[0], who[1], folder_id, p, m, off, bool(end), await request.body())
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ Google Drive in the vault
+def _drive_error(e: Exception) -> HTTPException:
+    if isinstance(e, PermissionError):
+        return HTTPException(409, str(e))
+    log.warning("drive: %s", e)
+    return HTTPException(502, str(e) or "Google Drive didn't answer.")
+
+
+@app.get("/drive")
+async def drive_about(user: User = Depends(current_user)):
+    try:
+        return await drive.about(user["id"])
+    except Exception as e:
+        raise _drive_error(e)
+
+
+@app.get("/drive/files")
+async def drive_files(folder: str = "root", q: str = "", page: str = "", user: User = Depends(current_user)):
+    try:
+        return await drive.listing(user["id"], folder, q, page)
+    except Exception as e:
+        raise _drive_error(e)
+
+
+@app.get("/drive/files/{file_id}/open")
+async def drive_open(file_id: str, user: User = Depends(current_user)):
+    try:
+        return await drive.open_link(user["id"], file_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise _drive_error(e)
+
+
+@app.get("/drive/files/{file_id}/preview")
+async def drive_preview(file_id: str, user: User = Depends(current_user)):
+    try:
+        return await drive.preview(user["id"], file_id)
+    except Exception as e:
+        log.warning("drive preview %s failed: %s", file_id, e)
+        return {"type": "error", "message": "This file couldn't be opened."}
+
+
+@app.delete("/drive/files/{file_id}")
+async def drive_trash(file_id: str, user: User = Depends(current_user)):
+    try:
+        await drive.trash(user["id"], file_id)
+    except Exception as e:
+        raise _drive_error(e)
+    return {"ok": True}
+
+
+class DriveStar(BaseModel):
+    starred: bool
+
+
+@app.patch("/drive/files/{file_id}")
+async def drive_star(file_id: str, body: DriveStar, user: User = Depends(current_user)):
+    try:
+        await drive.star(user["id"], file_id, body.starred)
+    except Exception as e:
+        raise _drive_error(e)
+    return {"ok": True}
+
+
+class DriveFolder(BaseModel):
+    name: str
+    parent: str = "root"
+
+
+@app.post("/drive/folders")
+async def drive_new_folder(body: DriveFolder, user: User = Depends(current_user)):
+    try:
+        return await drive.new_folder(user["id"], body.name, body.parent)
+    except Exception as e:
+        raise _drive_error(e)
+
+
+class DriveUpload(BaseModel):
+    name: str
+    parent: str = "root"
+    mime: str = ""
+
+
+@app.post("/drive/upload")
+async def drive_upload(body: DriveUpload, user: User = Depends(current_user)):
+    """Where the phone sends a file's bytes (straight to Google)."""
+    try:
+        return {"url": await drive.upload_session(user["id"], body.name, body.parent, body.mime)}
+    except Exception as e:
+        raise _drive_error(e)
+
+
+class DriveToVault(BaseModel):
+    parent: str = ""
+
+
+@app.post("/drive/files/{file_id}/vault")
+async def drive_to_vault(file_id: str, body: DriveToVault, user: User = Depends(current_user)):
+    try:
+        return vault.public(user["id"], await drive.to_vault(user["id"], file_id, body.parent))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise _drive_error(e)
 
 
 @app.get("/vault/{item_id}/preview")

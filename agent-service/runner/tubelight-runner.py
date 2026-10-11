@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "14"  # 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "15"  # 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -208,6 +208,76 @@ def fs_put(c: dict, a: dict) -> str:
         p, n = folder / f"{Path(name).stem} ({n}){Path(name).suffix}", n + 1
     p.write_bytes(base64.b64decode(a["b64"]))
     return str(p)
+
+
+# Folders kept in sync with the phone's Vault (one way: this computer → the vault). The server asks for a folder's
+# listing now and then and for the files it doesn't have; the files go straight to it, in pieces (the tunnel takes
+# up to 100 MB a request).
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".cache", ".Trash"}
+PIECE = 48 * 1024 * 1024
+
+
+def sync_root(c: dict, path: str) -> Path:
+    """Anywhere in the home folder with full access on (the default), otherwise inside the shared folders."""
+    p = anywhere(path) if c.get("full_access", True) else inside(c, path)
+    if not p.is_dir():
+        raise FileNotFoundError(f"No such folder: {p}")
+    return p
+
+
+def sync_dirs(c: dict, a: dict) -> dict:
+    """The folders inside one, for picking what to sync from the phone."""
+    if not a.get("path") and not c.get("full_access", True):
+        return {"path": "", "dirs": [str(f) for f in folders(c)]}
+    p = sync_root(c, a.get("path") or "~")
+    dirs = sorted((e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")), key=str.lower)
+    return {"path": str(p), "parent": str(p.parent) if p != Path.home() and p != p.parent else "", "dirs": dirs[:500]}
+
+
+def sync_scan(c: dict, a: dict) -> list:
+    """Every file under the folder: [relative path, size, mtime]. Hidden files and build folders are left out."""
+    root, out = sync_root(c, a["path"]), []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS]
+        for f in files:
+            if f.startswith(".") or f.endswith((".part", ".crdownload", "~")):
+                continue
+            p = Path(d) / f
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append([str(p.relative_to(root)), st.st_size, int(st.st_mtime)])
+            if len(out) >= 20000:
+                return out
+    return out
+
+
+def sync_push(c: dict, a: dict) -> dict:
+    """Sends the files asked for to the server, each in pieces."""
+    root, sent, failed = sync_root(c, a["path"]), 0, []
+    for rel in a.get("files", []):
+        p = root / rel
+        try:
+            st = p.stat()
+            with p.open("rb") as f:
+                off = 0
+                while True:
+                    piece = f.read(PIECE)
+                    end = off + len(piece) >= st.st_size
+                    q = urllib.parse.urlencode({"p": rel, "m": int(st.st_mtime), "off": off, "end": int(end)})
+                    req = urllib.request.Request(f"{c['url'].rstrip('/')}/runner/sync/{a['sid']}?{q}", data=piece, method="POST",
+                                                 headers={"Content-Type": "application/octet-stream", "User-Agent": f"tubelight-runner/{VERSION}",
+                                                          "Authorization": f"Bearer {c['token']}"})
+                    with urllib.request.urlopen(req, timeout=600) as r:
+                        r.read()
+                    off += len(piece)
+                    if end:
+                        break
+            sent += 1
+        except Exception as e:
+            failed.append(f"{rel}: {e}"[:200])
+    return {"sent": sent, "failed": failed[:20]}
 
 
 # Long jobs: started detached (they outlive the 10-minute limit and a runner restart), logged to a file, and reported
@@ -647,7 +717,8 @@ OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": sh
        "quit_app": quit_app, "screenshot": screenshot,
        "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
-       "box_read": box_read, "box_write": box_write, "box_close": box_close}
+       "box_read": box_read, "box_write": box_write, "box_close": box_close,
+       "sync_dirs": sync_dirs, "sync_scan": sync_scan, "sync_push": sync_push}
 
 
 # ------------------------------------------------------------------ the loop

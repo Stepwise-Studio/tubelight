@@ -26,7 +26,7 @@ from . import config, memory
 
 ROOT = Path(os.environ.get("VAULT_DIR") or Path(os.environ.get("WORKSPACES_DIR", "data/workspaces")).parent / "vault")
 MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a request
-QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "20")) * 1e9)  # per user; the user's choice, raise it here
+QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 1000, 60  # what a sheet preview carries
 TYPES = {
@@ -128,20 +128,23 @@ async def _check_parent(owner_id: str, parent: str) -> None:
             raise ValueError("That folder is gone.")
 
 
-async def add_folder(owner_id: str, name: str, parent: str = "") -> dict[str, Any]:
+async def add_folder(owner_id: str, name: str, parent: str = "", meta: dict[str, Any] | None = None) -> dict[str, Any]:
     await _check_parent(owner_id, parent)
     now = _now()
     row = {"kind": "folder", "name": await _unique(owner_id, parent, clean_name(name)), "parent": parent, "mime": "",
-           "size": 0, "meta": {}, "starred": False, "created_at": now, "updated_at": now}
+           "size": 0, "meta": meta or {}, "starred": False, "created_at": now, "updated_at": now}
     key = str(uuid.uuid4())
     await memory.store.aput(_ns(owner_id), key, row, index=False)
     return {"id": key, **row}
 
 
-async def add_file(owner_id: str, name: str, data_path: Path, size: int, parent: str = "", mime: str = "") -> dict[str, Any]:
-    """Takes a file already written to `data_path` (moved into the vault)."""
-    await _check_parent(owner_id, parent)
-    if (await usage(owner_id))["free"] < size:
+async def add_file(owner_id: str, name: str, data_path: Path, size: int, parent: str = "", mime: str = "",
+                   synced: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Takes a file already written to `data_path` (moved into the vault). `synced`: a file from a computer's synced
+    folder ({rel, mtime}); its name is already unique there and the sync checked the room it needs."""
+    if not synced:
+        await _check_parent(owner_id, parent)
+    if not synced and (await usage(owner_id))["free"] < size:
         raise ValueError(f"Your vault is full ({QUOTA / 1e9:g} GB). Delete something to make room.")
     key = str(uuid.uuid4())
     dest = file_path(owner_id, key)
@@ -150,9 +153,9 @@ async def add_file(owner_id: str, name: str, data_path: Path, size: int, parent:
     name = clean_name(name)
     if not mime or mime in ("application/octet-stream", "binary/octet-stream"):
         mime = mime_of(name)
-    meta = await asyncio.to_thread(_inspect, owner_id, key, mime)
+    meta = {**await asyncio.to_thread(_inspect, owner_id, key, mime), **(synced or {})}
     now = _now()
-    row = {"kind": "file", "name": await _unique(owner_id, parent, name), "parent": parent, "mime": mime, "size": size,
+    row = {"kind": "file", "name": name if synced else await _unique(owner_id, parent, name), "parent": parent, "mime": mime, "size": size,
            "meta": meta, "starred": False, "created_at": now, "updated_at": now}
     await memory.store.aput(_ns(owner_id), key, row, index=False)
     return {"id": key, **row}
@@ -167,11 +170,24 @@ async def add_bytes(owner_id: str, name: str, data: bytes, parent: str = "", mim
     return await add_file(owner_id, name, tmp, len(data), parent, mime)
 
 
+LOOK_KEYS = {"color", "icon"}
+
+
+def synced_copy(row: dict[str, Any]) -> bool:
+    """A file or folder inside a folder synced from a computer (the folder itself isn't): the computer owns it."""
+    return "rel" in (row.get("meta") or {})
+
+
 async def update(owner_id: str, key: str, changes: dict[str, Any]) -> dict[str, Any] | None:
     row = await get(owner_id, key)
     if not row:
         return None
+    if synced_copy(row) and ({"name", "parent"} & changes.keys()):
+        raise ValueError("This comes from your computer: rename or move it there and it changes here too.")
     new = {k: row[k] for k in row if k != "id"}
+    if isinstance(changes.get("look"), dict) and row["kind"] == "folder":  # the folder's colour and icon
+        look = {k: str(v)[:40] for k, v in changes["look"].items() if k in LOOK_KEYS and v}
+        new["meta"] = {**(row.get("meta") or {}), "look": look}
     parent = changes.get("parent", row.get("parent", ""))
     if "parent" in changes and parent != row.get("parent"):
         await _check_parent(owner_id, parent)
@@ -192,11 +208,14 @@ async def update(owner_id: str, key: str, changes: dict[str, Any]) -> dict[str, 
     return {"id": key, **new}
 
 
-async def remove(owner_id: str, key: str) -> int:
+async def remove(owner_id: str, key: str, force: bool = False) -> int:
     """Deletes an item and, for a folder, everything in it. Returns how many items went."""
     rows = await items(owner_id)
-    if not any(r["id"] == key for r in rows):
+    row = next((r for r in rows if r["id"] == key), None)
+    if not row:
         return 0
+    if synced_copy(row) and not force:
+        raise ValueError("This comes from your computer: delete it there and it goes from here too.")
     doomed, frontier = {key}, [key]
     while frontier:
         kids = [r["id"] for r in rows if r.get("parent") in frontier]
