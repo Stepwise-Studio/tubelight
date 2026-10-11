@@ -1,13 +1,13 @@
 import { router } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
-import { BackHandler, FlatList, Pressable, RefreshControl, TextInput, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import { useRef, useState } from 'react'
+import { FlatList, RefreshControl, View } from 'react-native'
+import Animated, { FadeIn } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, Cancel01Icon, CheckListIcon, NotificationOff02Icon, Search01Icon, Settings01Icon, UserGroupIcon,
+  Add01Icon, ArrowRight01Icon, CheckListIcon, NotificationOff02Icon, Settings01Icon, UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 
-import { CrewList } from '@/components/crew'
+import { HeaderSearch } from '@/components/header-search'
 import { useChatNotify } from '@/components/notify-prefs'
 import { useTabBarInset } from '@/components/tab-bar'
 import { ThreadAvatar } from '@/components/thread-avatar'
@@ -15,119 +15,53 @@ import { openSheet } from '@/components/sheet-screen'
 import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
 import { isComputer, useWorkspace, type Preview } from '@/lib/workspace'
-import { motion, type as typeScale, useTheme } from '@/theme'
+import { motion, useTheme } from '@/theme'
 import {
-  Button, EmptyState, Icon, IconButton, Logo, Press, Segment, Skeleton, TeammateAvatar, Text, haptic, showMenu,
+  Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, showMenu,
 } from '@/ui'
 
-/**
- * Logo left, a search button right that morphs into the full search bar: the capsule grows leftward over
- * the logo (250 ms open / 150 ms close, smooth-out), the field fades in and takes focus. Back or ✕ closes
- * and clears it.
- */
-function HeaderSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  const { c, scheme } = useTheme()
-  const [open, setOpen] = useState(false)
-  const [width, setWidth] = useState(0)
-  const p = useSharedValue(0)
-  const input = useRef<TextInput>(null)
+const openThread = (threadId: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId } })
 
-  useEffect(() => {
-    p.value = withTiming(open ? 1 : 0, { duration: open ? motion.duration.fast : motion.duration.quick, easing: motion.ease.smoothOut })
-    if (!open) return
-    const focus = setTimeout(() => input.current?.focus(), motion.duration.fast / 2)
-    const back = BackHandler.addEventListener('hardwareBackPress', () => { setOpen(false); onChange(''); return true })
-    return () => { clearTimeout(focus); back.remove() }
-  }, [open, p, onChange])
-
-  const capsule = useAnimatedStyle(() => ({ width: width ? 40 + (width - 40) * p.value : 40 }))
-  const field = useAnimatedStyle(() => ({ opacity: p.value }))
-  const logo = useAnimatedStyle(() => ({ opacity: 1 - p.value, transform: [{ translateX: -12 * p.value }] }))
-
-  const close = () => { haptic.tap(); setOpen(false); onChange(''); input.current?.blur() }
-
+export default function Chats() {
+  const insets = useSafeAreaInsets()
+  const [query, setQuery] = useState('')
   return (
-    <View style={{ height: 44, justifyContent: 'center' }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      <Animated.View style={logo} pointerEvents={open ? 'none' : 'auto'}><Logo scale={1.2} /></Animated.View>
-      <Animated.View style={[{ position: 'absolute', right: 0, height: 40, borderRadius: 20, overflow: 'hidden', backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center' }, capsule]}>
-        <Pressable
-          onPress={() => { if (!open) { haptic.tap(); setOpen(true) } }}
-          disabled={open}
-          accessibilityRole="button"
-          accessibilityLabel="Search"
-          accessibilityState={{ expanded: open }}
-          style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Icon icon={Search01Icon} size={18} color={open ? 'ink3' : 'ink2'} />
-        </Pressable>
-        <Animated.View style={[{ flex: 1, flexDirection: 'row', alignItems: 'center' }, field]} pointerEvents={open ? 'auto' : 'none'}>
-          <TextInput
-            ref={input}
-            value={value}
-            onChangeText={onChange}
-            placeholder={placeholder}
-            placeholderTextColor={c.ink4}
-            selectionColor={c.tube}
-            cursorColor={c.tube}
-            keyboardAppearance={scheme}
-            returnKeyType="search"
-            accessibilityLabel={placeholder}
-            style={[typeScale.body, { flex: 1, color: c.ink, paddingVertical: 0 }]}
-          />
-          <IconButton icon={Cancel01Icon} round size={32} iconSize={16} color={c.ink3} accessibilityLabel="Close search" onPress={close} style={{ marginRight: 4 }} />
-        </Animated.View>
-      </Animated.View>
+    <View style={{ flex: 1 }}>
+      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 8 }}>
+        <HeaderSearch value={query} onChange={setQuery} placeholder="Search chats" />
+      </View>
+      <Inbox query={query} />
     </View>
   )
 }
 
-const openThread = (threadId: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId } })
+const CREW_ROW = 64
 
-type Page = 'inbox' | 'crew'
-const PAGES: Page[] = ['inbox', 'crew']
-
-export default function Chats() {
+/** Like WhatsApp's locked chats: sits above the first chat, scrolled out of sight until you pull the list down. */
+function CrewRow() {
+  const { c } = useTheme()
   const ws = useWorkspace()
-  const insets = useSafeAreaInsets()
-  const { width } = useWindowDimensions()
-  const [page, setPage] = useState<Page>('inbox')
-  const [query, setQuery] = useState('')
-  const pager = useRef<Animated.ScrollView>(null)
-  const progress = useSharedValue(0)
-  const onScroll = useAnimatedScrollHandler((e) => { progress.value = e.contentOffset.x / width })
-
-  const go = (p: Page) => { setPage(p); pager.current?.scrollTo({ x: PAGES.indexOf(p) * width, animated: true }) }
-
+  const working = new Set(ws.liveRuns.filter((r) => r.status === 'running').map((r) => r.teammate_id)).size
   return (
-    <View style={{ flex: 1 }}>
-      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, gap: 12, paddingBottom: 8 }}>
-        <HeaderSearch value={query} onChange={setQuery} placeholder={page === 'inbox' ? 'Search chats' : 'Search your crew'} />
-        <Segment
-          value={page}
-          onChange={go}
-          progress={progress}
-          accessibilityLabel="Show chats or your crew"
-          options={[
-            { value: 'inbox', label: 'Chats', count: ws.threads.filter(isUnread).length || undefined },
-            { value: 'crew', label: 'Crew', count: ws.teammates.length || undefined },
-          ]}
-        />
+    <Press
+      radius={16}
+      static
+      onPress={() => router.push('/crew')}
+      accessibilityLabel={`Crew, ${ws.teammates.length} teammates${working ? `, ${working} working` : ''}`}
+      accessibilityHint="Opens your crew"
+      outerStyle={{ marginHorizontal: 8 }}
+      style={{ height: CREW_ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 8 }}
+    >
+      <View style={{ width: 48, alignItems: 'center' }}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={UserGroupIcon} size={18} color="ink2" />
+        </View>
       </View>
-      <Animated.ScrollView
-        ref={pager}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-        onMomentumScrollEnd={(e) => setPage(PAGES[Math.round(e.nativeEvent.contentOffset.x / width)] ?? 'inbox')}
-        keyboardShouldPersistTaps="handled"
-        style={{ flex: 1 }}
-      >
-        <View style={{ width }}><Inbox query={query} /></View>
-        <View style={{ width }}><CrewList query={query} /></View>
-      </Animated.ScrollView>
-    </View>
+      <Text variant="bodyMedium" style={{ flex: 1 }}>Crew</Text>
+      {working > 0 && <Text variant="footnote" color="tube" tabular>{working} working</Text>}
+      <Text variant="footnote" color="ink3" tabular>{ws.teammates.length}</Text>
+      <Icon icon={ArrowRight01Icon} size={16} color="ink3" />
+    </Press>
   )
 }
 
@@ -136,6 +70,8 @@ function Inbox({ query }: { query: string }) {
   const ws = useWorkspace()
   const inset = useTabBarInset()
   const [refreshing, setRefreshing] = useState(false)
+  const [height, setHeight] = useState(0)
+  const list = useRef<FlatList<Thread>>(null)
   const refresh = async () => { setRefreshing(true); await ws.refresh(); setRefreshing(false) }
 
   const q = query.trim().toLowerCase()
@@ -176,9 +112,15 @@ function Inbox({ query }: { query: string }) {
 
   return (
     <FlatList
+      ref={list}
       data={threads}
+      // Start with the Crew row scrolled away; the list is always tall enough to hide it, and stops at it on the way up.
+      onLayout={(e) => { if (!height) { setHeight(e.nativeEvent.layout.height); requestAnimationFrame(() => list.current?.scrollToOffset({ offset: CREW_ROW, animated: false })) } }}
+      ListHeaderComponent={q ? null : <CrewRow />}
+      snapToOffsets={q ? undefined : [0, CREW_ROW]}
+      snapToEnd={false}
       keyExtractor={(t) => t.id}
-      contentContainerStyle={{ paddingBottom: inset + 96 }}
+      contentContainerStyle={{ paddingBottom: inset + 96, minHeight: q ? undefined : height + CREW_ROW }}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
