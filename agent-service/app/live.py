@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from . import brief, config, connectors, db, graph, memory
+from . import brief, config, connectors, db, graph, mem, memory
 
 VOICES = ["Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr"]
 
@@ -59,9 +59,13 @@ def voice_for(tm: dict) -> str:
 async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
     now = graph.local_now(ctx)
     shelf = memory.ns("user", ctx.owner_id)
-    prefs = await memory.listing(shelf, limit=12, kind="preference")
-    owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
-    facts = [r for r in await memory.listing(shelf, limit=15) if r["kind"] in ("person", "fact")]
+    prefs, owed, facts, known = [], [], [], ""
+    if mem.ready():
+        known = await mem.recall(ctx.owner_id, "", brief=True)
+    else:
+        prefs = await memory.listing(shelf, limit=12, kind="preference")
+        owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
+        facts = [r for r in await memory.listing(shelf, limit=15) if r["kind"] in ("person", "fact")]
     apps = ", ".join(connectors.name_of(t) for t in tm.get("allowed_toolkits") or []) or "none yet"
     recent = await db.select("messages", {"thread_id": f"eq.{thread_id}", "kind": "eq.text", "order": "created_at.desc",
                                           "limit": "12", "select": "sender_type,text"})
@@ -71,6 +75,8 @@ async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
         f"Apps you can use through run_task: {apps}.",
         "## Your role\n" + (tm.get("system_prompt") or "")[:2500],
     ]
+    if known:
+        lines.append("What you know (memory; anything marked no longer true isn't current):\n" + known)
     if prefs:
         lines.append("How they like things:\n" + "\n".join(f"- {r['text']}" for r in prefs))
     if owed:

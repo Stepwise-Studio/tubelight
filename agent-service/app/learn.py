@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from . import config, db, llm, memory
+from . import config, db, llm, mem, memory
 
 log = logging.getLogger(__name__)
 MAX_CHANGES = 6
@@ -49,10 +49,15 @@ Reply with JSON only:
  "update": [{{"key": "...", "text": "..."}}], "delete": ["key"], "done": ["key"]}}"""
 
 
+def exchange_start(msgs: list[BaseMessage]) -> int:
+    """Where the latest turn starts: the user's last message."""
+    return next((i for i in range(len(msgs) - 1, -1, -1)
+                 if isinstance(msgs[i], HumanMessage) and msgs[i].name != "summary"), 0)
+
+
 def exchange(msgs: list[BaseMessage], limit: int = 9000) -> str:
     """The latest turn: from the user's last message to the end, tool output clipped."""
-    start = next((i for i in range(len(msgs) - 1, -1, -1)
-                  if isinstance(msgs[i], HumanMessage) and msgs[i].name != "summary"), 0)
+    start = exchange_start(msgs)
     out = []
     for m in msgs[start:]:
         if isinstance(m, HumanMessage):
@@ -93,7 +98,10 @@ async def learn(owner_id: str, user_name: str, tm: dict, project_id: str | None,
         turn += "\n\n" + signals
     if len(turn) < 40:
         return {}
-    shelves = {"user": memory.ns("user", owner_id), "teammate": memory.ns("teammate", tm["id"])}
+    # With memory v2 on, facts about the user's world go through mem.py (episodes, evidence, time); this pass keeps
+    # only the teammate's own how-to lessons.
+    shelves = {"teammate": memory.ns("teammate", tm["id"])} if mem.ready() else {
+        "user": memory.ns("user", owner_id), "teammate": memory.ns("teammate", tm["id"])}
     if project_id:
         shelves["project"] = memory.ns("project", project_id)
     known: dict[str, tuple[str, dict]] = {}
@@ -115,7 +123,7 @@ async def learn(owner_id: str, user_name: str, tm: dict, project_id: str | None,
         text = str(a.get("text") or "").strip()
         shelf = a.get("shelf") if a.get("shelf") in shelves else "user"
         kind = a.get("kind") if a.get("kind") in memory.KINDS else "fact"
-        if not text:
+        if not text or shelf not in shelves or mem.ready() and kind != "lesson":
             continue
         top = await memory.search_rows(shelves[shelf], text, limit=1)
         if top and top[0].get("score", 0) >= SAME:

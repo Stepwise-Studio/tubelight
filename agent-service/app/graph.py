@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, computers, config, connectors, db, floor, followups, genui, llm, memory, push, reactions, repo, tools as T
+from . import automations, computers, config, connectors, db, floor, followups, genui, llm, mem, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -206,10 +206,14 @@ def local_now(ctx: RunCtx) -> datetime:
 async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: list[str]) -> str:
     query = _last_human(msgs)[:500]
     shelf = memory.ns("user", ctx.owner_id)
-    owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
-    prefs = await memory.listing(shelf, limit=12, kind="preference")
-    seen = {r["key"] for r in owed + prefs}
-    profile = [r for r in await memory.search_rows(shelf, query, limit=8) if r["key"] not in seen]
+    known, owed, prefs, profile = "", [], [], []
+    if mem.ready():
+        known = await mem.recall(ctx.owner_id, query, brief=True)
+    else:
+        owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
+        prefs = await memory.listing(shelf, limit=12, kind="preference")
+        seen = {r["key"] for r in owed + prefs}
+        profile = [r for r in await memory.search_rows(shelf, query, limit=8) if r["key"] not in seen]
     own = await memory.search(memory.ns("teammate", tm["id"]), query)
     proj = await memory.search(memory.ns("project", ctx.project["id"]), query) if ctx.project else []
 
@@ -353,6 +357,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     guides = [PLAYBOOKS[t] for t in ctx.toolkits(tm) if t in PLAYBOOKS]
     if guides:
         lines.append("\n\n".join(guides))
+    if known:
+        lines.append(f"What you know about {ctx.user_name}'s world (memory; dates say since when each was true; follow their "
+                     "preferences; anything marked no longer true or unconfirmed is not current fact):\n" + known)
     if prefs:
         lines.append("How the user likes things (follow these):\n" + "\n".join(f"- {r['text']}" for r in prefs))
     if owed:

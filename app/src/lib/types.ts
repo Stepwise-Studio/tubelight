@@ -206,3 +206,45 @@ export interface MemoryItem {
   scope_id: string
   scope_name: string
 }
+
+/** Memory v2: someone or something the teammates know about (agent-service mem.py). */
+export interface Person {
+  id: string
+  kind: 'person' | 'org' | 'project' | 'place' | 'thing'
+  name: string
+  aliases: string[]
+  profile: string
+  touched_at: string
+  facts: number
+}
+
+export interface FactSource {
+  quote: string
+  role: 'says' | 'done' | 'wrong'
+  source: 'chat' | 'call' | 'note' | 'import'
+  speaker: string
+  occurred_at: string
+  ref: string
+}
+
+export interface Fact {
+  id: string
+  kind: 'trait' | 'relation' | 'event' | 'commitment' | 'preference'
+  text: string
+  valid_from: string | null
+  valid_to: string | null
+  learned_at: string
+  confidence: number
+  /** 2 you, 1 a teammate, 0 outside content (emails, callers, apps) */
+  trust: 0 | 1 | 2
+  due: string | null
+  done: boolean | null
+  sensitive: boolean
+  status: 'current' | 'closed' | 'retracted'
+  sources: FactSource[]
+}
+
+export interface PersonDetail extends Omit<Person, 'facts'> {
+  ids: { type: 'phone' | 'email' | 'handle'; value: string }[]
+  facts: Fact[]
+}

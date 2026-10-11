@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, memory, phone, repo, sandbox, todos, usage, vault
+from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -262,7 +262,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return "You are not in a project here. Use scope 'self' or 'user'."
         ns = {"self": memory.ns("teammate", tm["id"]), "user": memory.ns("user", ctx.owner_id)}.get(scope) \
             or memory.ns("project", ctx.project["id"])
-        key = await memory.add(ns, text)
+        if scope == "user" and mem.ready():  # facts about the user's world go through v2's checks like anything said
+            await mem.log_episode(ctx.owner_id, "note", text, trust=1, ref=ctx.thread_id, speaker=tm["name"])
+            key = "episode"
+        else:
+            key = await memory.add(ns, text)
         await db.activity(ctx.owner_id, "memory_write", scope, run_id=ctx.run_id, thread_id=ctx.thread_id,
                           teammate_id=tm["id"], input={"text": text, "scope": scope}, output={"key": key})
         return "Saved."
@@ -271,8 +275,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         spaces = [memory.ns("teammate", tm["id"]), memory.ns("user", ctx.owner_id)]
         if ctx.project:
             spaces.append(memory.ns("project", ctx.project["id"]))
+        if mem.ready():
+            spaces.remove(memory.ns("user", ctx.owner_id))
         found = [t for ns in spaces for t in await memory.search(ns, query, limit=5)]
-        return "\n".join(f"- {t}" for t in found) or "Nothing relevant in memory."
+        world = await mem.recall(ctx.owner_id, query) if mem.ready() else ""
+        return "\n".join([world, *(f"- {t}" for t in found)]).strip() or "Nothing relevant in memory."
 
     try:
         zone = ZoneInfo(ctx.timezone)

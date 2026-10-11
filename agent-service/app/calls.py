@@ -20,7 +20,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from . import brief, config, db, followups, live, llm, memory, phone, push, todos
+from . import brief, config, db, followups, live, llm, mem, memory, phone, push, todos
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +37,17 @@ def _mentions(text: str, name: str) -> bool:
 
 async def context(owner_id: str, name: str, number: str = "") -> str:
     """What Tubelight knows that involves this person, as notes for the stand-in."""
-    shelf = memory.ns("user", owner_id)
-    rows = await memory.listing(shelf, limit=300)
-    about = [r for r in rows if any(_mentions(a, name) for a in r.get("about") or []) or _mentions(r["text"], name)]
-    seen = {r["text"] for r in about}
-    about += [r for r in await memory.search_rows(shelf, name, limit=4) if r["text"] not in seen and _mentions(r["text"], name)]
     lines: list[str] = []
+    about = []
+    if mem.ready():
+        if known := await mem.recall(owner_id, name, phone=number, names=(name,)):
+            lines.append("What you know about them (memory; anything marked no longer true isn't current):\n" + known)
+    else:
+        shelf = memory.ns("user", owner_id)
+        rows = await memory.listing(shelf, limit=300)
+        about = [r for r in rows if any(_mentions(a, name) for a in r.get("about") or []) or _mentions(r["text"], name)]
+        seen = {r["text"] for r in about}
+        about += [r for r in await memory.search_rows(shelf, name, limit=4) if r["text"] not in seen and _mentions(r["text"], name)]
     if about:
         lines.append("What you know about them:\n" + "\n".join(
             f"- {r['text']}" + (f" (due {r['due']})" if r.get("due") else "") + (" (done)" if r.get("done") else "") for r in about[:15]))
@@ -167,11 +172,18 @@ async def end(owner_id: str, call_id: str, turns: list[dict[str, str]]) -> dict[
         except (AttributeError, ValueError):
             plan = {"summary": said[:400]}
     summary = str(plan.get("summary") or f"{caller} called; nothing was said.")
-    shelf = memory.ns("user", owner_id)
     day = datetime.now().strftime("%d %b")
-    await memory.add(shelf, f"{day}: {summary}"[:500], kind="person", about=[caller[:60]])
-    for f in (plan.get("facts") or [])[:3]:
-        await memory.add(shelf, str(f)[:500], kind="person", about=[caller[:60]])
+    if mem.ready():  # the caller's own words are the evidence; memory extracts from them like any conversation
+        who = f"caller {caller}" + (f" ({call['number']})" if call.get("number") else "")
+        for t in turns:
+            if t.get("text"):
+                await mem.log_episode(owner_id, "call", t["text"], trust=0 if t.get("role") == "user" else 1, ref=call_id,
+                                      speaker=who if t.get("role") == "user" else "assistant")
+    else:
+        shelf = memory.ns("user", owner_id)
+        await memory.add(shelf, f"{day}: {summary}"[:500], kind="person", about=[caller[:60]])
+        for f in (plan.get("facts") or [])[:3]:
+            await memory.add(shelf, str(f)[:500], kind="person", about=[caller[:60]])
     made = []
     for a in (plan.get("asks") or [])[:5]:
         t = await todos.add(owner_id, f"{a}"[:200], notes=f"From {caller}'s call ({day})", added_by="call")

@@ -1,10 +1,12 @@
-// Memory: everything the teammates have learned about you, your people and your work. List or graph.
+// Memory: what the teammates know. People (memory v2: the people and things in your world, what's true about them and
+// where each fact came from), Notes (each teammate's lessons and the older notes) and the graph of those notes.
 import { useCallback, useEffect, useState } from 'react'
 import { FlatList, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CheckmarkCircle02Icon, Delete02Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 
 import { MemoryGraph, entitiesOf, type Entity } from '@/components/memory-graph'
+import { PeopleList } from '@/components/people'
 import { ScreenHeader } from '@/components/screen-header'
 import { api } from '@/lib/api'
 import { ago } from '@/lib/format'
@@ -30,7 +32,7 @@ const whose = (m: MemoryItem) => (m.scope === 'user' ? 'All teammates' : m.scope
 export default function MemoryScreen() {
   const insets = useSafeAreaInsets()
   const [items, setItems] = useState<MemoryItem[] | null>(null)
-  const [view, setView] = useState<'list' | 'graph'>('list')
+  const [view, setView] = useState<'people' | 'list' | 'graph'>('people')
   const [kind, setKind] = useState<Kind | 'all'>('all')
   const [query, setQuery] = useState('')
   const [entity, setEntity] = useState<Entity | null>(null)
@@ -74,9 +76,9 @@ export default function MemoryScreen() {
     <View style={{ flex: 1 }}>
       <ScreenHeader title="Memory" subtitle="What your teammates have learned" />
       <View style={{ paddingHorizontal: 16, paddingTop: 12, gap: 12 }}>
-        <Segment value={view} onChange={setView} options={[{ value: 'list', label: 'List' }, { value: 'graph', label: 'Graph' }]} accessibilityLabel="Show memory as" />
+        <Segment value={view} onChange={setView} options={[{ value: 'people', label: 'People' }, { value: 'list', label: 'Notes' }, { value: 'graph', label: 'Graph' }]} accessibilityLabel="Show memory as" />
       </View>
-      {items === null ? (
+      {view === 'people' ? <PeopleList bottom={insets.bottom + 24} /> : items === null ? (
         <View style={{ padding: 16, gap: 12 }}>
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} height={64} radius={16} />)}
         </View>

@@ -22,7 +22,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, memory, phone, push, reactions, repo, runs, sandbox, todos, usage, vault
+from . import automations, computers, config, connectors, db, events, files, followups, images, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -53,6 +53,12 @@ async def lifespan(_: FastAPI):
         zoneinfo.ZoneInfo("Asia/Kolkata")
     except zoneinfo.ZoneInfoNotFoundError:
         log.error("No time zone database: every user's time would be UTC. Install the tzdata package.")
+    try:
+        await mem.setup()
+    except Exception as e:
+        log.error("memory v2 unavailable (%s); teammates use the older notes", e)
+        mem._pool = None
+    mem_worker = asyncio.create_task(mem.loop()) if mem.ready() else None
     runs.docker_ok = await asyncio.to_thread(sandbox.available)
     await runs.sweep_orphans()
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
@@ -63,6 +69,8 @@ async def lifespan(_: FastAPI):
     warm.cancel()
     faces.cancel()
     scheduler.cancel()
+    if mem_worker:
+        mem_worker.cancel()
     for t in list(runs.tasks.values()):
         t.cancel()
     await usage.flush()
@@ -430,6 +438,46 @@ async def all_memories(user: User = Depends(current_user)):
         for r in await memory.listing(memory.ns(scope, id), limit=500):
             out.append({**r, "scope": scope, "scope_id": id, "scope_name": name})
     return sorted(out, key=lambda r: r["updated_at"], reverse=True)
+
+
+# ------------------------------------------------------------------ people (memory v2)
+def _mem_on() -> None:
+    if not mem.ready():
+        raise HTTPException(503, "Memory isn't available right now.")
+
+
+@app.get("/people")
+async def list_people(user: User = Depends(current_user)):
+    _mem_on()
+    return await mem.entities(user["id"])
+
+
+@app.get("/people/{eid}")
+async def get_person(eid: str, user: User = Depends(current_user)):
+    _mem_on()
+    e = await mem.entity(user["id"], eid)
+    if not e:
+        raise HTTPException(404, "Not found.")
+    return e
+
+
+class FactFix(BaseModel):
+    text: str = ""
+
+
+@app.post("/people/facts/{fid}/wrong")
+async def fact_wrong(fid: str, body: FactFix, user: User = Depends(current_user)):
+    _mem_on()
+    if not await mem.correct(user["id"], fid, body.text.strip()):
+        raise HTTPException(404, "Not found.")
+    return {"ok": True}
+
+
+@app.delete("/people/{eid}")
+async def forget_person(eid: str, user: User = Depends(current_user)):
+    _mem_on()
+    await mem.forget_entity(user["id"], eid)
+    return {"ok": True}
 
 
 class MemoryPatch(BaseModel):

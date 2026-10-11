@@ -79,3 +79,9 @@ export function copied() {
   if (Platform.OS === 'ios') toast({ title: 'Copied', tone: 'success' })
   else haptic.light()
 }
+
+/** A calendar date: "14 Sep", or "14 Sep 2025" outside this year. */
+export function shortDate(iso: string, now = new Date()) {
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) })
+}
