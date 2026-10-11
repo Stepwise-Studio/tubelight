@@ -485,7 +485,7 @@ const SIZE = 56
 function Face() {
   const { c } = useTheme()
   return (
-    <View style={{ width: SIZE, height: SIZE, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: c.solidTo, borderWidth: 1, borderColor: c.solidEdge }}>
+    <View style={{ width: SIZE, height: SIZE, borderRadius: SIZE / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: c.solidTo, borderWidth: 1, borderColor: c.solidEdge }}>
       <Icon icon={Add01Icon} size={24} color={c.solidInk} strokeWidth={2} />
     </View>
   )
@@ -495,8 +495,8 @@ function AddFab({ parent, bottom }: { parent: string; bottom: number }) {
   const { scheme } = useTheme()
   const ref = useRef<View>(null)
   return (
-    <View ref={ref} collapsable={false} style={[{ position: 'absolute', right: 16, bottom, borderRadius: 18 }, elevation(scheme)]}>
-      <Press radius={18} onPress={() => { haptic.tap(); showContextMenu(ref.current, <Face />, addItems(parent)) }} accessibilityLabel="Add to the vault">
+    <View ref={ref} collapsable={false} style={[{ position: 'absolute', right: 16, bottom, borderRadius: SIZE / 2 }, elevation(scheme)]}>
+      <Press radius={SIZE / 2} smoothing={0} onPress={() => { haptic.tap(); showContextMenu(ref.current, <Face />, addItems(parent)) }} accessibilityLabel="Add to the vault">
         <Face />
       </Press>
     </View>
