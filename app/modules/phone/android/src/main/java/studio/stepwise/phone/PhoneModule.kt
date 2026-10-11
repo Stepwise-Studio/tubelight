@@ -75,6 +75,14 @@ class PhoneModule : Module() {
     AsyncFunction("appAct") { snapshot: String, element: String, action: String, value: String -> Apps.act(context, snapshot, element, action, value) }
     AsyncFunction("appKey") { key: String -> Apps.key(context, key) }
     AsyncFunction("appOpen") { app: String -> act(mapOf("action" to "open_app", "app" to app)); Apps.waitFor(context, app) }
+    // The call stand-in (Calls.kt).
+    Function("standIn") { mapOf("on" to Calls.on(context), "answer" to Calls.canAnswer(context), "access" to Calls.canSwitchAccess(context)) }
+    Function("setStandIn") { on: Boolean -> Calls.set(context, on) }
+    Function("callState") { Calls.state(context) }
+    Function("callAnswer") { Calls.clear(context); Calls.answer(context) }
+    Function("callHangUp") { Calls.hangUp(context) }
+    Function("callSpeaker") { on: Boolean -> Calls.speaker(context, on) }
+    Function("standInAccess") { on: Boolean -> Calls.access(context, on) }
     Function("canDnd") { Controls.canDnd(context) }
     Function("openDndAccess") { start(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
     Function("canBrightness") { Settings.System.canWrite(context) }

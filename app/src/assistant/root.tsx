@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { ApprovalCard } from '@/components/approval-card'
 import { QuestionCard } from '@/components/chat/prompt-cards'
+import { CallStandIn } from '@/components/voice/call-stand-in'
 import { VoiceMode } from '@/components/voice/voice-mode'
 import { Phone, registerPhone, syncNotifications, usePhoneActions } from '@/lib/phone'
 import { useSession } from '@/lib/session'
@@ -38,8 +39,11 @@ export function AssistantRoot() {
 
 function Assistant() {
   const { session, ready } = useSession()
+  const [args] = useState(() => Phone?.launchArgs() ?? {})
   if (!ready) return null
   if (!session) return <Note title="Sign in to Tubelight first" />
+  // "Let my assistant answer" on a ringing call (modules/phone Calls.kt).
+  if (args.call) return <Shade><CallStandIn caller={args.caller || 'Someone'} onDone={close} /></Shade>
   return (
     <WorkspaceProvider userId={session.user.id}>
       <Talk userId={session.user.id} />

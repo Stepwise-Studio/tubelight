@@ -35,6 +35,16 @@ interface PhoneModule {
   appAct(snapshot: string, element: string, action: string, value: string): Promise<AppScreen>
   appKey(key: string): Promise<AppScreen>
   appOpen(app: string): Promise<AppScreen>
+  /** The call stand-in (Calls.kt): on, and whether it can answer calls and switch accessibility on just for a call. */
+  standIn(): { on: boolean; answer: boolean; access: boolean }
+  setStandIn(on: boolean): void
+  callState(): 'ringing' | 'active' | 'idle'
+  callAnswer(): void
+  callHangUp(): void
+  /** The call on the speaker (loud) or back; true when it took. */
+  callSpeaker(on: boolean): boolean
+  /** Tubelight's accessibility on for the call / off after (only with the one-time USB grant); whether it's on. */
+  standInAccess(on: boolean): boolean
   canDnd(): boolean
   openDndAccess(): void
   canBrightness(): boolean

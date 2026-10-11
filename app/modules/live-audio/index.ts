@@ -13,7 +13,8 @@ type Events = {
 }
 
 interface LiveAudioModule {
-  start(): Promise<void>
+  /** `inCall`: the call stand-in (leave the call's audio alone; hear the caller through the speaker). */
+  start(inCall?: boolean): Promise<void>
   stop(): void
   /** Queue base64 PCM16 24 kHz mono for playback. */
   play(base64: string): void

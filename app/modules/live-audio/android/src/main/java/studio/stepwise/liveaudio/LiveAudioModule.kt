@@ -64,7 +64,7 @@ class LiveAudioModule : Module() {
     Name("LiveAudio")
     Events("onMic", "onInputLevel", "onOutputLevel", "onPlayback", "onInterruption")
 
-    AsyncFunction("start") { start() }
+    AsyncFunction("start") { inCall: Boolean? -> start(inCall == true) }
     Function("stop") { stop() }
     Function("play") { base64: String -> if (running.get()) queue.add(Base64.decode(base64, Base64.NO_WRAP)) }
     Function("clear") { clear() }
@@ -74,14 +74,26 @@ class LiveAudioModule : Module() {
   }
 
   @SuppressLint("MissingPermission")
-  private fun start() {
+  @Volatile private var inCall = false
+
+  /**
+   * `inCall`: the call stand-in. A phone call is going on (on speaker), so the call's own audio mode, focus and
+   * routing are left alone (touching them would break the call): the mic hears the caller through the speaker (Android
+   * lets an app capture during a call only as an accessibility service: the stand-in turns that on for the call), and
+   * the reply plays on the call's speaker, where the mic carries it to the caller. The echo gate keeps the model from
+   * hearing itself.
+   */
+  private fun start(inCall: Boolean = false) {
     if (running.get()) return
     muted.set(false) // a new session always starts listening
     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     audioManager = am
-    am.mode = AudioManager.MODE_IN_COMMUNICATION
-    requestFocus(am)
-    routeToSpeakerOrHeadset(am)
+    this.inCall = inCall
+    if (!inCall) {
+      am.mode = AudioManager.MODE_IN_COMMUNICATION
+      requestFocus(am)
+      routeToSpeakerOrHeadset(am)
+    }
 
     val session = am.generateAudioSessionId()
     val outMin = AudioTrack.getMinBufferSize(outRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -95,12 +107,12 @@ class LiveAudioModule : Module() {
 
     val inMin = AudioRecord.getMinBufferSize(inRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
     val rec = AudioRecord(
-      MediaRecorder.AudioSource.VOICE_COMMUNICATION, inRate, AudioFormat.CHANNEL_IN_MONO,
+      if (inCall) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION, inRate, AudioFormat.CHANNEL_IN_MONO,
       AudioFormat.ENCODING_PCM_16BIT, maxOf(inMin, chunkBytes * 4),
     )
     if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("The microphone is unavailable")
-    if (AcousticEchoCanceler.isAvailable()) echo = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
-    if (NoiseSuppressor.isAvailable()) noise = NoiseSuppressor.create(rec.audioSessionId)?.apply { enabled = true }
+    if (!inCall && AcousticEchoCanceler.isAvailable()) echo = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
+    if (!inCall && NoiseSuppressor.isAvailable()) noise = NoiseSuppressor.create(rec.audioSessionId)?.apply { enabled = true }
     record = rec
     running.set(true)
     rec.startRecording()
@@ -209,6 +221,7 @@ class LiveAudioModule : Module() {
     try { track?.stop() } catch (_: Exception) {}
     track?.release(); track = null
     playing = false
+    if (inCall) { inCall = false; return } // the call's audio was never ours to change
     audioManager?.let { am ->
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.clearCommunicationDevice()
       focus?.let { am.abandonAudioFocusRequest(it) }

@@ -16,6 +16,12 @@
   <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
   <!-- Brightness (the user allows "modify system settings"). -->
   <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
+  <!-- The call stand-in: answer and end calls, know a call is ringing, put it on speaker; switch Tubelight's
+       accessibility on only for the call (WRITE_SECURE_SETTINGS, granted once over USB). -->
+  <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+  <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+  <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
   <!-- Find installed apps by name to open them. -->
   <queries>
     <intent>

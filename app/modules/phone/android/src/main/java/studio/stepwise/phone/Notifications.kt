@@ -14,6 +14,7 @@ import org.json.JSONObject
  *  them when asked. Kept on the phone; the app passes them to the server when it opens. */
 class NotificationsService : NotificationListenerService() {
   override fun onNotificationPosted(sbn: StatusBarNotification) {
+    Calls.seen(this, sbn) // a ringing call: offer the stand-in
     Notes.add(this, sbn)
   }
 }

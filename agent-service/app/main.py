@@ -976,6 +976,58 @@ async def phone_notifications(body: PhoneNotes, user: User = Depends(current_use
     return {"kept": await phone.save_notes(user["id"], body.items)}
 
 
+class CallIn(BaseModel):
+    caller: str = Field("", max_length=120)
+    number: str = Field("", max_length=40)
+
+
+@app.post("/calls/start")
+async def call_start(body: CallIn, user: User = Depends(current_user)):
+    """The call stand-in answers: a Live token whose persona is the user's assistant, with what's known about the caller."""
+    from . import calls
+    if not config.env("GEMINI_API_KEY"):
+        raise HTTPException(503, "The stand-in needs a Gemini API key on the server.")
+    profile = await db.one("profiles", {"id": f"eq.{user['id']}"})
+    zone = zoneinfo.ZoneInfo(await db.user_timezone(user["id"]) or "UTC")
+    try:
+        return await calls.start(user["id"], (profile or {}).get("display_name") or "the user", zone, body.caller, body.number)
+    except httpx.HTTPError:
+        log.exception("stand-in token failed")
+        raise HTTPException(502, "Could not start the stand-in. Try again in a moment.")
+
+
+class CallAsk(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/calls/{call_id}/ask")
+async def call_ask(call_id: str, body: CallAsk, user: User = Depends(current_user)):
+    from . import calls
+    return {"answer": await calls.ask(user["id"], call_id, body.question)}
+
+
+class CallMessage(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    urgent: bool = False
+
+
+@app.post("/calls/{call_id}/message")
+async def call_message(call_id: str, body: CallMessage, user: User = Depends(current_user)):
+    from . import calls
+    return {"answer": await calls.message(user["id"], call_id, body.message, body.urgent)}
+
+
+class CallEnd(BaseModel):
+    turns: list[dict[str, str]] = Field(default_factory=list, max_length=400)
+
+
+@app.post("/calls/{call_id}/end")
+async def call_end(call_id: str, body: CallEnd, user: User = Depends(current_user)):
+    """After the call: summary into memory about the caller, asks as to-dos, the note in the phone's chat."""
+    from . import calls
+    return await calls.end(user["id"], call_id, body.turns)
+
+
 class PhoneStep(BaseModel):
     goal: str = Field(min_length=1, max_length=1000)
     inputs: list[str] = Field(default_factory=list, max_length=20)

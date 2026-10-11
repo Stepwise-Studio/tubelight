@@ -150,6 +150,7 @@ function PhoneAssistant() {
   const read = () => ({
     notes: !!Phone?.notificationAccess(), ring: !!Phone?.canRing(), usage: !!Phone?.usageAccess(),
     dnd: !!Phone?.canDnd?.(), brightness: !!Phone?.canBrightness?.(), apps: !!Phone?.appsOn?.(),
+    standIn: Phone?.standIn?.() ?? { on: false, answer: false, access: false },
   })
   const [access, setAccess] = useState(read)
   const [people, setPeople] = useState(false)
@@ -166,6 +167,18 @@ function PhoneAssistant() {
     setPeople(got[PEOPLE[0]] === 'granted')
     if (!all && Object.values(got).includes('never_ask_again')) Linking.openSettings()
     syncNotifications().catch(() => {}) // the status (what's allowed, calendar, calls) goes up with it
+  }
+  // The call stand-in: answering needs two runtime permissions; hearing the caller needs a one-time grant over USB.
+  const toggleStandIn = async () => {
+    if (!Phone?.standIn) return
+    if (access.standIn.on) { Phone.setStandIn(false); setAccess(read()); return }
+    const got = await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.ANSWER_PHONE_CALLS, PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE])
+    if (Object.values(got).some((g) => g !== 'granted')) {
+      if (Object.values(got).includes('never_ask_again')) Linking.openSettings()
+      return
+    }
+    Phone.setStandIn(true)
+    setAccess(read())
   }
   const row = (on: boolean, title: string, sub: [string, string], onPress: () => void) => (
     <>
@@ -197,6 +210,9 @@ function PhoneAssistant() {
               'Off: let it call and text by name, see recent calls and your calendar, and send SMS you OK'], askPeople)}
             {row(access.dnd, 'Do Not Disturb', ['On: it can turn Do Not Disturb on and off', 'Off: let it switch Do Not Disturb (and silence the ringer)'], () => Phone?.openDndAccess())}
             {row(access.brightness, 'Brightness', ['On: it can set the screen brightness', 'Off: let it set the screen brightness'], () => Phone?.openBrightnessAccess())}
+            {row(access.standIn.on, 'Answer calls for me', [
+              access.standIn.access ? 'On: when a call rings, tap “Let my assistant answer”' : 'On, but it needs its one-time setup from your computer to hear the caller',
+              'Off: let your assistant take calls you can’t, as your assistant'], toggleStandIn)}
             {row(access.apps, 'Use apps for you', ['On: after your OK, it works through a task inside an app',
               'Off: Settings → Accessibility → Tubelight (first: App info → ⋮ → Allow restricted settings)'], () => Phone?.openAppsAccess())}
           </>
