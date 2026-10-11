@@ -11,6 +11,7 @@ Not part of pytest: it calls real, rate-limited models.
 """
 import asyncio
 import os
+import re
 import sys
 import time
 import uuid
@@ -113,6 +114,12 @@ CASES = [
                                 ("Shelby", "I can't order food yet, but I can find the number for you.")]),
     ], [("What did Kiran ask about?", [["pricing", "price"]], [], False)]),
 
+    ("teammates' banter and one-off asks aren't memory", [
+        ("2026-09-26", "chat", [("user", "everyone roast Ivy, she broke the build"), ("Shelby", "Ivy, your tests are flakier than a croissant."),
+                                ("Ivy", "Says the one who scheduled a meeting for 3 AM.")]),
+        ("2026-09-27", "chat", [("user", "Ivy apologise to Shelby"), ("Ivy", "Sorry Shelby, truce."), ("Shelby", "Truce accepted.")]),
+    ], [("How do I like teammates to treat each other?", [], ["roast", "apolog"], True)]),
+
     ("a caller's message reaches the record", [
         ("2026-10-10", "call", [("Saqlain", "Tell Jayanth the API keys were rotated, he needs to update staging today."),
                                 ("assistant", "I'll make sure he gets that.")]),
@@ -171,12 +178,13 @@ def V2():
 
 
 def check(answer: str, must: list[list[str]], never: list[str], abstain: bool) -> bool:
-    a = answer.lower().replace("\u2011", "-").replace("\u2010", "-")  # models like non-breaking hyphens
-    if any(n.lower() in a for n in never):
+    flat = lambda t: re.sub(r"[-\u2010\u2011\u2012\u2013]", " ", t.lower())  # noqa: E731 ("co‑founder", "day-first")
+    a = flat(answer)
+    if any(flat(n) in a for n in never):
         return False
     if abstain:
         return "not_on_record" in a
-    return "not_on_record" not in a and all(any(w in a for w in group) for group in must)
+    return "not_on_record" not in a and all(any(flat(w) in a for w in group) for group in must)
 
 
 async def run(system: str, only: str = "") -> None:

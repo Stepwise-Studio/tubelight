@@ -194,3 +194,15 @@ async def test_recall_finds_someone_by_a_name_only_their_facts_use(m):
                                       "quote": "wants the board update"}]})
     text = await mem.recall(owner, "Who is Vikram Rao to me?")
     assert "Vik (person" in text and "cofounder" in text
+
+
+async def test_two_full_names_sharing_a_first_name_stay_two_people(m):
+    _, owner = m
+    a = await episode(owner, "Priya Raman from Northwind wants a demo")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Priya Raman", "aka": ["Priya"], "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Priya Raman wants a demo", "episode": 1, "quote": "wants a demo"}]})
+    b = await episode(owner, "my sister Priya Shah is visiting", days=1)
+    await run(owner, [b], {"entities": [{"ref": "n1", "name": "Priya Shah", "aka": ["Priya"], "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Priya Shah is Jayanth's sister", "episode": 1, "quote": "my sister Priya Shah"}]})
+    rows = await mem._q("select name from mem_entities where owner = %s and kind = 'person' order by name", owner)
+    assert [r["name"] for r in rows] == ["Priya Raman", "Priya Shah"]

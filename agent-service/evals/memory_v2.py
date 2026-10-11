@@ -22,6 +22,10 @@ class Adapter:
             pool = AsyncConnectionPool(os.environ["TL_TEST_PG"], open=False, kwargs={"autocommit": True, "row_factory": dict_row})
             await pool.open()
             await mem.setup(pool)
+
+            async def roster(_owner: str) -> list[str]:
+                return ["Shelby", "Ivy"]
+            mem._roster = roster
             self.ready = True
 
     async def ingest(self, day: str, source: str, lines: list[tuple[str, str]]) -> None:
