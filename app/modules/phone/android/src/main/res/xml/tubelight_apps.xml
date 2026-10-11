@@ -2,7 +2,7 @@
 <!-- Tubelight using apps for you (Apps.kt): reads the app in front and acts on it when you ask a teammate to. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
   android:description="@string/tubelight_apps_description"
-  android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+  android:accessibilityEventTypes="typeAllMask"
   android:accessibilityFeedbackType="feedbackGeneric"
   android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
   android:canRetrieveWindowContent="true"

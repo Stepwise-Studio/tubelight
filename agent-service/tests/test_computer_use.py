@@ -27,7 +27,7 @@ async def test_subtask_types_only_given_text_and_reports(env, monkeypatch):
     fake.script[:] = [
         AIMessage(json.dumps({"action": "TYPE", "element": "e1", "value": "Akhil", "why": "fill the name"})),
         AIMessage(json.dumps({"action": "CLICK", "element": "e2", "why": "save"})),
-        AIMessage(json.dumps({"action": "DONE", "why": "saved"})),
+        AIMessage(json.dumps({"action": "DONE", "evidence": "Save", "why": "saved"})),
     ]
     out = await computer_use.subtask("c1", "Settings", "Set my name", ["Akhil"], "the name shows Akhil", 6)
     assert out.startswith("DONE: saved") and "type e1 'Akhil': done" in out and "click e2: done" in out
@@ -63,3 +63,16 @@ def test_phone_status_reports_the_next_alarm():
     text = asyncio.run(phone.status_text(owner, zone))
     assert "Next alarm: Sun 11 Oct, 06:00 (Clock)" in text
     assert phone.action("alarms", None, None, "") == {"action": "alarms"}
+
+
+async def test_done_must_be_on_screen(env, monkeypatch):
+    _, fake = env
+    fake.script[:] = [
+        AIMessage(json.dumps({"action": "DONE", "evidence": "1000", "why": "shows 1000"})),
+        AIMessage(json.dumps({"action": "CLICK", "element": "e2", "why": "fix it"})),
+    ]
+    d = await computer_use.decide("work out 125 x 8", [], "shows 1000", [], "[e1] text field “11,02,200” (type)\n[e2] button “C” (click)")
+    assert d["action"] == "CLICK"  # the claim wasn't on screen: it looked again
+    fake.script[:] = [AIMessage(json.dumps({"action": "DONE", "evidence": "1000", "why": "ok"}))]
+    d = await computer_use.decide("work out 125 x 8", [], "shows 1000", [], "[e1] text field “1,000” (type)")
+    assert d["action"] == "DONE"  # commas and spaces don't matter

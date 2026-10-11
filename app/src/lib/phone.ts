@@ -74,6 +74,7 @@ async function workInApp(a: PhoneAction, threadId?: string) {
   toast({ title: `Working in ${a.app}…` })
   try {
     let screen = await Phone!.appOpen(a.app ?? '')
+    if (__DEV__) console.log('[app task] screen\n' + screen.text)
     for (let i = 0; i < 20; i++) {
       const d = await api<{ action: string; element?: string; value?: string; keys?: string[]; why?: string }>('/phone/step', {
         method: 'POST', json: { goal: a.goal, inputs: a.inputs ?? [], done_when: a.done_when ?? '', steps, screen: screen.text },
@@ -85,7 +86,11 @@ async function workInApp(a: PhoneAction, threadId?: string) {
       }
       if (d.action === 'KEYS') screen = await Phone!.appKey(String(d.keys?.[0] ?? 'back'))
       else screen = await Phone!.appAct(screen.snapshot ?? '', d.element ?? '', d.action, d.value ?? '')
-      steps.push(`${d.action.toLowerCase()} ${d.element ?? d.keys?.join(' ') ?? ''}${d.value ? ` "${d.value}"` : ''}: ${screen.did ?? screen.status ?? ''}${screen.status === 'stale' ? ` (${screen.why})` : ''} [${d.why ?? ''}]`)
+      // What the text fields show now, so the model sees what each tap did ("125×8"), not just that it tapped.
+      const shows = (screen.text ?? '').split('\n').filter((l) => l.includes('] text field ')).map((l) => l.split(' = ')[1]?.replace(/\s*\([^)]*\)\s*$/, '').trim())
+        .filter(Boolean).slice(0, 2)
+      steps.push(`${d.action.toLowerCase()} ${d.element ?? d.keys?.join(' ') ?? ''}${d.value ? ` "${d.value}"` : ''}: ${screen.did ?? screen.status ?? ''}`
+        + `${screen.status === 'stale' ? ` (${screen.why})` : ''}${shows.length ? ` → field shows ${shows.map((x) => `“${x}”`).join(', ')}` : ''}`)
       if (__DEV__) console.log('[app task]', steps[steps.length - 1])
     }
     return finish(`Stopped after 20 steps in ${a.app} without finishing. Steps: ${steps.join('; ')}`)

@@ -73,7 +73,13 @@ object Apps {
     fun walk(n: AccessibilityNodeInfo?, depth: Int) {
       if (n == null || depth > 40 || nodes.size >= MAX) return
       if (n.isVisibleToUser) {
-        val name = (n.text ?: n.contentDescription ?: n.hintText ?: "").toString().replace('\n', ' ').trim().take(80)
+        // What it shows and what it's called, when they differ ("C" is Clear), plus the app's own id for it
+        // ({btn_clear}): models find the right element far more reliably with all three.
+        val shown = (n.text ?: n.hintText ?: "").toString().replace('\n', ' ').trim().take(80)
+        val called = n.contentDescription?.toString()?.replace('\n', ' ')?.trim()?.take(60).orEmpty()
+        val name = shown.ifEmpty { called }
+        val aka = if (shown.isNotEmpty() && called.isNotEmpty() && !called.equals(shown, true)) " aka “$called”" else ""
+        val rid = n.viewIdResourceName?.substringAfterLast('/')?.let { " {$it}" }.orEmpty()
         val acts = buildList {
           if (n.isClickable || n.isCheckable) add("click")
           if (n.isEditable) add("type")
@@ -83,7 +89,7 @@ object Apps {
           val id = "e${nodes.size + 1}"
           nodes[id] = n
           val value = if (n.isEditable) " = ${n.text ?: ""}".take(80) else if (n.isCheckable) " = ${if (n.isChecked) "on" else "off"}" else ""
-          lines.add("[$id] ${role(n)} “$name”$value${if (acts.isEmpty()) "" else " (${acts.joinToString(", ")})"}")
+          lines.add("[$id] ${role(n)} “$name”$aka$rid$value${if (acts.isEmpty()) "" else " (${acts.joinToString(", ")})"}")
         }
       }
       for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)

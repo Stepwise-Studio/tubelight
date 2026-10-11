@@ -62,12 +62,14 @@ Goal: {goal}
 Done when: {done}
 Text you may type (use exactly these, nothing else): {inputs}
 
-Each element on screen is "[id] role “name” = value (actions)". Find the element by its exact name and copy its id
-from that same line (ids are not in any order). Check the steps so far: each says what really happened; if one
+Each element on screen is "[id] role “name” = value (actions)", sometimes with what it's also called (aka “Clear”) and
+the app's id for it ({{btn_clear}}). Find the element by its name, aka or app id and copy its [id] from that same line
+(ids are not in any order; never guess one). Check the steps so far: each says what really happened; if one
 went wrong, fix it (clear, backspace) before going on. Reply with one JSON object:
-{{"action": "{actions}|DONE|BLOCKED|NEEDS_INPUT", "element": "e12", "value": "...", "keys": ["{key}"], "why": "short"}}
+{{"action": "{actions}|DONE|BLOCKED|NEEDS_INPUT", "element": "e12", "value": "...", "keys": ["{key}"], "evidence": "...", "why": "short"}}
 {rules}
-- DONE when the goal is reached (check the screen, don't assume); BLOCKED if it can't be done (say why);
+- DONE when the goal is reached: put the exact text on the screen below that proves it in "evidence" (copy it, don't
+  assume or round); BLOCKED if it can't be done (say why);
   NEEDS_INPUT if a field needs text you weren't given (name the field in "why").
 Steps so far:
 {steps}
@@ -88,20 +90,35 @@ PHONE = {"device": "an Android phone", "actions": "CLICK|TYPE|SCROLL|SUBMIT|KEYS
 - Things you can't see may be further down: scroll before giving up."""}
 
 
+def _plain(t: str) -> str:
+    return re.sub(r"[\s,]", "", t).lower()
+
+
 async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str], screen: str, kind: dict[str, str] = DESKTOP) -> dict[str, Any]:
     """The fast model's next action for this screen. It may only type text from `inputs`: anything else comes back as
-    NEEDS_INPUT; the same step three times in a row comes back as BLOCKED."""
+    NEEDS_INPUT; the same step three times in a row comes back as BLOCKED. DONE must quote the screen: a claim the
+    screen doesn't show is sent back to look again (twice), then BLOCKED (gpt-oss once said "shows 1000" over 11,02,200)."""
     model = llm.chat_model(config.CU_MODEL, json=True)
-    res = await model.ainvoke([
-        SystemMessage("You are a precise UI operator. Answer with JSON only."),
-        HumanMessage(SUBTASK.format(goal=goal, done=done_when or "the goal is visibly reached", inputs=json.dumps(inputs or []),
-                                    steps="\n".join(steps) or "(none yet)", screen=screen, **kind)),
-    ])
-    d = _json(res.text)
-    d["action"] = str(d.get("action", "")).upper()
-    d["why"] = str(d.get("why", ""))[:200]
     if len(steps) >= 3 and steps[-1] == steps[-2] == steps[-3] and not steps[-1].startswith("keys"):
         return {"action": "BLOCKED", "why": "it kept repeating the same step"}
+    notes: list[str] = []
+    for _ in range(3):
+        res = await model.ainvoke([
+            SystemMessage("You are a precise UI operator. Answer with JSON only."),
+            HumanMessage(SUBTASK.format(goal=goal, done=done_when or "the goal is visibly reached", inputs=json.dumps(inputs or []),
+                                        steps="\n".join([*steps, *notes]) or "(none yet)", screen=screen, **kind)),
+        ])
+        d = _json(res.text)
+        d["action"] = str(d.get("action", "")).upper()
+        d["why"] = str(d.get("why", ""))[:200]
+        if d["action"] != "DONE":
+            break
+        proof = str(d.get("evidence") or "")
+        if proof and _plain(proof) in _plain(screen):
+            return d
+        notes.append(f"(you said DONE, but the screen doesn't show {proof!r}: read the screen again; fix it if it's wrong)")
+    else:
+        return {"action": "BLOCKED", "why": "it said it was done, but the screen doesn't show it"}
     value = str(d.get("value") or "")
     if d["action"] == "TYPE" and not any(value and value in i for i in inputs or []):
         return {"action": "NEEDS_INPUT", "why": f"it wanted to type {value!r}, which it wasn't given ({d['why']})"}
