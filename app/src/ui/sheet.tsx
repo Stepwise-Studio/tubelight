@@ -188,7 +188,7 @@ export function MenuHost() {
             destructive={it.destructive}
             accessory={it.value ? <Text variant="caption" color="ink3">{it.value}</Text> : undefined}
             chevron={!!it.value}
-            leading={it.icon && <View style={{ width: 28, alignItems: 'center' }}><Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} /></View>}
+            leading={it.icon && <Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} />}
             onPress={() => { close(); it.onPress() }}
             style={{ minHeight: 52 }}
           />

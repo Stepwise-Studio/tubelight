@@ -71,6 +71,8 @@ interface PhoneModule {
   /** A file another app opened with Tubelight (content:// or file://), copied into the cache. */
   openFile(uri: string): Promise<{ uri: string; name: string; size: number; mime: string }>
   /** "All files access" is on (the Vault's On this phone needs it). */
+  /** Internal storage as Settings reports it, in bytes. */
+  storage?(): { total: number; free: number }
   filesAllowed?(): boolean
   openFilesAccess?(): void
   /** A folder on the phone ("" = its shared storage). Folders' size is how many items they hold. */

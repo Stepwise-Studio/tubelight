@@ -32,7 +32,7 @@ export interface VaultItem {
 export interface VaultUsage { used: number; files: number; free: number; total: number; quota: number }
 export interface Upload { id: string; name: string; parent: string; mime: string; size: number; progress: number; local: string; error?: string }
 
-export type FileKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'word' | 'sheet' | 'slides' | 'archive' | 'other'
+export type FileKind = 'image' | 'video' | 'audio' | 'pdf' | 'markdown' | 'text' | 'code' | 'word' | 'sheet' | 'slides' | 'archive' | 'other'
 
 export function kindOf(name: string, mime = ''): FileKind {
   const ext = name.toLowerCase().split('.').pop() ?? ''
@@ -45,7 +45,8 @@ export function kindOf(name: string, mime = ''): FileKind {
   if (['xlsx', 'xlsm', 'csv', 'tsv'].includes(ext)) return 'sheet'
   if (ext === 'pptx') return 'slides'
   if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive'
-  if (mime.startsWith('text/') || ['txt', 'json', 'log', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx', 'py', 'kt', 'java', 'sh', 'sql', 'c', 'cpp', 'h', 'go', 'rs', 'rb', 'swift'].includes(ext)) return 'text'
+  if (['json', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx', 'py', 'kt', 'java', 'sh', 'sql', 'c', 'cpp', 'h', 'go', 'rs', 'rb', 'swift'].includes(ext)) return 'code'
+  if (mime.startsWith('text/') || ['txt', 'log'].includes(ext)) return 'text'
   return 'other'
 }
 
@@ -228,7 +229,7 @@ export const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'photos', label: 'Photos' }, { id: 'videos', label: 'Videos' }, { id: 'docs', label: 'Documents' },
   { id: 'audio', label: 'Audio' }, { id: 'starred', label: 'Starred' }, { id: 'all', label: 'All files' },
 ]
-const DOC_KINDS: FileKind[] = ['pdf', 'word', 'sheet', 'slides', 'markdown', 'text']
+const DOC_KINDS: FileKind[] = ['pdf', 'word', 'sheet', 'slides', 'markdown', 'text', 'code']
 
 export function inCategory(r: VaultItem, c: Category) {
   if (c === 'starred') return r.starred

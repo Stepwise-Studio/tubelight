@@ -2,14 +2,17 @@
 // folder (path). Files open in the vault's viewer and can be kept in the vault or shared. Needs "All files access".
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
+import { RefreshControl, View, useWindowDimensions } from 'react-native'
+import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { GridViewIcon, LeftToRightListBulletIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { shareItem } from '@/components/vault/actions'
 import { PLACES, openPhoneFile, usePhoneAccess, type PhoneFile } from '@/components/vault/phone-files'
+import { useDragSelect } from '@/components/vault/drag-select'
 import { OutsideRow, OutsideTile, chunk } from '@/components/vault/outside-row'
+import { SelectBar } from '@/components/vault/select-bar'
 import { Phone } from '@/lib/phone'
 import { uploadFiles, useVaultPrefs } from '@/lib/vault'
 import { useTheme } from '@/theme'
@@ -46,7 +49,43 @@ export default function PhoneFiles() {
   }
   useEffect(() => { load() }, [allowed, path]) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
 
-  const title = path ? name ?? path.split('/').pop() ?? 'Folder' : 'On this phone'
+  const title = path ? name ?? path.split('/').pop() ?? 'Folder' : 'This phone'
+  const q = query.trim().toLowerCase()
+  const shown = (rows ?? []).filter((f) => !q || f.name.toLowerCase().includes(q))
+  const grid = prefs.view === 'grid'
+  // Folders, then (at the top) the newest documents under their own heading; in a grid, three to a row.
+  const groups = path ? [{ label: '', items: shown }] : [{ label: '', items: shown.filter((f) => f.dir) }, { label: 'Recent documents', items: shown.filter((f) => !f.dir) }]
+  const blocks: { key: string; label?: string; items?: PhoneFile[] }[] = []
+  for (const g of groups) {
+    if (!g.items.length) continue
+    if (g.label) blocks.push({ key: `l-${g.label}`, label: g.label })
+    for (const r of grid ? chunk(g.items, 3) : g.items.map((f) => [f])) blocks.push({ key: r[0].path, items: r })
+  }
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const selecting = selected.size > 0
+  const files = blocks.flatMap((b) => (b.items ?? []).filter((f) => !f.dir))
+  const drag = useDragSelect({
+    order: files.map((f) => f.path),
+    keyAt: (i, x) => {
+      const r = blocks[i]?.items
+      const f = grid ? r?.[Math.min(2, Math.max(0, Math.floor((x - 16) / (tile + 8))))] : r?.[0]
+      return f && !f.dir ? f.path : null
+    },
+    selected,
+    setSelected,
+  })
+  const toggle = (f: PhoneFile) => { haptic.tap(); setSelected((s) => { const n = new Set(s); if (n.has(f.path)) n.delete(f.path); else n.add(f.path); return n }) }
+  const picked = files.filter((f) => selected.has(f.path))
+  const label = (f: PhoneFile) => (f.dir && f.name === 'Download' ? 'Downloads' : f.name)
+  const open = (f: PhoneFile) => (selecting && !f.dir ? toggle(f) : f.dir ? router.push({ pathname: '/vault/phone', params: { path: f.path, name: label(f) } }) : openPhoneFile(f))
+  const more = (f: PhoneFile) => showMenu({ title: f.name, items: [
+    { label: 'Save to Vault', icon: VaultIcon, onPress: () => {
+      toast({ title: `Saving ${f.name} to your vault` })
+      uploadFiles([{ uri: `file://${f.path}`, name: f.name, mime: f.mime, size: f.size }], '')
+        .then((r) => toast(r.done ? { title: 'Saved to your vault', body: f.name, tone: 'success' } : { title: 'Unable to save it', tone: 'error' }))
+    } },
+    { label: 'Share or open in…', icon: Share08Icon, onPress: () => shareItem({ id: f.path, name: f.name, mime: f.mime, size: f.size, src: `file://${f.path}` }) },
+  ] })
   if (!Phone?.listFiles) {
     return <View style={{ flex: 1, backgroundColor: c.canvas }}><ScreenHeader title={title} /><EmptyState title="Update Tubelight" body="This version can’t read the phone’s files yet." /></View>
   }
@@ -60,34 +99,16 @@ export default function PhoneFiles() {
       </View>
     )
   }
-  const q = query.trim().toLowerCase()
-  const shown = (rows ?? []).filter((f) => !q || f.name.toLowerCase().includes(q))
-  const grid = prefs.view === 'grid'
-  // Folders, then (at the top) the newest documents under their own heading; in a grid, three to a row.
-  const groups = path ? [{ label: '', items: shown }] : [{ label: '', items: shown.filter((f) => f.dir) }, { label: 'Recent documents', items: shown.filter((f) => !f.dir) }]
-  const blocks: { key: string; label?: string; items?: PhoneFile[] }[] = []
-  for (const g of groups) {
-    if (!g.items.length) continue
-    if (g.label) blocks.push({ key: `l-${g.label}`, label: g.label })
-    for (const r of grid ? chunk(g.items, 3) : g.items.map((f) => [f])) blocks.push({ key: r[0].path, items: r })
-  }
-  const label = (f: PhoneFile) => (f.dir && f.name === 'Download' ? 'Downloads' : f.name)
-  const open = (f: PhoneFile) => (f.dir ? router.push({ pathname: '/vault/phone', params: { path: f.path, name: label(f) } }) : openPhoneFile(f))
-  const more = (f: PhoneFile) => showMenu({ title: f.name, items: [
-    { label: 'Save to Vault', icon: VaultIcon, onPress: () => {
-      toast({ title: `Saving ${f.name} to your vault` })
-      uploadFiles([{ uri: `file://${f.path}`, name: f.name, mime: f.mime, size: f.size }], '')
-        .then((r) => toast(r.done ? { title: 'Saved to your vault', body: f.name, tone: 'success' } : { title: 'Unable to save it', tone: 'error' }))
-    } },
-    { label: 'Share or open in…', icon: Share08Icon, onPress: () => shareItem({ id: f.path, name: f.name, mime: f.mime, size: f.size, src: `file://${f.path}` }) },
-  ] })
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
-      <ScreenHeader title={title} subtitle={path ? 'On this phone' : 'Vault'} right={
+      <ScreenHeader title={title} subtitle={path ? 'This phone' : 'Vault'} right={
         <IconButton icon={grid ? LeftToRightListBulletIcon : GridViewIcon} accessibilityLabel={grid ? 'Show as a list' : 'Show as a grid'}
           onPress={() => { haptic.tap(); setPrefs({ view: grid ? 'list' : 'grid' }) }} />
       } />
+      <GestureDetector gesture={drag.gesture}>
+      <View {...drag.wrapProps}>
       <FlatList
+        {...drag.listProps}
         data={blocks}
         keyExtractor={(b) => b.key}
         keyboardShouldPersistTaps="handled"
@@ -100,19 +121,34 @@ export default function PhoneFiles() {
         ) : grid ? (
           <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
             {b.items!.map((f) => <OutsideTile key={f.path} name={label(f)} mime={f.mime} dir={f.dir} size={tile} thumb={f.mime.startsWith('image/') ? `file://${f.path}` : null}
-              onPress={() => open(f)} onMore={f.dir ? undefined : () => more(f)} />)}
+              onPress={() => open(f)} onHold={f.dir ? undefined : () => drag.begin(f.path)} selecting={selecting} selected={selected.has(f.path)} />)}
           </View>
         ) : (() => {
           const f = b.items![0]
           return (
             <OutsideRow name={label(f)} mime={f.mime} dir={f.dir} size={f.size} date={f.dir ? undefined : f.modified} thumb={f.mime.startsWith('image/') ? `file://${f.path}` : null}
-              meta={f.dir ? `${f.size} ${f.size === 1 ? 'item' : 'items'}` : undefined} onPress={() => open(f)} onMore={f.dir ? undefined : () => more(f)} />
+              meta={f.dir ? `${f.size} ${f.size === 1 ? 'item' : 'items'}` : undefined} onPress={() => open(f)} onMore={f.dir ? undefined : () => more(f)}
+              onHold={f.dir ? undefined : () => drag.begin(f.path)} selecting={selecting} selected={selected.has(f.path)} />
           )
         })()}
         ListEmptyComponent={!rows && !error
           ? <View style={{ paddingHorizontal: 16, gap: 10 }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={52} radius={12} />)}</View>
           : <EmptyState title={error ? 'Unable to read this folder' : q ? 'Nothing matches' : 'Empty'} body={error ?? (q ? 'Try another name.' : 'Nothing in this folder yet.')} />}
       />
+      </View>
+      </GestureDetector>
+      {selecting && (
+        <SelectBar count={selected.size} bottom={insets.bottom + 8} onClear={() => setSelected(new Set())} actions={[
+          { icon: VaultIcon, label: 'Save them to the vault', onPress: () => {
+            const list = picked
+            setSelected(new Set())
+            toast({ title: `Saving ${list.length} ${list.length === 1 ? 'file' : 'files'} to your vault` })
+            uploadFiles(list.map((f) => ({ uri: `file://${f.path}`, name: f.name, mime: f.mime, size: f.size })), '')
+              .then((r) => toast(r.failed ? { title: `${r.done} saved, ${r.failed} didn’t`, tone: 'error' } : { title: 'Saved to your vault', tone: 'success' }))
+          } },
+          ...(picked.length === 1 ? [{ icon: Share08Icon, label: 'Share it', onPress: () => shareItem({ id: picked[0].path, name: picked[0].name, mime: picked[0].mime, size: picked[0].size, src: `file://${picked[0].path}` }) }] : []),
+        ]} />
+      )}
     </View>
   )
 }

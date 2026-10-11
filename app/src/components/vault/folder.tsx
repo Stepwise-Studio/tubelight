@@ -9,17 +9,18 @@ import Animated, { interpolate, useAnimatedStyle, useReducedMotion, useSharedVal
 import Svg, { Defs, Ellipse, Path, RadialGradient, Stop } from 'react-native-svg'
 import {
   Book02Icon, Briefcase01Icon, Camera01Icon, CodeIcon, File01Icon, Folder01Icon, Image02Icon, Invoice01Icon, LaptopIcon,
-  MusicNote01Icon, StarIcon, Tick02Icon, Video01Icon,
+  MusicNote01Icon, StarIcon, Video01Icon,
 } from '@hugeicons/core-free-icons'
 
 import { useTheme } from '@/theme'
-import { Icon, Squircle, Text } from '@/ui'
+import { Icon, SelectDot, Squircle, Text } from '@/ui'
 
 /** The colours a folder can take (Stepwise's swatch set), and the neutral default. */
 export const FOLDER_COLORS = [
   { value: '', name: 'Plain' }, { value: '#bfdbfe', name: 'Sky' }, { value: '#ddd6fe', name: 'Lilac' }, { value: '#2563eb', name: 'Blue' },
   { value: '#f5d98b', name: 'Sand' }, { value: '#fbcfe8', name: 'Rose' }, { value: '#bbf7d0', name: 'Mint' },
 ]
+export const DEFAULT_COLOR = '#bfdbfe'
 export const FOLDER_ICONS = {
   folder: Folder01Icon, file: File01Icon, image: Image02Icon, camera: Camera01Icon, video: Video01Icon, music: MusicNote01Icon,
   book: Book02Icon, work: Briefcase01Icon, receipt: Invoice01Icon, code: CodeIcon, star: StarIcon, laptop: LaptopIcon,
@@ -69,11 +70,11 @@ function mix(hex: string, to: string, t: number, alpha = 1) {
 
 const SPRING = { stiffness: 260, damping: 24 }
 
-export const Folder = memo(function Folder({ size, label, count, color, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, selecting, accessibilityLabel }: {
+export const Folder = memo(function Folder({ size, label, count, color = DEFAULT_COLOR, icon = 'folder', thumbs = [], peek = 3, badge, onPress, onLongPress, selected, selecting, accessibilityLabel }: {
   size: number
   label: string
   count?: string
-  /** Body colour (hex); '' or undefined = Stepwise's neutral. */
+  /** Body colour (hex); the default is Sky, '' is Stepwise's neutral (Plain). */
   color?: string
   icon?: FolderIconName | ''
   /** Up to three photos inside it, peeking out instead of skeleton pages. */
@@ -168,10 +169,7 @@ export const Folder = memo(function Folder({ size, label, count, color, icon = '
           </Squircle>
         </Animated.View>
         {selecting && (
-          <View style={{ position: 'absolute', right: -4, top: h * 0.13 - 8, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
-            backgroundColor: selected ? c.tube : 'rgba(0,0,0,0.28)', borderWidth: 2, borderColor: selected ? c.tube : '#fff' }}>
-            {selected && <Icon icon={Tick02Icon} size={15} color="#fff" strokeWidth={2.6} />}
-          </View>
+          <View style={{ position: 'absolute', right: -4, top: h * 0.13 - 8 }}><SelectDot on={!!selected} size={26} onImage /></View>
         )}
       </View>
       <View style={{ alignItems: 'center', gap: 6, maxWidth: w + 16 }}>

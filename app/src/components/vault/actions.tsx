@@ -18,7 +18,7 @@ import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu,
 import { ColorSwatches } from '@/components/form-bits'
 
 import { FolderGlyph } from './file-tile'
-import { FOLDER_COLORS, FOLDER_ICONS, Folder, type FolderIconName } from './folder'
+import { DEFAULT_COLOR, FOLDER_COLORS, FOLDER_ICONS, Folder, type FolderIconName } from './folder'
 
 export function openItem(item: VaultItem) {
   haptic.tap()
@@ -220,7 +220,7 @@ function MoveRow({ label, depth, current, onPress }: { label: string; depth: num
 /** A folder's colour and icon, with the folder itself as the preview (like Stepwise UI's Colors & icon demo). */
 function LookSheet({ open, item, onClose }: { open: boolean; item: VaultItem | null; onClose: () => void }) {
   const { c } = useTheme()
-  const [color, setColor] = useState(item?.meta.look?.color ?? '')
+  const [color, setColor] = useState(item?.meta.look?.color ?? DEFAULT_COLOR)
   const [icon, setIcon] = useState<FolderIconName | ''>((item?.meta.look?.icon as FolderIconName) ?? 'folder')
   if (!item) return null
   const save = () => {

@@ -5,10 +5,10 @@ import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { router } from 'expo-router'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated'
+import { RefreshControl, View, useWindowDimensions } from 'react-native'
+import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import {
-  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, Download04Icon,
+  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, Delete02Icon,
   File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GridViewIcon, Image01Icon, LaptopIcon,
   LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
@@ -18,18 +18,18 @@ import {
   uploadFiles, useVault, useVaultPrefs, viewable, type Category, type Upload, type VaultItem,
 } from '@/lib/vault'
 import { useDriveAbout } from '@/lib/drive'
-import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Squircle, Text, confirm, elevation, haptic, showContextMenu, showMenu, toast } from '@/ui'
+import { Phone } from '@/lib/phone'
+import { useTheme } from '@/theme'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, haptic, showContextMenu, showMenu, toast } from '@/ui'
 
 import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, shareItem } from './actions'
 import { Folder, type FolderIconName } from './folder'
-import { usePhoneAccess } from './phone-files'
 import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
 import { DriveLogo } from './drive-logo'
 import { FilePreview } from './preview'
-
-const PHONE_ROOT = '/storage/emulated/0'
+import { SelectBar } from './select-bar'
+import { useDragSelect } from './drag-select'
 
 type Row =
   | { type: 'title'; key: string; label: string; controls?: boolean; add?: boolean }
@@ -108,6 +108,18 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
   }, [all, uploads, parent, category, query, prefs.sort, view, root, inSynced])
 
   const tile = Math.floor((width - 32 - 16) / 3)
+  // Hold a file, then slide over others to choose them all (tiles: which column from x).
+  const drag = useDragSelect({
+    order: useMemo(() => rows.flatMap((r) => (r.type === 'file' ? [r.item.id] : r.type === 'tiles' ? r.items.map((x) => x.id) : [])), [rows]),
+    keyAt: (i, x) => {
+      const r = rows[i]
+      if (r?.type === 'file') return r.item.id
+      if (r?.type === 'tiles') return r.items[Math.min(2, Math.max(0, Math.floor((x - 16) / (tile + 8))))]?.id ?? null
+      return null
+    },
+    selected,
+    setSelected,
+  })
   const card = Math.floor((width - 32 - 10) / 2)
   const picked = all.filter((r) => selected.has(r.id))
   const toggle = (r: VaultItem) => {
@@ -115,12 +127,15 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
     setSelected((s) => { const n = new Set(s); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })
   }
   const press = (r: VaultItem) => (selecting ? toggle(r) : openItem(r))
-  const hold = (r: VaultItem) => { haptic.light(); toggle(r) }
+  const hold = (r: VaultItem) => drag.begin(r.id) // choose it, then slide to choose more
   const clear = () => setSelected(new Set())
 
   return (
     <View style={{ flex: 1 }}>
+      <GestureDetector gesture={drag.gesture}>
+      <View {...drag.wrapProps}>
       <FlatList
+      {...drag.listProps}
         data={items ? rows : []}
         keyExtractor={(r) => r.key}
         keyboardShouldPersistTaps="handled"
@@ -185,14 +200,18 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24 
           return <FileRow item={r.item} selected={selected.has(r.item.id)} selecting={selecting} onPress={() => press(r.item)} onHold={() => hold(r.item)} />
         }}
         ListEmptyComponent={!items ? <Loading tile={tile} /> : (
+          <View style={{ flex: 1, justifyContent: 'center', paddingBottom: 60 }}>
           <EmptyState
             art={<FolderGlyph size={56} />}
             title={error ? 'Unable to reach your vault' : query ? 'Nothing matches' : category ? 'Nothing here yet' : parent ? 'This folder is empty' : 'Your vault is empty'}
             body={error ?? (query ? 'Try another name.' : 'Keep photos, videos, PDFs, notes and documents here. They live on your own server, and your teammates can find them when you ask.')}
             action={error ? <Button label="Try again" onPress={() => refreshVault()} /> : query || category ? undefined : <Button label="Add files" icon={Add01Icon} onPress={() => addMenu(parent)} />}
           />
+          </View>
         )}
       />
+      </View>
+      </GestureDetector>
       {selecting && <SelectionBar picked={picked} bottom={bottom} onClear={clear} />}
     </View>
   )
@@ -359,67 +378,49 @@ function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }
   )
 }
 
-/** Below the folders on the vault's top: cloud drives, the phone's own files, and Browse by kind. */
+/** Below the folders on the vault's top: Google Drive and this phone, each with how full it is, then Browse. */
 function Places({ items, width }: { items: VaultItem[]; width: number }) {
   const { c } = useTheme()
   const { about } = useDriveAbout()
-  const phone = usePhoneAccess()
+  const [phone] = useState(() => Phone?.storage?.() ?? null)
   const go = (pathname: '/vault/phone' | '/vault/drive/[id]', params: Record<string, string>) => { haptic.tap(); router.push({ pathname, params } as never) }
   return (
     <View style={{ gap: 24, paddingTop: 4 }}>
-      <Section title="Cloud drives">
-        <PlaceRow art={<DriveLogo size={22} />} title="Google Drive"
-          sub={about?.connected ? (about.quota ? `${formatSize(about.used ?? 0)} of ${formatSize(about.quota)} used` : `${formatSize(about.used ?? 0)} used`) : about ? 'Connect to browse your Drive here' : ' '}
+      <View style={{ paddingHorizontal: 16, gap: 10 }}>
+        <PlaceCard art={<DriveLogo size={22} />} title="Google Drive"
+          used={about?.connected ? about.used ?? 0 : undefined} total={about?.connected ? about.quota || undefined : undefined}
+          note={about && !about.connected ? 'Connect to browse your Drive here' : undefined}
           onPress={() => go('/vault/drive/[id]', { id: 'root' })} />
-      </Section>
-      <Section title="On this phone">
-        {phone ? (
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <PlaceTile icon={Download04Icon} title="Downloads" width={width} onPress={() => go('/vault/phone', { path: `${PHONE_ROOT}/Download`, name: 'Downloads' })} />
-            <PlaceTile icon={File01Icon} title="Documents" width={width} onPress={() => go('/vault/phone', {})} />
-          </View>
-        ) : (
-          <PlaceRow art={<Icon icon={SmartPhone01Icon} size={20} color={c.ink2} strokeWidth={1.9} />} title="Files on this phone" sub="Downloads, documents and recent files" onPress={() => go('/vault/phone', {})} />
-        )}
-      </Section>
+        <PlaceCard art={<Icon icon={SmartPhone01Icon} size={20} color={c.ink2} strokeWidth={1.9} />} title="This phone"
+          used={phone ? phone.total - phone.free : undefined} total={phone?.total} note={phone ? undefined : 'Downloads, documents and recent files'}
+          onPress={() => go('/vault/phone', {})} />
+      </View>
       {items.some((r) => r.kind === 'file') && <Browse items={items} width={width} />}
     </View>
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 10 }}>
-      <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingLeft: 4 }}>{title}</Text>
-      {children}
-    </View>
-  )
-}
-
-function PlaceRow({ art, title, sub, onPress }: { art: ReactNode; title: string; sub: string; onPress: () => void }) {
+/** A place with storage: its mark and name, "x of y used", and a bar of how full it is. */
+function PlaceCard({ art, title, used, total, note, onPress }: { art: ReactNode; title: string; used?: number; total?: number; note?: string; onPress: () => void }) {
   const { c } = useTheme()
+  const pct = used !== undefined && total ? Math.min(100, (used / total) * 100) : null
+  const line = note ?? (used === undefined ? ' ' : total ? `${formatSize(used)} of ${formatSize(total)} used` : `${formatSize(used)} used`)
   return (
-    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${sub}`}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
-      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
-        <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{sub}</Text>
+    <Press radius={18} onPress={onPress} accessibilityLabel={`${title}. ${line}${total && used !== undefined ? `, ${formatSize(total - used)} free` : ''}`}
+      style={{ padding: 12, paddingBottom: pct === null ? 12 : 14, gap: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>{art}</View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="bodyMedium" numberOfLines={1}>{title}</Text>
+          <Text variant="footnote" color="ink3" numberOfLines={1} tabular>{line}</Text>
+        </View>
+        {total && used !== undefined ? <Text variant="footnote" color="ink3" tabular>{formatSize(total - used)} free</Text> : <Icon icon={ArrowRight01Icon} size={16} color="ink4" />}
       </View>
-      <Icon icon={ArrowRight01Icon} size={16} color="ink4" />
-    </Press>
-  )
-}
-
-function PlaceTile({ icon, title, width, onPress }: { icon: Parameters<typeof Icon>[0]['icon']; title: string; width: number; onPress: () => void }) {
-  const { c } = useTheme()
-  return (
-    <Press radius={18} onPress={onPress} accessibilityLabel={title} outerStyle={{ width }}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel }}>
-      <View style={{ width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
-        <Icon icon={icon} size={20} color="ink2" strokeWidth={1.9} />
-      </View>
-      <Text variant="bodyMedium" numberOfLines={1} style={{ flex: 1 }}>{title}</Text>
+      {pct !== null && (
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: c.panel2, overflow: 'hidden' }}>
+          <View style={{ width: `${Math.max(pct, 1.5)}%`, height: 6, borderRadius: 3, backgroundColor: pct > 90 ? c.danger : c.tube }} />
+        </View>
+      )}
     </Press>
   )
 }
@@ -456,46 +457,35 @@ function FileRow({ item, selected, selecting, onPress, onHold }: { item: VaultIt
         <Text variant="footnote" color="ink3" tabular numberOfLines={1}>{meta}</Text>
       </View>
       {selecting
-        ? <View style={{ width: 40, alignItems: 'center' }}><Icon icon={CheckmarkCircle02Icon} size={22} color={selected ? 'tube' : 'ink4'} strokeWidth={selected ? 2.2 : 1.5} /></View>
+        ? <View style={{ width: 40, alignItems: 'center' }}><SelectDot on={selected} size={22} /></View>
         : <IconButton icon={MoreHorizontalIcon} size={40} iconSize={18} color={c.ink3} accessibilityLabel={`More for ${item.name}`} onPress={() => itemMenu(item)} />}
     </Press>
   )
 }
 
 function Check({ on }: { on: boolean }) {
-  const { c } = useTheme()
-  return (
-    <View style={{ position: 'absolute', left: 6, top: 6, width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: on ? c.tube : 'rgba(0,0,0,0.35)', borderWidth: 1.5, borderColor: '#fff' }}>
-      {on && <Icon icon={CheckmarkCircle02Icon} size={16} color="#fff" strokeWidth={2.4} />}
-    </View>
-  )
+  return <View style={{ position: 'absolute', left: 6, top: 6 }}><SelectDot on={on} onImage /></View>
 }
 
 /** Several picked: what you can do with them all at once. */
 function SelectionBar({ picked, bottom, onClear }: { picked: VaultItem[]; bottom: number; onClear: () => void }) {
-  const { c, scheme } = useTheme()
+  const { c } = useTheme()
   const starAll = picked.some((r) => !r.starred)
   const one = picked.length === 1 && picked[0].kind === 'file' ? picked[0] : null
-  const act = (f: () => unknown) => { haptic.tap(); f() }
   return (
-    <Animated.View entering={FadeInDown.duration(motion.duration.fast)} exiting={FadeOutDown.duration(motion.duration.quick)}
-      style={[{ position: 'absolute', left: 16, right: 16, bottom: bottom + 8, borderRadius: 26 }, elevation(scheme)]}>
-      <Squircle style={{ borderRadius: 26, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', padding: 6, gap: 2 }}>
-        <IconButton icon={Cancel01Icon} round accessibilityLabel="Clear the selection" onPress={() => act(onClear)} />
-        <Text variant="bodyMedium" style={{ flex: 1 }} tabular>{picked.length} selected</Text>
-        <IconButton icon={StarIcon} color={starAll ? c.ink2 : '#e5a50a'} accessibilityLabel={starAll ? 'Star them' : 'Unstar them'}
-          onPress={() => act(() => Promise.all(picked.map((r) => editItem(r.id, { starred: starAll }))).catch(() => toast({ title: 'Unable to save', tone: 'error' })))} />
-        <IconButton icon={FolderExportIcon} accessibilityLabel="Move them" onPress={() => act(() => { moveItems(picked); onClear() })} />
-        {one && <IconButton icon={Share08Icon} accessibilityLabel="Share it" onPress={() => act(() => shareItem(viewable(one)))} />}
-        <IconButton icon={Delete02Icon} color={c.danger} accessibilityLabel="Delete them" onPress={async () => {
-          if (!await confirm({ title: `Delete ${picked.length} ${picked.length === 1 ? 'item' : 'items'}?`, body: 'They leave your server for good, with everything inside any folder.', confirmLabel: 'Delete', destructive: true })) return
-          onClear()
-          for (const r of picked) await deleteItem(r.id).catch(() => toast({ title: `Unable to delete ${r.name}`, tone: 'error' }))
-          haptic.success()
-        }} />
-      </Squircle>
-    </Animated.View>
+    <SelectBar count={picked.length} bottom={bottom} onClear={onClear} actions={[
+      { icon: StarIcon, label: starAll ? 'Star them' : 'Unstar them', color: starAll ? undefined : '#e5a50a',
+        onPress: () => Promise.all(picked.map((r) => editItem(r.id, { starred: starAll }))).catch(() => toast({ title: 'Unable to save', tone: 'error' })) },
+      { icon: FolderExportIcon, label: 'Move them', onPress: () => { moveItems(picked); onClear() } },
+      ...(one ? [{ icon: Share08Icon, label: 'Share it', onPress: () => shareItem(viewable(one)) }] : []),
+      { icon: Delete02Icon, label: 'Delete them', color: c.danger, onPress: async () => {
+        if (!await confirm({ title: `Delete ${picked.length} ${picked.length === 1 ? 'item' : 'items'}?`, body: 'They leave your server for good, with everything inside any folder.', confirmLabel: 'Delete', destructive: true })) return
+        onClear()
+        for (const r of picked) await deleteItem(r.id).catch((e) => toast({ title: `Unable to delete ${r.name}`, body: (e as Error).message, tone: 'error' }))
+        haptic.success()
+        toast({ title: picked.length === 1 ? `${picked[0].name} deleted` : `${picked.length} items deleted`, tone: 'success' })
+      } },
+    ]} />
   )
 }
 

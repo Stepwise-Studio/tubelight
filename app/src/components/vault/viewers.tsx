@@ -40,7 +40,7 @@ export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover }: {
   if (kind === 'video') return <Video item={item} />
   if (kind === 'audio') return <Audio item={item} />
   if (kind === 'pdf') return <PdfReader item={item} chrome={chrome} onCover={onCover ?? (() => {})} fallback={(note) => <Other item={item} note={note} />} />
-  if (kind === 'markdown' || kind === 'text') return <TextFile item={item} markdown={kind === 'markdown'} chrome={chrome} />
+  if (kind === 'markdown' || kind === 'text' || kind === 'code') return <TextFile item={item} markdown={kind === 'markdown'} chrome={chrome} />
   if (kind === 'word' || kind === 'sheet' || kind === 'slides') return <Preview item={item} chrome={chrome} />
   return <Other item={item} />
 }

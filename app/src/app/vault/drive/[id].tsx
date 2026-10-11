@@ -3,14 +3,17 @@
 import * as DocumentPicker from 'expo-document-picker'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
-import { FlatList, RefreshControl, View, useWindowDimensions } from 'react-native'
+import { RefreshControl, View, useWindowDimensions } from 'react-native'
+import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon, Delete02Icon, File01Icon, FolderAddIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { askName, shareItem } from '@/components/vault/actions'
 import { openOutside } from '@/components/vault/outside'
+import { useDragSelect } from '@/components/vault/drag-select'
 import { OutsideRow, OutsideTile, chunk } from '@/components/vault/outside-row'
+import { SelectBar } from '@/components/vault/select-bar'
 import { connectApp } from '@/lib/catalog'
 import { driveToVault, driveViewable, newDriveFolder, starDrive, trashDrive, uploadToDrive, useDriveAbout, useDriveFolder, type DriveItem } from '@/lib/drive'
 import { refreshVault, useVaultPrefs } from '@/lib/vault'
@@ -36,6 +39,31 @@ export default function DriveFolder() {
   const { width } = useWindowDimensions()
   const tile = Math.floor((width - 32 - 16) / 3)
   const more = (f: DriveItem) => { haptic.light(); showMenu({ title: f.name, items: menuItems(f) }) }
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const selecting = selected.size > 0
+  const files = (items ?? []).filter((f) => f.kind === 'file')
+  const rows = grid ? chunk(items ?? [], 3) : (items ?? []).map((f) => [f])
+  const drag = useDragSelect({
+    order: files.map((f) => f.id),
+    keyAt: (i, x) => {
+      const f = grid ? rows[i]?.[Math.min(2, Math.max(0, Math.floor((x - 16) / (tile + 8))))] : rows[i]?.[0]
+      return f?.kind === 'file' ? f.id : null
+    },
+    selected,
+    setSelected,
+  })
+  const toggle = (f: DriveItem) => { haptic.tap(); setSelected((s) => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n }) }
+  const tap = (f: DriveItem) => (selecting && f.kind === 'file' ? toggle(f) : open(f))
+  const picked = files.filter((f) => selected.has(f.id))
+  const bulk = async (what: string, run: (f: DriveItem) => Promise<unknown>, done: string) => {
+    const list = picked
+    setSelected(new Set())
+    toast({ title: `${what} ${list.length} ${list.length === 1 ? 'file' : 'files'}` })
+    const r = await Promise.allSettled(list.map(run))
+    const failed = r.filter((x) => x.status === 'rejected').length
+    toast(failed ? { title: `${list.length - failed} done, ${failed} didn’t work`, tone: 'error' } : { title: done, tone: 'success' })
+    reload()
+  }
 
   const open = async (f: DriveItem) => {
     haptic.tap()
@@ -105,8 +133,11 @@ export default function DriveFolder() {
             onPress={() => { haptic.tap(); setPrefs({ view: grid ? 'list' : 'grid' }) }} />
           {(top ? tab === 'root' : true) && <IconButton icon={Add01Icon} accessibilityLabel="Add to this Drive folder" onPress={add} />}
         </>} />
+      <GestureDetector gesture={drag.gesture}>
+      <View {...drag.wrapProps}>
       <FlatList
-        data={grid ? chunk(items ?? [], 3) : (items ?? []).map((f) => [f])}
+        {...drag.listProps}
+        data={rows}
         keyExtractor={(row) => row[0].id}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -121,11 +152,13 @@ export default function DriveFolder() {
         }
         renderItem={({ item: row }) => grid ? (
           <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
-            {row.map((f) => <OutsideTile key={f.id} name={f.name} mime={f.mime} dir={f.kind === 'folder'} thumb={f.thumb} size={tile} onPress={() => open(f)} onMore={() => more(f)} />)}
+            {row.map((f) => <OutsideTile key={f.id} name={f.name} mime={f.mime} dir={f.kind === 'folder'} thumb={f.thumb} size={tile} onPress={() => tap(f)}
+              onHold={() => drag.begin(f.id)} selecting={selecting} selected={selected.has(f.id)} />)}
           </View>
         ) : (
           <OutsideRow name={row[0].name} mime={row[0].mime} dir={row[0].kind === 'folder'} size={row[0].size} date={row[0].updated_at} thumb={row[0].thumb}
-            onPress={() => open(row[0])} onMore={() => more(row[0])} />
+            onPress={() => tap(row[0])} onMore={() => more(row[0])} onHold={row[0].kind === 'file' ? () => drag.begin(row[0].id) : undefined}
+            selecting={selecting} selected={selected.has(row[0].id)} />
         )}
         ListEmptyComponent={!items && !error
           ? <View style={{ paddingHorizontal: 16, gap: 10 }}>{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={52} radius={12} />)}</View>
@@ -133,6 +166,18 @@ export default function DriveFolder() {
               body={error ?? (query ? 'Try another name.' : tab === 'starred' && top ? 'Files you star in Drive show up here.' : 'Add files with +.')}
               action={error ? <Button label="Try again" onPress={reload} /> : undefined} />}
       />
+      </View>
+      </GestureDetector>
+      {selecting && (
+        <SelectBar count={selected.size} bottom={insets.bottom + 8} onClear={() => setSelected(new Set())} actions={[
+          { icon: StarIcon, label: 'Star them in Drive', onPress: () => bulk('Starring', (f) => starDrive(f.id, true), 'Starred in Drive') },
+          { icon: VaultIcon, label: 'Save them to the vault', onPress: () => bulk('Saving', (f) => driveToVault(f.id), 'Saved to your vault').then(() => refreshVault()) },
+          { icon: Delete02Icon, label: 'Remove them from Drive', color: c.danger, onPress: async () => {
+            if (!await confirm({ title: `Remove ${picked.length} ${picked.length === 1 ? 'file' : 'files'}?`, body: 'They go to your Drive’s trash, where you can still restore them.', confirmLabel: 'Remove', destructive: true })) return
+            bulk('Removing', (f) => trashDrive(f.id), 'Moved to Drive’s trash')
+          } },
+        ]} />
+      )}
     </View>
   )
 }

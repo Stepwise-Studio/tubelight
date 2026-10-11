@@ -97,6 +97,11 @@ class PhoneModule : Module() {
     Function("pdfClose") { Pdf.close() }
     AsyncFunction("openFile") { uri: String -> Opened.take(context, uri) }
     Function("filesAllowed") { Files.allowed() }
+    Function("storage") {
+      // The figures Settings shows (total rounded to the marketed size), not the data partition's.
+      val st = context.getSystemService(StorageStatsManager::class.java)
+      mapOf("total" to st.getTotalBytes(StorageManager.UUID_DEFAULT).toDouble(), "free" to st.getFreeBytes(StorageManager.UUID_DEFAULT).toDouble())
+    }
     Function("openFilesAccess") {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) start(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}")))
     }
