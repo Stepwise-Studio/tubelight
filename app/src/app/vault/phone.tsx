@@ -1,14 +1,17 @@
 // The phone's own files inside the Vault: its main folders and the newest documents anywhere on it (top), or one
 // folder (path). Files open in the vault's viewer and can be kept in the vault or shared. Needs "All files access".
+import * as DocumentPicker from 'expo-document-picker'
+import { Directory, File } from 'expo-file-system'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Delete02Icon, Edit02Icon, FolderAddIcon, FolderExportIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Delete02Icon, Edit02Icon, File01Icon, FolderAddIcon, FolderExportIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { askName, shareItem } from '@/components/vault/actions'
+import { Fab } from '@/components/vault/fab'
 import { FolderPicker, type PickerDir } from '@/components/vault/folder-picker'
 import { PLACES, openPhoneFile, usePhoneAccess, type PhoneFile } from '@/components/vault/phone-files'
 import { useDragSelect } from '@/components/vault/drag-select'
@@ -123,6 +126,18 @@ export default function PhoneFiles() {
     load()
   }
   const phoneDirs = (at: string) => Phone!.listFiles!(at).then((r) => r.items.filter((x) => x.dir).sort((a, b) => a.name.localeCompare(b.name)).map((x) => ({ id: x.path, name: x.name })))
+  // Files picked elsewhere copied into this folder.
+  const addHere = async () => {
+    const r = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true })
+    if (r.canceled || !path) return
+    let done = 0
+    for (const a of r.assets) {
+      try { new File(a.uri).copy(new File(new Directory(`file://${path}`), a.name)); done++ } catch { /* counted below */ }
+    }
+    toast(done < r.assets.length ? { title: `${done} added, ${r.assets.length - done} didn’t`, tone: 'error' }
+      : { title: done === 1 ? `${r.assets[0].name} is here` : `${done} files added`, tone: 'success' })
+    load()
+  }
   const newFolder = () => askName('New folder', 'Create folder', async (n) => {
     await Phone!.makeFolder!(path ?? '', n)
     toast({ title: `${n} is on your phone`, tone: 'success' })
@@ -147,7 +162,6 @@ export default function PhoneFiles() {
         <>
           <IconButton icon={grid ? LeftToRightListBulletIcon : GridViewIcon} accessibilityLabel={grid ? 'Show as a list' : 'Show as a grid'}
             onPress={() => { haptic.tap(); setPrefs({ view: grid ? 'list' : 'grid' }) }} />
-          {!!path && <IconButton icon={FolderAddIcon} accessibilityLabel="New folder here" onPress={newFolder} />}
         </>
       } />
       <GestureDetector gesture={drag.gesture}>
@@ -158,7 +172,7 @@ export default function PhoneFiles() {
         keyExtractor={(b) => b.key}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false) }} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
         ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}><SearchField value={query} onChangeText={setQuery} placeholder={path ? 'Search this folder' : 'Search recent documents'} /></View>}
         renderItem={({ item: b }) => b.label ? (
@@ -182,6 +196,10 @@ export default function PhoneFiles() {
       />
       </View>
       </GestureDetector>
+      {!selecting && !!path && <Fab label="Add to this folder" bottom={insets.bottom + 16} items={() => [
+        { label: 'Files', icon: File01Icon, onPress: addHere },
+        { label: 'New folder', icon: FolderAddIcon, onPress: newFolder },
+      ]} />}
       {selecting && (
         <SelectBar count={selected.size} bottom={insets.bottom + 8} onClear={() => setSelected(new Set())} actions={[
           ...(picked.length === 1 ? [{ icon: Edit02Icon, label: 'Rename it', onPress: () => { const f = picked[0]; setSelected(new Set()); askName('Rename file', 'Rename', async (n) => { await Phone!.renameFile!(f.path, n); toast({ title: `Renamed to ${n}`, tone: 'success' }); load() }, f.name) } }] : []),

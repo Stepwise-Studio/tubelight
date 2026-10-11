@@ -1,17 +1,19 @@
 // Google Drive inside the Vault: one Drive folder (or Starred / Recent), opened in the vault's viewer; add files from
 // the phone, make folders, star, copy into the vault, remove (to Drive's trash).
 import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, Delete02Icon, Edit02Icon, File01Icon, FolderAddIcon, FolderExportIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Delete02Icon, Edit02Icon, File01Icon, FolderAddIcon, Image01Icon, FolderExportIcon, GridViewIcon, LeftToRightListBulletIcon, Share08Icon, StarIcon, StarOffIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { ScreenHeader } from '@/components/screen-header'
 import { askName, shareItem } from '@/components/vault/actions'
 import { openOutside } from '@/components/vault/outside'
 import { useDragSelect } from '@/components/vault/drag-select'
+import { Fab } from '@/components/vault/fab'
 import { FolderPicker, type PickerDir } from '@/components/vault/folder-picker'
 import { OutsideRow, OutsideTile, chunk } from '@/components/vault/outside-row'
 import { SelectBar } from '@/components/vault/select-bar'
@@ -113,24 +115,28 @@ export default function DriveFolder() {
       }, fail('Unable to remove it'))
     } },
   ]
-  const add = () => showMenu({
-    title: 'Add to Google Drive',
-    items: [
+  const upload = async (files: { uri: string; name: string; mime?: string }[]) => {
+    if (!files.length) return
+    toast({ title: files.length === 1 ? `Uploading ${files[0].name}` : `Uploading ${files.length} files` })
+    const up = await uploadToDrive(files, parent)
+    toast(up.failed ? { title: `${up.done} uploaded, ${up.failed} didn’t`, tone: 'error' }
+      : { title: up.done === 1 ? `${files[0].name} is in your Drive` : `${up.done} files are in your Drive`, tone: 'success' })
+    reload()
+  }
+  const addItems = () => [
+      { label: 'Photos & videos', icon: Image01Icon, onPress: async () => {
+        const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], allowsMultipleSelection: true, selectionLimit: 0, quality: 1 })
+        if (!r.canceled) upload(r.assets.map((a, i) => ({ uri: a.uri, name: a.fileName ?? `${a.type === 'video' ? 'Video' : 'Photo'} ${Date.now()}${i ? `-${i}` : ''}.${a.type === 'video' ? 'mp4' : 'jpg'}`, mime: a.mimeType ?? undefined })))
+      } },
       { label: 'Files from this phone', icon: File01Icon, onPress: async () => {
         const r = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true })
-        if (r.canceled) return
-        toast({ title: r.assets.length === 1 ? `Uploading ${r.assets[0].name}` : `Uploading ${r.assets.length} files` })
-        const up = await uploadToDrive(r.assets.map((a) => ({ uri: a.uri, name: a.name, mime: a.mimeType ?? undefined })), parent)
-        toast(up.failed ? { title: `${up.done} uploaded, ${up.failed} didn’t`, tone: 'error' }
-          : { title: up.done === 1 ? `${r.assets[0].name} is in your Drive` : `${up.done} files are in your Drive`, tone: 'success' })
-        reload()
+        if (!r.canceled) upload(r.assets.map((a) => ({ uri: a.uri, name: a.name, mime: a.mimeType ?? undefined })))
       } },
       { label: 'New folder', icon: FolderAddIcon, onPress: () => askName('New Drive folder', 'Create folder', (n) => newDriveFolder(n, parent).then(() => {
         toast({ title: `${n} is in your Drive`, tone: 'success' })
         reload()
       })) },
-    ],
-  })
+  ]
 
   if (about && !about.connected) {
     return (
@@ -147,7 +153,6 @@ export default function DriveFolder() {
         right={<>
           <IconButton icon={grid ? LeftToRightListBulletIcon : GridViewIcon} accessibilityLabel={grid ? 'Show as a list' : 'Show as a grid'}
             onPress={() => { haptic.tap(); setPrefs({ view: grid ? 'list' : 'grid' }) }} />
-          {(top ? tab === 'root' : true) && <IconButton icon={Add01Icon} accessibilityLabel="Add to this Drive folder" onPress={add} />}
         </>} />
       <GestureDetector gesture={drag.gesture}>
       <View {...drag.wrapProps}>
@@ -157,7 +162,7 @@ export default function DriveFolder() {
         keyExtractor={(row) => row[0].id}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100, flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await reload(); setRefreshing(false) }} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
         ListHeaderComponent={
           <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 12 }}>
@@ -184,6 +189,7 @@ export default function DriveFolder() {
       />
       </View>
       </GestureDetector>
+      {!selecting && (!top || tab === 'root') && <Fab label="Add to this Drive folder" items={addItems} bottom={insets.bottom + 16} />}
       {selecting && (
         <SelectBar count={selected.size} bottom={insets.bottom + 8} onClear={() => setSelected(new Set())} actions={[
           { icon: StarIcon, label: 'Star them in Drive', onPress: () => bulk('Starring', (f) => starDrive(f.id, true), 'Starred in Drive') },

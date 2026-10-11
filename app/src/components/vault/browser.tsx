@@ -20,13 +20,14 @@ import {
 import { useDriveAbout } from '@/lib/drive'
 import { Phone } from '@/lib/phone'
 import { useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, elevation, type MenuItem, haptic, showContextMenu, showMenu, toast } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Press, SearchField, Sheet, Skeleton, Text, SelectDot, confirm, type MenuItem, haptic, showContextMenu, showMenu, toast } from '@/ui'
 
 import { itemActions, itemMenu, moveItems, newFolderSheet, openItem, renameItem, shareItem } from './actions'
 import { Folder, type FolderIconName } from './folder'
 import { FileIcon, KIND_COLOR } from './file-icon'
 import { FolderGlyph } from './file-tile'
 import { DriveLogo } from './drive-logo'
+import { Fab } from './fab'
 import { FilePreview } from './preview'
 import { SelectBar } from './select-bar'
 import { useDragSelect } from './drag-select'
@@ -209,7 +210,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24,
       />
       </View>
       </GestureDetector>
-      {selecting ? <SelectionBar picked={picked} bottom={bottom} onClear={clear} /> : fab && <AddFab parent={parent} bottom={bottom + 12} />}
+      {selecting ? <SelectionBar picked={picked} bottom={bottom} onClear={clear} /> : fab && <Fab label="Add to the vault" items={() => addItems(parent)} bottom={bottom + 12} />}
     </View>
   )
 }
@@ -474,31 +475,6 @@ function Loading({ tile }: { tile: number }) {
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {[0, 1, 2].map((i) => <Skeleton key={i} width={tile} height={tile} radius={14} />)}
       </View>
-    </View>
-  )
-}
-
-// ------------------------------------------------------------------ the floating +
-// Above the nav on the right (as WhatsApp's); its menu grows out of it in place.
-const SIZE = 56
-
-function Face() {
-  const { c } = useTheme()
-  return (
-    <View style={{ width: SIZE, height: SIZE, borderRadius: SIZE / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: c.solidTo, borderWidth: 1, borderColor: c.solidEdge }}>
-      <Icon icon={Add01Icon} size={24} color={c.solidInk} strokeWidth={2} />
-    </View>
-  )
-}
-
-function AddFab({ parent, bottom }: { parent: string; bottom: number }) {
-  const { scheme } = useTheme()
-  const ref = useRef<View>(null)
-  return (
-    <View ref={ref} collapsable={false} style={[{ position: 'absolute', right: 16, bottom, borderRadius: SIZE / 2 }, elevation(scheme)]}>
-      <Press radius={SIZE / 2} smoothing={0} onPress={() => { haptic.tap(); showContextMenu(ref.current, <Face />, addItems(parent)) }} accessibilityLabel="Add to the vault">
-        <Face />
-      </Press>
     </View>
   )
 }
