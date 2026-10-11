@@ -10,7 +10,7 @@ async def test_replies_in_a_burst_go_out_as_one_and_needs_you_kinds_at_once(env,
         sent.append(msg)
     monkeypatch.setattr(push, "_send", send)
     monkeypatch.setattr(push, "BUNDLE_S", 0.05)
-    tess = {"name": "Tess", "avatar_shape": "face:Kai", "color": "#F59E0B"}
+    tess = {"name": "Tess", "avatar_shape": "face:cap", "color": "#F59E0B"}
     dev = {"name": "Dev", "avatar_shape": "robot", "color": "#3B82F6"}
     await push.notify(OWNER, "Tess in Launch", "First **thing**", "proj:p", teammate=tess)
     await push.notify(OWNER, "Dev in Launch", "Second", "proj:p", teammate=dev)
@@ -24,7 +24,7 @@ async def test_replies_in_a_burst_go_out_as_one_and_needs_you_kinds_at_once(env,
     burst = sent[1]
     assert burst["title"] == "Tess and Dev · Launch" and burst["body"] == "Tess: Third (+2 more)"
     assert burst["tag"] == "proj:p" and burst["categoryId"] == "reply" and burst["channelId"] == "tl-chime"
-    assert burst["richContent"]["image"].endswith("/faces/Kai.png?c=F59E0B")
+    assert burst["richContent"]["image"].endswith("/faces/cap.png?c=F59E0B")
 
 
 async def test_only_when_it_needs_me_and_per_chat_settings(env, monkeypatch):
@@ -82,12 +82,10 @@ async def test_fcm_tokens_go_through_firebase_and_expo_tokens_are_the_fallback(e
     assert via == [("fcm", ["fcm-1"])] and [r["token"] for r in fdb.tables["push_tokens"]] == ["ExponentPushToken[x]"]
 
 
-async def test_faces_are_served_from_the_service(api, env, monkeypatch):
-    async def png(seed, color):
-        return b"\x89PNG" + seed.encode() + color.encode()
-    monkeypatch.setattr(push, "face_png", png)
-    r = await api.get("/faces/Kai.png", params={"c": "F59E0B;rm -rf"})
-    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content == b"\x89PNGKaiF59E0B"
+async def test_faces_are_served_from_the_service(api, env):
+    r = await api.get("/faces/cap.png", params={"c": "F59E0B;rm -rf"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content.startswith(b"\x89PNG")
+    assert push._face_key({"name": "Kai", "avatar_shape": "bot"})[0] in push.FACES  # old seeds still get a face
 
 
 def test_drawings_read_as_their_title_in_notifications():

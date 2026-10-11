@@ -1,9 +1,5 @@
-import { createAvatar } from '@dicebear/core'
-import * as notionists from '@dicebear/notionists'
-import { Skia } from '@shopify/react-native-skia'
 import { memo } from 'react'
-import { Image, PixelRatio, Pressable, View } from 'react-native'
-import { SvgXml } from 'react-native-svg'
+import { Image, Pressable, View } from 'react-native'
 import { LaptopIcon, SmartPhone01Icon } from '@hugeicons/core-free-icons'
 
 import type { Teammate } from '@/lib/types'
@@ -13,51 +9,35 @@ import { Icon } from './icon'
 
 export type AvatarState = 'default' | 'working' | 'sleeping'
 
-/** Faces offered in the teammate editor (besides their name's own). Stable seeds, so a rename keeps the face. */
-export const FACE_SEEDS = ['Nova', 'Milo', 'Juno', 'Ezra', 'Iris', 'Otto', 'Remy', 'Luna', 'Kai', 'Zoe', 'Theo']
-
-/**
- * Which face a teammate has. `avatar_shape` is `face:<seed>` once picked in the editor; older teammates
- * still carry a bot shape name there, and get the face their name draws.
- */
-export const faceSeed = (t: Pick<Teammate, 'avatar_shape' | 'name'>) =>
-  t.avatar_shape.startsWith('face:') ? t.avatar_shape.slice(5) : t.name || 'Teammate'
-
-const svgs = new Map<string, string>()
-/** DiceBear Notionists (CC0) on the teammate's colour, cached: the same few faces repeat across the app. */
-function faceSvg(seed: string, color: string) {
-  const key = `${seed}|${color}`
-  let svg = svgs.get(key)
-  if (!svg) {
-    svg = createAvatar(notionists, { seed, backgroundColor: [color.replace('#', '')], radius: 50 }).toString()
-    svgs.set(key, svg)
-  }
-  return svg
+/** Tubelight's own hand-drawn faces (`assets/avatars`, ink on transparent, drawn on the teammate's colour). */
+const FACES = {
+  bob: require('../../assets/avatars/bob.png'),
+  hoodie: require('../../assets/avatars/hoodie.png'),
+  wavy: require('../../assets/avatars/wavy.png'),
+  boy: require('../../assets/avatars/boy.png'),
+  braid: require('../../assets/avatars/braid.png'),
+  glasses: require('../../assets/avatars/glasses.png'),
+  ponytail: require('../../assets/avatars/ponytail.png'),
+  cap: require('../../assets/avatars/cap.png'),
+  curly: require('../../assets/avatars/curly.png'),
+  puppy: require('../../assets/avatars/puppy.png'),
+  husky: require('../../assets/avatars/husky.png'),
+  cat: require('../../assets/avatars/cat.png'),
 }
+export type Face = keyof typeof FACES
+/** Faces offered in the teammate editor. Same list and order as the agent's `push.FACES`. */
+export const FACE_SEEDS = Object.keys(FACES) as Face[]
 
-const pngs = new Map<string, string | null>()
 /**
- * The face as a PNG data URI, drawn once per seed, colour and size with Skia's native SVG renderer and cached.
- * Plain images decode off the JS thread and scroll for free; a dozen live SVG trees stalled the teammate sheet.
- * null when Skia can't draw it (then the SVG is used).
+ * Which face a teammate has. `avatar_shape` is `face:<face>` once picked in the editor; anything else (older
+ * seeds, legacy bot shapes) maps to a face by a hash of the seed, the same one the agent uses for notifications.
  */
-function facePng(seed: string, color: string, size: number) {
-  const px = Math.round(size * PixelRatio.get())
-  const key = `${seed}|${color}|${px}`
-  if (pngs.has(key)) return pngs.get(key)!
-  let uri: string | null = null
-  try {
-    const svg = Skia.SVG.MakeFromString(faceSvg(seed, color))
-    const surface = svg && Skia.Surface.Make(px, px)
-    if (svg && surface) {
-      surface.getCanvas().drawSvg(svg, px, px)
-      uri = `data:image/png;base64,${surface.makeImageSnapshot().encodeToBase64()}`
-    }
-  } catch {
-    uri = null
-  }
-  pngs.set(key, uri)
-  return uri
+export const faceSeed = (t: Pick<Teammate, 'avatar_shape' | 'name'>): Face => {
+  const seed = t.avatar_shape.startsWith('face:') ? t.avatar_shape.slice(5) : t.name || 'Teammate'
+  if (seed in FACES) return seed as Face
+  let h = 0
+  for (const ch of seed) h += ch.codePointAt(0)!
+  return FACE_SEEDS[h % FACE_SEEDS.length]
 }
 
 export interface TeammateAvatarProps {
@@ -72,14 +52,13 @@ export interface TeammateAvatarProps {
   onPress?: () => void
 }
 
-/** Every teammate's face goes through here: a static DiceBear Notionists portrait. */
+/** Every teammate's face goes through here: a static hand-drawn portrait on their colour. */
 export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40, state = 'default', onPress }: TeammateAvatarProps) {
   const { c } = useTheme()
   const working = state === 'working'
   // A linked computer's own chat (agent computers.py) or the phone's (agent phone.py): an icon, not a face.
   const phone = teammate.avatar_shape === 'phone'
   const device = phone || teammate.avatar_shape.startsWith('device:')
-  const png = device ? null : facePng(faceSeed(teammate), teammate.color, size)
   const face = (
     <View
       style={{ width: size, height: size, opacity: state === 'sleeping' ? 0.5 : 1 }}
@@ -87,15 +66,13 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
       accessibilityRole={onPress ? 'button' : 'image'}
       accessibilityLabel={working ? `${teammate.name}, working` : teammate.name}
     >
-      {device ? (
-        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: teammate.color || '#64748b', alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: teammate.color || '#64748b', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {device ? (
           <Icon icon={phone ? SmartPhone01Icon : LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
-        </View>
-      ) : png ? (
-        <Image source={{ uri: png }} style={{ width: size, height: size }} fadeDuration={0} />
-      ) : (
-        <SvgXml xml={faceSvg(faceSeed(teammate), teammate.color)} width={size} height={size} />
-      )}
+        ) : (
+          <Image source={FACES[faceSeed(teammate)]} style={{ width: size, height: size }} fadeDuration={0} />
+        )}
+      </View>
       {working && (
         <View
           pointerEvents="none"

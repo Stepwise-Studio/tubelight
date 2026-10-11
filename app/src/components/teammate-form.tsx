@@ -54,12 +54,12 @@ const followName = (d: TeammateDraft, name: string) => (!d.handle || d.handle ==
 
 export const sameDraft = (a: TeammateDraft, b: TeammateDraft) => JSON.stringify(a) === JSON.stringify(b)
 
-/** The look, at the top next to the name: a strip of Notionists faces on the chosen colour, then the colours. */
+/** The look, at the top next to the name: a strip of faces on the chosen colour, then the colours. */
 function LookPicker({ draft, onChange }: { draft: TeammateDraft; onChange: (d: Partial<TeammateDraft>) => void }) {
   const { c } = useTheme()
   const ready = useSheet()?.ready ?? true
   const current = faceSeed({ ...draft, name: draft.name || 'Teammate' })
-  const seeds = [draft.name.trim() || 'Teammate', ...FACE_SEEDS]
+  const seeds = FACE_SEEDS
   const size = 60
   return (
     <View style={{ gap: 16 }}>
@@ -77,7 +77,7 @@ function LookPicker({ draft, onChange }: { draft: TeammateDraft; onChange: (d: P
             <Pressable
               key={`${i}-${seed}`}
               accessibilityRole="radio"
-              accessibilityLabel={i === 0 ? 'Face from their name' : `Face ${i + 1}`}
+              accessibilityLabel={`Face ${i + 1}`}
               accessibilityState={{ checked: on }}
               onPress={() => { if (!on) { haptic.tap(); onChange({ avatar_shape: `face:${seed}` }) } }}
               style={{ width: size + 8, height: size + 8, borderRadius: size, padding: 2, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}

@@ -17,7 +17,7 @@ export interface Teammate {
   system_prompt: string
   model: string
   allowed_toolkits: string[]
-  /** `face:<seed>` (a Notionists face) or a legacy bot shape name. */
+  /** `face:<seed>` (one of `ui/avatar` FACES) or a legacy bot shape name. */
   avatar_shape: string
   color: string
   created_at: string

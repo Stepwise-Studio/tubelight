@@ -50,7 +50,7 @@ root. Next.js or Vite both fine.
 | Icons | **Hugeicons** — `@hugeicons/react` + `@hugeicons/core-free-icons` | Same set as Stepwise UI. Never mix in Lucide/Heroicons |
 | Class merging | `clsx` + `tailwind-merge` (`cn()`), installed by Stepwise | |
 | Motion | CSS transitions with the tokens in `assets/tokens.css` first; `motion` (motion/react) only for springs, layout and gesture animations | Most motion here is short and simple; CSS is enough |
-| Avatars (people / agents) | DiceBear **Notionists** (`@dicebear/core`, `@dicebear/collection`), static SVG per seed + colour | Friendly, consistent, no stock photos |
+| Avatars (people / agents) | Tubelight's own hand-drawn faces (black ink PNGs on transparent, `app/assets/avatars`) on the teammate's colour circle | Friendly, consistent, no stock photos |
 | Rare delight | libraries.dev web components (border beam, thinking orbs, voice glow) | At most one or two places in a whole product (see §8) |
 
 Required global CSS (Stepwise is class-based dark mode — without this every `dark:` class silently does nothing):

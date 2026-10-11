@@ -9,7 +9,7 @@
 - the user's choices (Profile and each chat's menu): `mode` all | needed (only what waits on them: approvals,
   questions, connects, alerts) | off, per chat or for everything; `sound` = which of the app's channels it rings on
   (each Android channel has its sound fixed at creation, so one channel per sound, ids `tl-<sound>`).
-- the teammate's face shows on the notification (DiceBear's PNG of the same seed and colour as in the app).
+- the teammate's face shows on the notification (the app's own drawing, `app/faces`, on the teammate's colour).
 Delivery: an Android phone registers its Firebase (FCM) token and gets data-only messages sent straight through FCM
 (FCM_SERVICE_ACCOUNT_B64, the Firebase service account): expo-notifications draws those itself, with the buttons,
 the sound channel, the per-chat tag and the face (app/patches: the face from `data.image`). Expo's push service
@@ -19,6 +19,8 @@ Best effort throughout: a failed push never breaks a run.
 """
 import asyncio
 import base64
+import functools
+import io
 import json
 import logging
 import re
@@ -67,59 +69,42 @@ def wanted(p: dict[str, Any], thread_id: str, kind: str) -> bool:
     return mode == "all" or (mode == "needed" and kind in NEEDS_YOU)
 
 
+# Same list and order as the app's `ui/avatar.tsx` FACES (the hash below must pick the same face).
+FACES = ["bob", "hoodie", "wavy", "boy", "braid", "glasses", "ponytail", "cap", "curly", "puppy", "husky", "cat"]
+
+
 def _face_key(tm: dict[str, Any]) -> tuple[str, str]:
-    """(seed, colour) of a teammate's face: the same DiceBear Notionists face the app draws."""
+    """(face, colour) of a teammate: the same face the app draws (older seeds map to one by a hash)."""
     shape = tm.get("avatar_shape") or ""
     seed = shape[5:] if shape.startswith("face:") else tm.get("name") or "Teammate"
-    return seed, re.sub(r"[^0-9a-fA-F]", "", tm.get("color") or "a1a1aa")[:6] or "a1a1aa"
+    face = seed if seed in FACES else FACES[sum(map(ord, seed)) % len(FACES)]
+    return face, re.sub(r"[^0-9a-fA-F]", "", tm.get("color") or "a1a1aa")[:6] or "a1a1aa"
 
 
 def face(tm: dict[str, Any] | None) -> str | None:
-    """The teammate's face as a PNG URL on this service (/faces, a cached copy of DiceBear's PNG): DiceBear's CDN
-    often stalls from a phone, and the phone gives up on an image after 8 s."""
+    """The teammate's face as a PNG URL on this service (/faces)."""
     if not tm or (tm.get("avatar_shape") or "").startswith("device:"):  # a computer's chat has no face
         return None
     seed, color = _face_key(tm)
     return f"{config.PUBLIC_URL}/faces/{quote(seed, safe='')}.png?c={color}"
 
 
-def _face_file(seed: str, color: str):
+@functools.lru_cache(maxsize=256)
+def face_png(seed: str, color: str) -> bytes:
+    """The face drawn on a circle of the teammate's colour, 128 px."""
+    from PIL import Image, ImageDraw
     from pathlib import Path
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", seed)[:60]
-    return Path(config.WORKSPACES).parent / "faces" / f"{safe}-{color}.png"
-
-
-async def face_png(seed: str, color: str) -> bytes:
-    """DiceBear's PNG for a face, fetched once per seed and colour and kept on disk (it outlives redeploys).
-    DiceBear can stall for many seconds, so it's tried a few times; prewarm_faces fetches them ahead of time."""
-    f = _face_file(seed, color)
-    if f.exists():
-        return f.read_bytes()
-    url = f"https://api.dicebear.com/9.x/notionists/png?seed={quote(seed)}&backgroundColor={color}&radius=50&size=128"
-    last: Exception | None = None
-    for _ in range(3):
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=15)) as c:
-                r = await c.get(url)
-            r.raise_for_status()
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_bytes(r.content)
-            return r.content
-        except httpx.HTTPError as e:
-            last = e
-    raise last or httpx.HTTPError("no face")
-
-
-async def prewarm_faces() -> None:
-    """Every teammate's face on disk before the first notification needs it (run at startup, best effort)."""
-    try:
-        for tm in await db.select("teammates", {"select": "name,avatar_shape,color"}):
-            try:
-                await face_png(*_face_key(tm))
-            except httpx.HTTPError:
-                pass
-    except Exception as e:
-        log.warning("face prewarm failed: %s", e)
+    face = seed if seed in FACES else _face_key({"name": seed})[0]
+    ink = Image.open(Path(__file__).parent / "faces" / f"{face}.png").convert("RGBA").resize((128, 128), Image.LANCZOS)
+    out = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    disc = Image.new("RGBA", (128, 128), "#" + color)
+    disc.alpha_composite(ink)
+    mask = Image.new("L", (128, 128), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 127, 127), 255)
+    out.paste(disc, (0, 0), mask)
+    buf = io.BytesIO()
+    out.save(buf, "PNG")
+    return buf.getvalue()
 
 
 def plain(text: str) -> str:
@@ -239,10 +224,6 @@ async def notify(owner_id: str, title: str, body: str, thread_id: str, *, kind: 
     if not wanted(p, thread_id, kind):
         return
     body = genui.plain(body)
-    if teammate and not _face_file(*_face_key(teammate)).exists():  # fetch it now, so it's there when the phone asks
-        t = asyncio.create_task(face_png(*_face_key(teammate)))
-        _tasks.add(t)
-        t.add_done_callback(lambda task: (_tasks.discard(task), task.exception()))
     if kind != "reply":
         data = {"thread_id": thread_id, **({"approval_id": approval_id} if approval_id else {})}
         await _send(owner_id, _message(p, title, plain(body), data, kind, approval_id or f"{thread_id}:{kind}", face(teammate)))
