@@ -124,11 +124,11 @@ function Overview({ bottom, onPeople }: { bottom: number; onPeople: () => void }
 
       {o.open.length > 0 && (
         <FactGroup title="Open" facts={o.open} onOpen={open}
-          meta={(f) => [f.about, f.due ? `due ${shortDate(f.due)}` : null].filter(Boolean).join(' · ')} />
+          meta={(f) => [f.entity === o.you.id ? 'You' : f.about, f.due ? `due ${shortDate(f.due)}` : null].filter(Boolean).join(' · ')} />
       )}
 
       <FactGroup title="Recently learned" facts={o.recent} onOpen={open}
-        meta={(f) => [f.about, heardFrom(f.origin, o.you.name), ago(f.learned_at)].filter(Boolean).join(' · ')} />
+        meta={(f) => [f.entity === o.you.id ? 'You' : f.about, heardFrom(f.origin, [o.you.name, ...o.you.aliases]), ago(f.learned_at)].filter(Boolean).join(' · ')} />
 
       {o.people.length > 0 && (
         <View style={{ gap: 8 }}>

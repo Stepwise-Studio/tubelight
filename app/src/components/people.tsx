@@ -74,12 +74,12 @@ export function PeopleList({ bottom }: { bottom: number }) {
 }
 
 /** Where a fact was first heard, in a few words: "you, in a chat", "Shelby", "Saqlain on a call", "earlier notes". */
-export function heardFrom(o: { source: string; speaker: string } | null, you: string) {
+export function heardFrom(o: { source: string; speaker: string } | null, you: string[]) {
   if (!o) return ''
   if (o.source === 'import') return 'earlier notes'
   if (o.source === 'note') return o.speaker === 'the user' ? 'your correction' : `${o.speaker}'s note`
   const who = o.speaker.replace(/^caller /, '').replace(/ \(.*\)$/, '').replace(/^app /, '')
   if (o.source === 'call') return `${who} on a call`
   if (o.speaker.startsWith('app ')) return `an app (${who.toLowerCase()})`
-  return who === you ? 'you, in a chat' : `${who}, in a chat`
+  return you.includes(who) ? 'you, in a chat' : `${who}, in a chat`
 }
