@@ -436,11 +436,25 @@ def looping(text: str) -> bool:
     return bool(m) and len(set(m.group(1))) > 1
 
 
+def said(m: BaseMessage) -> str:
+    """A reply's text. Gemini can answer in several text parts, which `.text` runs together ("Timer stopped.Timer
+    cancelled."): parts that meet without a space get one."""
+    if not isinstance(m.content, list):
+        return m.text
+    out = ""
+    for b in m.content:
+        t = b if isinstance(b, str) else b.get("text", "") if isinstance(b, dict) and b.get("type", "text") == "text" else ""
+        if out and t and not out[-1].isspace() and not t[0].isspace():
+            out += " "
+        out += t
+    return out
+
+
 async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], stream_id: str) -> AIMessage:
     acc, sent, last = None, "", 0.0
     async for chunk in model.astream(messages):
         acc = chunk if acc is None else acc + chunk
-        text = acc.text
+        text = said(acc)
         if looping(text):  # stop now: never stream or save the garbage
             raise StreamCut(f"reply got stuck repeating itself after {len(text)} chars")
         if text and not sent:
@@ -448,14 +462,14 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
         if text != sent and time.monotonic() - last >= DELTA_EVERY:
             await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": text})
             sent, last = text, time.monotonic()
-    if acc is None or (not acc.text.strip() and not acc.tool_calls):
+    if acc is None or (not said(acc).strip() and not acc.tool_calls):
         # Nothing at all (a free tier's hiccup): retry rather than stay silent; an automation would read as "quiet".
         raise StreamCut("the reply came back empty")
-    if acc.text and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
+    if said(acc) and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
         # The stream stopped mid-reply with no error (free tiers do this): never save the fragment as the answer.
-        raise StreamCut(f"reply stream ended without finishing after {len(acc.text)} chars")
-    if acc.text and acc.text != sent:
-        await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": acc.text})
+        raise StreamCut(f"reply stream ended without finishing after {len(said(acc))} chars")
+    if said(acc) and said(acc) != sent:
+        await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": said(acc)})
     return AIMessage(content=acc.content, tool_calls=acc.tool_calls, id=acc.id or str(uuid.uuid4()),
                      response_metadata=acc.response_metadata, usage_metadata=acc.usage_metadata)
 
@@ -508,7 +522,7 @@ def make_teammate(ctx: RunCtx, tm: dict):
                     f"tools you have ({', '.join(t.name for t in tools) or 'none'}) with exactly their parameters, "
                     "or answer in text.]", name="system_note")]
         ai.name = tm["handle"]
-        text = ai.text.strip()
+        text = said(ai).strip()
         done = {**_ids(ctx, tm), "stream_id": stream_id}
         if ai.tool_calls or not text:
             if text or not ai.tool_calls:  # streamed tool-call chatter or an empty reply: no DB row follows

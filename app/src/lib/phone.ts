@@ -24,7 +24,7 @@ export function phoneLabel(a: PhoneAction): string {
     case 'snooze': return 'Snooze the alarm'
     case 'timer': return `Timer ${a.seconds && a.seconds >= 60 ? `${Math.round(a.seconds / 60)} min` : `${a.seconds} s`}`
     case 'timers': return 'Open your timers'
-    case 'timer_off': return 'Stop the timer'
+    case 'timer_off': return 'Open your timers'
     case 'call': return `Call ${who}`
     case 'text': return `Text ${who}`
     case 'sms': return `Send SMS to ${who}`
@@ -39,7 +39,7 @@ export function phoneLabel(a: PhoneAction): string {
     case 'settings': return `Open ${a.text ?? ''} settings`.replace('  ', ' ')
     case 'panel': return `Open ${a.text ?? ''}`
     case 'flashlight': return `Flashlight ${a.text === 'off' ? 'off' : 'on'}`
-    case 'volume': return `${a.text || 'Media'} volume ${a.level ?? 0}%`
+    case 'volume': return `${a.text ? a.text[0].toUpperCase() + a.text.slice(1) : 'Media'} volume ${a.level ?? 0}%`
     case 'dnd': return `Do Not Disturb ${a.text === 'off' ? 'off' : 'on'}`
     case 'brightness': return `Brightness ${a.level ?? 0}%`
     case 'media': return a.text ? a.text[0].toUpperCase() + a.text.slice(1) : 'Play/pause'

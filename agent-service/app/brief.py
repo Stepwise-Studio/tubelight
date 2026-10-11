@@ -49,7 +49,8 @@ below (they include the user's other chats, so news here can settle a condition 
 - cancel: pending follow-ups the new messages show are no longer needed (already done, dropped, replaced).
 A progress update ("still working on it") changes nothing when a pending follow-up already covers it. Recurring or
 standing requests (every morning, every 3 hours, whenever X happens) are automations the teammates set up, not
-follow-ups: never add those. Casual chat changes nothing. Write about {user} by name, never as he or she.
+follow-ups: never add those. Alarms, timers and calendar events set on the phone ring by themselves: never add a
+follow-up for them. Casual chat changes nothing. Write about {user} by name, never as he or she.
 
 Reply with JSON only:
 {{"brief": "...",

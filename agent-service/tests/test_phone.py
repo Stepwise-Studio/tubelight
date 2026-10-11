@@ -68,3 +68,11 @@ def test_sends_and_app_tasks_wait_for_approval():
     from app import tools
     assert tools.classify("phone_send") == "act" and tools.classify("phone_use_app") == "act"
     assert tools.title("phone_use_app", {"app": "Swiggy", "task": "Reorder my last order"}) == "Use Swiggy on your phone: Reorder my last order"
+
+
+def test_reply_parts_get_a_space_between_them():
+    from langchain_core.messages import AIMessage
+    from app.graph import said
+    assert said(AIMessage(content=[{"type": "text", "text": "Timer stopped."}, {"type": "text", "text": "Opened your timers."}])) \
+        == "Timer stopped. Opened your timers."
+    assert said(AIMessage(content="plain")) == "plain"

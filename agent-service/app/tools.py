@@ -487,13 +487,15 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools.append(StructuredTool.from_function(
             coroutine=phone_action, name="phone_action",
             description=(
-                "Do something on their phone right now: alarm (when: HH:MM), alarms (open their alarm list), alarm_off "
-                "(when: HH:MM, or title: its label, or neither for the next/ringing one), snooze, timer (seconds), timers, "
-                "timer_off, call / text / whatsapp (name from their contacts, or number; text), email (to, title, text), "
+                "Do something on their phone right now: alarm (when: HH:MM, title: its name if they gave one), alarms "
+                "(open their alarm list), alarm_off (when: HH:MM, or title, or neither for the ringing/next one; on a "
+                "Samsung this only opens the alarm list for them to switch it off: say that), snooze, timer (seconds), "
+                "timers, timer_off (no app can cancel a running timer: this opens their timers to stop it, say so), "
+                "call / text / whatsapp (name from their contacts, or number; text), email (to, title, text), "
                 "navigate (place), calendar (title, when + end as date-times, place), open_app (app), open_url (url), "
                 "search (text), flashlight (text: on/off), volume (level 0-100, text: media/ring/alarm/notification), "
                 "dnd (text: on/off), brightness (level 0-100), media (text: play/pause/next/previous/stop), play (text: what, "
-                "app: Spotify/YouTube Music/JioSaavn), photo (opens the camera), panel (text: wifi/internet/bluetooth/"
+                "app: Spotify/YouTube Music/Apple Music/JioSaavn), photo (opens the camera), panel (text: wifi/internet/bluetooth/"
                 "airplane/battery saver/location/volume: apps can't switch these, so their panel opens), settings (text: "
                 "storage, battery, wifi, bluetooth, display, apps, sound, location). For a reminder at a later time use a "
                 "follow-up instead (it pings them then); for their Google Calendar use the calendar app if connected.")))

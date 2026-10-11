@@ -217,12 +217,16 @@ class PhoneModule : Module() {
         val i = Intent(android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).putExtra(SearchManager.QUERY, str(a, "text"))
           .putExtra(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
         val want = str(a, "app").lowercase()
-        MUSIC.entries.firstOrNull { want.isNotEmpty() && want.contains(it.key) }?.let { i.setPackage(it.value) }
+        // The app they named, if it's installed; otherwise whatever plays music here (Android asks if there's a choice).
+        MUSIC.entries.firstOrNull { want.isNotEmpty() && want.contains(it.key) }?.value
+          ?.takeIf { context.packageManager.getLaunchIntentForPackage(it) != null }?.let { i.setPackage(it) }
         start(i); return "Playing ${str(a, "text")}"
       }
       "timers" -> { start(Intent(AlarmClock.ACTION_SHOW_TIMERS)); return "Timers opened" }
-      "timer_off" -> { start(Intent(AlarmClock.ACTION_DISMISS_TIMER)); return "Timer stopped" }
-      "snooze" -> { start(Intent(AlarmClock.ACTION_SNOOZE_ALARM)); return "Alarm snoozed" }
+      // Android can only silence a timer that's ringing (and Samsung's clock ignores even that), never cancel a running
+      // countdown: the timers open for them to stop it.
+      "timer_off" -> { start(Intent(AlarmClock.ACTION_SHOW_TIMERS)); return "Opened your timers: stop it there" }
+      "snooze" -> { start(Intent(AlarmClock.ACTION_SNOOZE_ALARM)); return "Asked the clock to snooze it" }
       "alarm_off" -> { // a ringing alarm, or one by time or label; whether the clock app obeys is up to it
         val i = Intent(AlarmClock.ACTION_DISMISS_ALARM)
         when {
@@ -232,7 +236,9 @@ class PhoneModule : Module() {
             .putExtra(AlarmClock.EXTRA_MESSAGE, str(a, "title"))
           else -> i.putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_NEXT)
         }
-        start(i); return "Alarm turned off"
+        start(i)
+        // Samsung's clock answers with the alarm list rather than turning one off (checked on a Galaxy, 2026-10-11).
+        return if (Build.MANUFACTURER.equals("samsung", true)) "Opened your alarms: switch it off there" else "Asked the clock to turn it off"
       }
       "photo" -> { start(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); return "Camera opened" }
       "panel" -> { // the switches apps can't flip themselves (Android 10+): their own panel opens
@@ -336,6 +342,7 @@ class PhoneModule : Module() {
 
   companion object {
     private val MUSIC = mapOf("spotify" to "com.spotify.music", "youtube" to "com.google.android.apps.youtube.music",
+      "apple" to "com.apple.android.music",
       "jiosaavn" to "com.jio.media.jiobeats", "saavn" to "com.jio.media.jiobeats", "amazon" to "com.amazon.mp3", "wynk" to "com.bsbportal.music")
     private const val RING_ID = 4711
     private const val RING_CHANNEL = "tl-ring"

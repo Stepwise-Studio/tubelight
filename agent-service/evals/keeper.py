@@ -42,6 +42,10 @@ def cond(p, *words):
 
 # (name, pending follow-ups, new messages, check)
 CASES = [
+    ("a phone alarm or timer is no follow-up (the phone rings itself)", "(none)",
+     ["Akhil: start a 2 minute timer", "Shelby: Timer set for 2 minutes.", "Akhil: and set an alarm for 6am tomorrow",
+      "Shelby: Alarm set for 6:00 AM."],
+     lambda p: not adds(p)),
     ("group agrees on a time", "(none)",
      ["Akhil: let's circle back on the launch copy at 6pm today", "Sol: works for me"],
      lambda p: at(p, 28, 18, 18) and len(adds(p)) == 1),
