@@ -5,7 +5,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Add01Icon } from '@hugeicons/core-free-icons'
 
-import { ColorSwatches, FormSection, SheetHeader, TeammateToggles } from '@/components/form-bits'
+import { ColorSwatches, FormSection, GroupIconPicker, SheetHeader, TeammateToggles } from '@/components/form-bits'
 import { RepoPicker } from '@/components/repo-picker'
 import { openSheet, useSheet } from '@/components/sheet-screen'
 import { api } from '@/lib/api'
@@ -26,6 +26,7 @@ export function NewProject() {
   const [description, setDescription] = useState('')
   const [repo, setRepo] = useState<string | null>(null)
   const [color, setColor] = useState(COLORS[1].value)
+  const [icon, setIcon] = useState('group')
   const [members, setMembers] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<{ name?: string }>({})
   const [saving, setSaving] = useState(false)
@@ -39,7 +40,7 @@ export function NewProject() {
     if (Object.keys(e).length) return
     setSaving(true)
     const { data, error } = await supabase.from('projects')
-      .insert({ name: name.trim(), description: description.trim(), color })
+      .insert({ name: name.trim(), description: description.trim(), color, icon })
       .select().single()
     if (error) { setSaving(false); toast({ title: 'Unable to create the project', body: 'Check your connection and try again.', tone: 'error' }); return }
     const project = data as Project
@@ -67,8 +68,9 @@ export function NewProject() {
         <FormSection title="Repository" hint="Optional. Teammates here read it and keep up with its changes.">
           <RepoPicker value={repo} onChange={setRepo} />
         </FormSection>
-        <FormSection title="Colour">
+        <FormSection title="Look">
           <ColorSwatches colors={COLORS} value={color} onChange={setColor} />
+          <GroupIconPicker color={color} value={icon} onChange={setIcon} />
         </FormSection>
         <FormSection title="Members" hint={ws.teammates.length ? 'Who’s in the chat. You can change this later.' : undefined}>
           {ws.teammates.length ? (

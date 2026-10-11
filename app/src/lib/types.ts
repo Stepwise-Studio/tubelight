@@ -31,6 +31,8 @@ export interface Project {
   description: string
   repo_url: string | null
   color: string
+  /** A GROUP_ICONS key (components/thread-avatar.tsx); null = the default. */
+  icon: string | null
   created_at: string
   updated_at: string
 }

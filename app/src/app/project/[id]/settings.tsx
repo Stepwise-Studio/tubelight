@@ -10,7 +10,7 @@ import {
   SourceCodeIcon, UserAdd01Icon, UserRemove01Icon, WebhookIcon,
 } from '@hugeicons/core-free-icons'
 
-import { CodeBlock, ColorSwatches, FormSection, RowWithAction, TeammateToggles } from '@/components/form-bits'
+import { CodeBlock, ColorSwatches, FormSection, GroupIconPicker, RowWithAction, TeammateToggles } from '@/components/form-bits'
 import { MemoryList } from '@/components/memory-list'
 import { AutomationRows } from '@/components/automation-rows'
 import { RepoPicker, repoStatusLine, useRepoKnowledge } from '@/components/repo-picker'
@@ -189,9 +189,10 @@ function Details({ p }: { p: Project }) {
   const [name, setName] = useState(p.name)
   const [description, setDescription] = useState(p.description)
   const [color, setColor] = useState(p.color)
+  const [icon, setIcon] = useState(p.icon)
   const [errors, setErrors] = useState<{ name?: string }>({})
   const [saving, setSaving] = useState(false)
-  const dirty = name !== p.name || description !== p.description || color !== p.color
+  const dirty = name !== p.name || description !== p.description || color !== p.color || icon !== p.icon
 
   const save = async () => {
     const e: typeof errors = {}
@@ -200,7 +201,7 @@ function Details({ p }: { p: Project }) {
     if (Object.keys(e).length) return
     setSaving(true)
     const { error } = await supabase.from('projects')
-      .update({ name: name.trim(), description: description.trim(), color, updated_at: new Date().toISOString() })
+      .update({ name: name.trim(), description: description.trim(), color, icon, updated_at: new Date().toISOString() })
       .eq('id', p.id)
     if (!error) await ws.refresh()
     setSaving(false)
@@ -213,9 +214,10 @@ function Details({ p }: { p: Project }) {
       <TextField label="Name" value={name} onChangeText={setName} error={errors.name} maxLength={60} />
       <TextField label="Description" value={description} onChangeText={setDescription} placeholder="What the team is working on" multiline showCount maxLength={280} />
       <ColorSwatches colors={COLORS} value={color} onChange={setColor} />
+      <GroupIconPicker color={color} value={icon} onChange={setIcon} />
       {dirty && (
         <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
-          <Button label="Discard" variant="ghost" onPress={() => { setName(p.name); setDescription(p.description); setColor(p.color); setErrors({}) }} />
+          <Button label="Discard" variant="ghost" onPress={() => { setName(p.name); setDescription(p.description); setColor(p.color); setIcon(p.icon); setErrors({}) }} />
           <Button label="Save details" loading={saving} onPress={save} />
         </View>
       )}

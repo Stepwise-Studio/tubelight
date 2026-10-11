@@ -6,6 +6,7 @@ import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { Grabber, useSheet } from '@/components/sheet-screen'
+import { GROUP_ICONS, GroupAvatar } from '@/components/thread-avatar'
 import type { Teammate } from '@/lib/types'
 import { motion, radius, useTheme } from '@/theme'
 import { Icon, IconButton, Press, TeammateAvatar, Text, Toggle, haptic } from '@/ui'
@@ -63,6 +64,32 @@ export function ColorSwatches({ colors, value, onChange }: { colors: { value: st
             hitSlop={4}
           >
             <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: col.value, borderWidth: 1, borderColor: c.imageOutline }} />
+          </Pressable>
+        )
+      })}
+    </View>
+  )
+}
+
+/** A group's picture: every icon drawn on the chosen colour, so the picker is its own preview. */
+export function GroupIconPicker({ color, value, onChange }: { color: string; value: string | null; onChange: (v: string) => void }) {
+  const { c } = useTheme()
+  const current = value && value in GROUP_ICONS ? value : 'group'
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Icon">
+      {Object.keys(GROUP_ICONS).map((k) => {
+        const on = k === current
+        return (
+          <Pressable
+            key={k}
+            accessibilityRole="radio"
+            accessibilityLabel={`${k} icon`}
+            accessibilityState={{ checked: on }}
+            onPress={() => { if (!on) { haptic.tap(); onChange(k) } }}
+            style={{ padding: 2, borderRadius: 16, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}
+            hitSlop={2}
+          >
+            <GroupAvatar color={color} icon={k} size={40} />
           </Pressable>
         )
       })}
