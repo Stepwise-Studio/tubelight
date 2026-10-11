@@ -109,7 +109,7 @@ async def test_names_and_numbers_resolve_to_one_person(m):
                                       "quote": "mobile +91 98450 12345"}]})
     assert len(await mem._q("select id from mem_entities where owner = %s and kind = 'person'", owner)) == 1
     by_number = await mem.recall(owner, "who is calling?", phone="09845012345")
-    assert "cofounder" in by_number and "98450 12345" in by_number and "unconfirmed" in by_number
+    assert "cofounder" in by_number and "98450 12345" in by_number and "unconfirmed" in by_number  # a contact card (app), not a call
 
 
 async def test_a_fuller_name_joins_the_known_nickname(m):
@@ -183,3 +183,14 @@ async def test_a_fact_about_a_name_instead_of_an_id_still_lands(m):
                                             "quote": "contract is for the Pune lease"}]})
     assert out["facts"] == 1
     assert len(await mem._q("select id from mem_entities where owner = %s and kind = 'person'", owner)) == 1
+
+
+async def test_recall_finds_someone_by_a_name_only_their_facts_use(m):
+    _, owner = m
+    a = await episode(owner, "Vik is my cofounder. Vikram Rao wants the board update")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Vik", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Vik is Jayanth's cofounder", "episode": 1, "quote": "my cofounder"},
+                                     {"about": "n1", "text": "Vikram Rao wants the board update", "episode": 1,
+                                      "quote": "wants the board update"}]})
+    text = await mem.recall(owner, "Who is Vikram Rao to me?")
+    assert "Vik (person" in text and "cofounder" in text
