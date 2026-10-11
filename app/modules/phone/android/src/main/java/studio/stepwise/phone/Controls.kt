@@ -69,8 +69,27 @@ object Controls {
     return "Brightness ${level.coerceIn(1, 100)}%"
   }
 
-  /** The media keys, as headphones send them: whatever is playing answers. */
+  /**
+   * Play, pause, skip. With notification access it tells the player itself (the app that last had music up, even if
+   * nothing has played since the phone started, when media keys go nowhere); otherwise it sends the media keys.
+   */
   fun media(c: Context, what: String): String {
+    val session = try {
+      (c.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager)
+        .getActiveSessions(ComponentName(c, NotificationsService::class.java)).firstOrNull()
+    } catch (_: SecurityException) { null }
+    if (session != null) {
+      val t = session.transportControls
+      val app = try { c.packageManager.getApplicationLabel(c.packageManager.getApplicationInfo(session.packageName, 0)).toString() } catch (_: Exception) { session.packageName }
+      return when {
+        "next" in what || "skip" in what -> { t.skipToNext(); "Next track in $app" }
+        "prev" in what || "back" in what -> { t.skipToPrevious(); "Previous track in $app" }
+        "pause" in what -> { t.pause(); "Paused $app" }
+        "stop" in what -> { t.stop(); "Stopped $app" }
+        "play" in what || "resume" in what -> { t.play(); "Playing in $app" }
+        else -> if (session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING) { t.pause(); "Paused $app" } else { t.play(); "Playing in $app" }
+      }
+    }
     val am = c.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val (code, said) = when {
       "next" in what || "skip" in what -> KeyEvent.KEYCODE_MEDIA_NEXT to "Next track"
