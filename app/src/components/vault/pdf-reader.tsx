@@ -96,11 +96,18 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   const side = 0 // the page tray floats over the pages; they keep their size
   const base = width - 24 - side // a page's width at zoom 1
   const pw = base * zoom
+  // Pages keep their size against the document's usual page (the median width): a receipt-sized page shows small and
+  // centred instead of blown up to full width; wider pages (landscape) still fit the screen.
+  const usual = useMemo(() => {
+    const ws = (doc?.sizes ?? []).map(([w]) => w).sort((a, b) => a - b)
+    return ws[Math.floor(ws.length / 2)] || 1
+  }, [doc])
+  const share = useCallback((w: number) => Math.min(1, w / usual), [usual])
   const layoutAt = useCallback((z: number) => (doc?.sizes ?? []).reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
     const prev = out[out.length - 1]
-    out.push({ length: (base * z * h) / w + GAP, offset: prev ? prev.offset + prev.length : chrome.top + GAP })
+    out.push({ length: (base * z * share(w) * h) / w + GAP, offset: prev ? prev.offset + prev.length : chrome.top + GAP })
     return out
-  }, []), [doc, base, chrome.top])
+  }, []), [doc, base, chrome.top, share])
   const layout = useMemo(() => layoutAt(zoom), [layoutAt, zoom])
 
   // ---- zoom: a live transform while pinching, then the real layout at the new size, kept under the fingers
@@ -224,11 +231,14 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
               onMomentumScrollEnd={poke}
               scrollEventThrottle={32}
               windowSize={zoom > 1.5 ? 3 : 5}
-              renderItem={({ item: i }) => (
-                <View style={{ paddingBottom: GAP }}>
-                  <PdfPage uri={doc.uri} index={i} width={pw} height={(pw * doc.sizes[i][1]) / doc.sizes[i][0]} scale={pw / doc.sizes[i][0]} marks={byPage.get(i)} />
-                </View>
-              )}
+              renderItem={({ item: i }) => {
+                const w = pw * share(doc.sizes[i][0])
+                return (
+                  <View style={{ paddingBottom: GAP, width: pw, alignItems: 'center' }}>
+                    <PdfPage uri={doc.uri} index={i} width={w} height={(w * doc.sizes[i][1]) / doc.sizes[i][0]} scale={w / doc.sizes[i][0]} marks={byPage.get(i)} />
+                  </View>
+                )
+              }}
             />
           </ScrollView>
         </Animated.View>
