@@ -29,6 +29,7 @@ MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a reques
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 1000, 60  # what a sheet preview carries
+PREVIEW_V = 2  # bump when previews change: older cached ones are made again (2: sheet formulas worked out)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",
@@ -92,6 +93,22 @@ async def items(owner_id: str) -> list[dict[str, Any]]:
     # ponytail: one flat list per load; page by folder once a vault holds tens of thousands of items.
     got = await memory.store.asearch(_ns(owner_id), limit=50_000)
     return [{"id": i.key, **i.value} for i in got]
+
+
+def visible(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What teammates may see: everything except folders the user hid from them (and all that's inside)."""
+    by_id = {r["id"]: r for r in rows}
+
+    def hidden(r: dict[str, Any]) -> bool:
+        at, seen = r, set()
+        while at and at["id"] not in seen:
+            if at["kind"] == "folder" and (at.get("meta") or {}).get("hidden"):
+                return True
+            seen.add(at["id"])
+            at = by_id.get(at.get("parent") or "")
+        return False
+
+    return [r for r in rows if not hidden(r)]
 
 
 async def get(owner_id: str, key: str) -> dict[str, Any] | None:
@@ -185,9 +202,11 @@ async def update(owner_id: str, key: str, changes: dict[str, Any]) -> dict[str, 
     if synced_copy(row) and ({"name", "parent"} & changes.keys()):
         raise ValueError("This comes from your computer: rename or move it there and it changes here too.")
     new = {k: row[k] for k in row if k != "id"}
+    if "hidden" in changes and row["kind"] == "folder":  # kept from teammates (the vault tool doesn't see it)
+        new["meta"] = {**(new.get("meta") or {}), "hidden": bool(changes["hidden"])}
     if isinstance(changes.get("look"), dict) and row["kind"] == "folder":  # the folder's colour and icon
         look = {k: str(v)[:40] for k, v in changes["look"].items() if k in LOOK_KEYS and v}
-        new["meta"] = {**(row.get("meta") or {}), "look": look}
+        new["meta"] = {**(new.get("meta") or {}), "look": look}
     parent = changes.get("parent", row.get("parent", ""))
     if "parent" in changes and parent != row.get("parent"):
         await _check_parent(owner_id, parent)
@@ -295,8 +314,10 @@ def preview(owner_id: str, key: str, name: str, mime: str) -> dict[str, Any]:
     """A vault file as the app draws it natively (see preview_of). Cached next to the file."""
     cache = file_path(owner_id, key, ".preview.json")
     if cache.exists():
-        return json.loads(cache.read_text())
-    out = preview_of(name, read_bytes(owner_id, key))
+        got = json.loads(cache.read_text())
+        if got.get("v") == PREVIEW_V:
+            return got
+    out = {**preview_of(name, read_bytes(owner_id, key)), "v": PREVIEW_V}
     if out["type"] != "none":
         cache.write_text(json.dumps(out))
     return out
@@ -325,6 +346,8 @@ def preview_of(name: str, data: bytes) -> dict[str, Any]:
 
 
 def _sheets(data: bytes) -> list[dict[str, Any]]:
+    """Each sheet's rows as text, formulas worked out (saved results first; files made by programs have none, so
+    sheetcalc computes them)."""
     import io
 
     from .documents import _no_broken_numpy
@@ -332,21 +355,43 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
     _no_broken_numpy()
     from openpyxl import load_workbook
 
-    wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    raw = load_workbook(io.BytesIO(data), read_only=True)  # formulas, for cells saved without their results
+    from .sheetcalc import Book, show
+
+    vals = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    raw = load_workbook(io.BytesIO(data), read_only=True)  # formulas
+    cells: dict[str, dict[str, Any]] = {}
+    saved: dict[str, dict[str, Any]] = {}
+    for ws, wf in zip(vals.worksheets, raw.worksheets):
+        cells[ws.title], saved[ws.title] = {}, {}
+        for rv, rf in zip(ws.iter_rows(max_row=MAX_ROWS * 2), wf.iter_rows(max_row=MAX_ROWS * 2)):
+            for v, f in zip(rv, rf):
+                if getattr(f, "coordinate", None) is None:
+                    continue
+                cells[ws.title][f.coordinate] = f.value
+                saved[ws.title][f.coordinate] = v.value
+    book = Book(cells)
     out = []
-    for ws, wf in zip(wb.worksheets, raw.worksheets):
-        rows, total = [], 0
-        for r, f in zip(ws.iter_rows(values_only=True), wf.iter_rows(values_only=True)):
-            r = [v if v is not None else (fv if isinstance(fv, str) and fv.startswith("=") else None) for v, fv in zip(r, f)]
-            cells = ["" if v is None else (f"{v:g}" if isinstance(v, float) else str(v)) for v in r[:MAX_COLS]]
-            if not any(cells):
-                continue
-            total += 1
-            if len(rows) < MAX_ROWS:
-                rows.append(cells)
-        width = max((max((i + 1 for i, c in enumerate(r) if c), default=0) for r in rows), default=0)
-        out.append({"name": ws.title, "rows": [r[:width] + [""] * (width - len(r[:width])) for r in rows], "total": total})
+    for name, grid in cells.items():
+        def at(coord: str, name: str = name) -> Any:
+            v = saved[name].get(coord)
+            if v is None and isinstance(grid.get(coord), str) and grid[coord].startswith("="):
+                v = book.value(name, coord)
+            return grid.get(coord) if v is None else v
+        from openpyxl.utils.cell import coordinate_from_string, column_index_from_string, get_column_letter
+        if not grid:
+            out.append({"name": name, "rows": [], "total": 0})
+            continue
+        spots = [coordinate_from_string(c) for c in grid]
+        width = min(MAX_COLS, max(column_index_from_string(c) for c, _ in spots))
+        last = max(r for _, r in spots)
+        rows = []
+        for r in range(1, last + 1):
+            line = [show(at(f"{get_column_letter(c)}{r}")) for c in range(1, width + 1)]
+            rows.append(line)
+        while rows and not any(rows[-1]):
+            rows.pop()
+        used = max((max((i + 1 for i, v in enumerate(r) if v), default=0) for r in rows), default=0)
+        out.append({"name": name, "rows": [r[:used] for r in rows[:MAX_ROWS]], "total": len(rows)})
     return out
 
 

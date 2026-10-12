@@ -58,17 +58,15 @@ def read_docx(data: bytes) -> str:
 
 
 def read_xlsx(data: bytes) -> str:
-    _no_broken_numpy()
-    from openpyxl import load_workbook
+    """Every sheet as a table, formulas worked out (vault._sheets: saved results, else sheetcalc)."""
+    from .vault import _sheets
 
-    wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     out = []
-    for ws in wb.worksheets:
-        rows = [["" if v is None else str(v) for v in r] for r in ws.iter_rows(values_only=True)]
-        rows = [r for r in rows if any(r)]
-        out.append(f"## Sheet: {ws.title} ({len(rows)} rows)")
+    for sh in _sheets(data):
+        rows = [r for r in sh["rows"] if any(r)]
+        out.append(f"## Sheet: {sh['name']} ({sh['total']} rows)")
         if rows:
-            out.append(_md_table(rows[:MAX_ROWS]) + (f"\n[{len(rows) - MAX_ROWS} more rows]" if len(rows) > MAX_ROWS else ""))
+            out.append(_md_table(rows[:MAX_ROWS]) + (f"\n[{sh['total'] - MAX_ROWS} more rows]" if sh["total"] > MAX_ROWS else ""))
     return "\n\n".join(out)
 
 

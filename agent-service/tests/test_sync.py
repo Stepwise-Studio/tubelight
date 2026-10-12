@@ -47,3 +47,19 @@ async def test_a_synced_folder_follows_its_computer(env, tmp_path, monkeypatch):
 
     with pytest.raises(PermissionError):
         await sync.receive(U, "other-computer", root["id"], "x.txt", 1, 0, True, b"x")
+
+
+async def test_folders_hidden_from_teammates_take_their_insides_along(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(vault, "ROOT", tmp_path)
+    work = await vault.add_folder(U, "Work")
+    secret = await vault.add_folder(U, "Private", work["id"])
+    inner = await vault.add_folder(U, "Deeper", secret["id"])
+    await vault.add_bytes(U, "plan.md", b"# plan", work["id"])
+    await vault.add_bytes(U, "diary.md", b"# diary", inner["id"])
+    await vault.update(U, secret["id"], {"hidden": True})
+    names = {r["name"] for r in vault.visible(await vault.items(U))}
+    assert names == {"Work", "plan.md"}
+    await vault.update(U, secret["id"], {"hidden": False, "look": {"color": "#bfdbfe"}})
+    row = await vault.get(U, secret["id"])
+    assert not row["meta"]["hidden"] and row["meta"]["look"]["color"] == "#bfdbfe"
+    assert len(vault.visible(await vault.items(U))) == 5

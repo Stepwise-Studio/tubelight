@@ -19,6 +19,8 @@ export interface VaultItem {
     look?: { color?: string; icon?: string }
     /** A folder kept in sync with a computer (sync.py): which, where, and how the last look went. */
     source?: { computer: string; name: string; path: string; last?: number; files?: number; error?: string | null }
+    /** A folder kept from teammates (their vault tool doesn't see it or anything inside). */
+    hidden?: boolean
     /** Inside a synced folder: its path there (the computer owns it). */
     rel?: string
   }
@@ -112,9 +114,9 @@ export async function newFolder(name: string, parent: string) {
   return row
 }
 
-export async function editItem(id: string, changes: Partial<Pick<VaultItem, 'name' | 'parent' | 'starred'>> & { look?: VaultItem['meta']['look'] }) {
+export async function editItem(id: string, changes: Partial<Pick<VaultItem, 'name' | 'parent' | 'starred'>> & { look?: VaultItem['meta']['look']; hidden?: boolean }) {
   const before = items
-  items = (items ?? []).map((r) => (r.id === id ? { ...r, ...changes, meta: changes.look ? { ...r.meta, look: changes.look } : r.meta } : r))
+  items = (items ?? []).map((r) => (r.id === id ? { ...r, ...changes, meta: { ...r.meta, ...(changes.look ? { look: changes.look } : {}), ...(changes.hidden !== undefined ? { hidden: changes.hidden } : {}) } } : r))
   emit()
   try {
     put(await api<VaultItem>(`/vault/${id}`, { method: 'PATCH', json: changes }))

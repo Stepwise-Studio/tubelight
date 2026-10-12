@@ -630,7 +630,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return "action is list, add, update or delete."
 
         async def vault_files(action: str, path: str = "", query: str = "", folder: str = "") -> str:
-            rows = await vault.items(ctx.owner_id)
+            rows = vault.visible(await vault.items(ctx.owner_id))  # folders they hid from teammates stay out
             by_id = {r["id"]: r for r in rows}
 
             def full(r: dict) -> str:
@@ -694,7 +694,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 coroutine=vault_files, name="vault",
                 description="Their vault: their own files (photos, PDFs, notes, documents) on their server. action: list "
                             "(folder: a folder path, or empty for the top) | search (query: part of a name) | read (path: "
-                            "a file's path, gives its text) | attach (path: send them the file in your reply) | save (path: "
+                            "a file's path, gives its text: documents as Markdown, sheets as tables with formulas worked "
+                            "out, slides as points, images described; work out totals, trends and answers from it) | attach (path: send them the file in your reply) | save (path: "
                             "the name of a file attached in this chat or one you just made; folder: where, optional)."),
         ]
 

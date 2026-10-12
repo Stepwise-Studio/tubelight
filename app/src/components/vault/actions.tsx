@@ -7,13 +7,15 @@ import { Asset, requestPermissionsAsync } from 'expo-media-library'
 import { useState, useSyncExternalStore } from 'react'
 import { ScrollView, View } from 'react-native'
 import {
-  CheckmarkCircle02Icon, Delete02Icon, InformationCircleIcon, Download03Icon, Edit02Icon, FolderExportIcon, PaintBrush02Icon, RefreshIcon, Share08Icon,
+  CheckmarkCircle02Icon, Delete02Icon, InformationCircleIcon, SentIcon, ViewIcon, ViewOffSlashIcon, Download03Icon, Edit02Icon, FolderExportIcon, PaintBrush02Icon, RefreshIcon, Share08Icon,
   StarIcon, StarOffIcon,
 } from '@hugeicons/core-free-icons'
 
 import { deleteItem, editItem, formatSize, kindOf, newFolder, pathTo, refreshVault, syncNow, syncedCopy, syncedRoot, useVault, viewable, type VaultItem, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { Button, Icon, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast, type MenuItem } from '@/ui'
+import { Button, Icon, Press, Radio, Sheet, TeammateAvatar, Text, TextField, confirm, haptic, showMenu, toast, type MenuItem } from '@/ui'
+import { api } from '@/lib/api'
+import { useWorkspace } from '@/lib/workspace'
 
 import { ColorSwatches } from '@/components/form-bits'
 
@@ -88,6 +90,10 @@ export function itemActions(item: VaultItem, opts: { onDeleted?: () => void; onS
   return [
       ...(opts.onSelect ? [{ label: 'Select', icon: CheckmarkCircle02Icon, onPress: opts.onSelect }] : []),
       { label: 'Info', icon: InformationCircleIcon, onPress: () => itemInfo(item) },
+      { label: 'Send to a teammate', icon: SentIcon, onPress: () => sendToTeammate(item) },
+      ...(item.kind === 'folder' ? [item.meta?.hidden
+        ? { label: 'Let teammates see it', icon: ViewIcon, onPress: () => setHidden(item, false) }
+        : { label: 'Hide from teammates', icon: ViewOffSlashIcon, onPress: () => setHidden(item, true) }] : []),
       { label: item.starred ? 'Unstar' : 'Star', icon: item.starred ? StarOffIcon : StarIcon, onPress: () => toggleStar(item) },
       ...(item.kind === 'file' ? [{ label: 'Share', icon: Share08Icon, onPress: () => shareItem(viewable(item)) }] : []),
       ...(media ? [{ label: 'Save to photos', icon: Download03Icon, onPress: () => saveToPhotos(viewable(item)) }] : []),
@@ -99,6 +105,14 @@ export function itemActions(item: VaultItem, opts: { onDeleted?: () => void; onS
         { label: syncedRoot(item) ? 'Stop syncing' : 'Delete', icon: Delete02Icon, destructive: true, onPress: () => removeItem(item, opts.onDeleted) },
       ]),
   ]
+}
+
+function setHidden(item: VaultItem, hidden: boolean) {
+  editItem(item.id, { hidden }).then(() => {
+    haptic.success()
+    toast(hidden ? { title: `Teammates can’t see ${item.name}`, body: 'Or anything inside it. You can still send them files from it yourself.', tone: 'success' }
+      : { title: `Teammates can see ${item.name} again`, tone: 'success' })
+  }, (e) => toast({ title: 'Unable to save', body: (e as Error).message, tone: 'error' }))
 }
 
 async function syncFolderNow(item: VaultItem) {
@@ -118,6 +132,7 @@ type Req =
   | { kind: 'move'; items: VaultItem[] }
   | { kind: 'look'; item: VaultItem }
   | { kind: 'info'; item: VaultItem }
+  | { kind: 'send'; item: VaultItem }
 let req: Req | null = null
 let shown = false
 const subs = new Set<() => void>()
@@ -137,6 +152,7 @@ export function renameItem(item: VaultItem) {
 }
 export function customiseFolder(item: VaultItem) { set({ kind: 'look', item }, true) }
 export function itemInfo(item: VaultItem) { set({ kind: 'info', item }, true) }
+export function sendToTeammate(item: VaultItem) { set({ kind: 'send', item }, true) }
 export function moveItem(item: VaultItem) { set({ kind: 'move', items: [item] }, true) }
 export function moveItems(items: VaultItem[]) { if (items.length) set({ kind: 'move', items }, true) }
 
@@ -147,6 +163,7 @@ export function VaultSheetsHost() {
     <>
       <NameSheet key={`n${s.n}`} open={s.shown && s.req?.kind === 'name'} req={s.req?.kind === 'name' ? s.req : null} onClose={close} />
       <MoveSheet open={s.shown && s.req?.kind === 'move'} moving={s.req?.kind === 'move' ? s.req.items : null} onClose={close} />
+      <SendSheet key={`s${s.n}`} open={s.shown && s.req?.kind === 'send'} item={s.req?.kind === 'send' ? s.req.item : null} onClose={close} />
       <InfoSheet open={s.shown && s.req?.kind === 'info'} item={s.req?.kind === 'info' ? s.req.item : null} onClose={close} />
       <LookSheet key={`l${s.n}`} open={s.shown && s.req?.kind === 'look'} item={s.req?.kind === 'look' ? s.req.item : null} onClose={close} />
     </>
@@ -291,6 +308,7 @@ function InfoSheet({ open, item, onClose }: { open: boolean; item: VaultItem | n
     ...(src ? [['Synced from', `${src.name}: ${src.path}`] as [string, string], ['Last synced', src.last ? when(new Date(src.last * 1000).toISOString()) : 'Not yet'] as [string, string]] : []),
     ...(src?.error ? [['Sync problem', src.error] as [string, string]] : []),
     ...(rootOf?.meta?.source ? [['From', `${rootOf.meta.source.name}: ${rootOf.meta.source.path}/${m.rel}`] as [string, string]] : []),
+    ...(live.kind === 'folder' ? [['Teammates', pathTo(live.id, all).some((p) => p.meta?.hidden) ? 'Hidden from them' : 'Can see it'] as [string, string]] : []),
     ['On the server', live.kind === 'folder' ? `Kept in the vault's index; its files are stored by id in ${disk}` : `${disk}${live.id}`],
   ]
   return (
@@ -303,6 +321,60 @@ function InfoSheet({ open, item, onClose }: { open: boolean; item: VaultItem | n
           </View>
         ))}
       </ScrollView>
+    </Sheet>
+  )
+}
+
+/** Send a file or folder into a teammate's chat: their attachments (a folder's first ten), and an optional note.
+ * They read it straight away and answer in that chat. */
+function SendSheet({ open, item, onClose }: { open: boolean; item: VaultItem | null; onClose: () => void }) {
+  const { c } = useTheme()
+  const ws = useWorkspace()
+  const [to, setTo] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!item) return null
+  const send = async () => {
+    if (!to) return
+    setBusy(true)
+    try {
+      const thread = `dm:${to}`
+      const r = await api<{ attached: number; files: number }>(`/vault/${item.id}/send`, { method: 'POST', json: { thread_id: thread, text: note } })
+      haptic.success()
+      onClose()
+      const name = ws.teammates.find((t) => t.id === to)?.name ?? 'them'
+      toast({ title: `Sent to ${name}`, body: item.kind === 'folder' ? `${r.attached} of ${r.files} files attached; the rest they can open in your vault.` : undefined, tone: 'success' })
+      router.push({ pathname: '/chat/[threadId]', params: { threadId: thread } })
+    } catch (e) {
+      toast({ title: 'Unable to send it', body: (e as Error).message, tone: 'error' })
+      setBusy(false)
+    }
+  }
+  return (
+    <Sheet open={open} onClose={onClose} title={`Send “${item.name}”`}>
+      <View style={{ paddingBottom: 16, gap: 12 }}>
+        <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ paddingHorizontal: 12 }}>
+          {ws.teammates.map((t) => {
+            const on = to === t.id
+            return (
+              <Press key={t.id} radius={14} onPress={() => { haptic.tap(); setTo(t.id) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={t.name}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingHorizontal: 8, backgroundColor: on ? c.panel2 : undefined }}>
+                <TeammateAvatar teammate={t} size={36} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text variant="bodyMedium" numberOfLines={1}>{t.name}</Text>
+                  {!!t.role && <Text variant="footnote" color="ink3" numberOfLines={1}>{t.role}</Text>}
+                </View>
+                <Radio checked={on} />
+              </Press>
+            )
+          })}
+          {!ws.teammates.length && <Text variant="caption" color="ink3" style={{ padding: 8 }}>Make a teammate first.</Text>}
+        </ScrollView>
+        <View style={{ paddingHorizontal: 20, gap: 12 }}>
+          <TextField label="Message (optional)" value={note} onChangeText={setNote} placeholder={item.kind === 'folder' ? 'What should they do with these?' : 'What should they do with it?'} multiline />
+          <Button label="Send" size="lg" fullWidth loading={busy} disabled={!to} onPress={send} />
+        </View>
+      </View>
     </Sheet>
   )
 }

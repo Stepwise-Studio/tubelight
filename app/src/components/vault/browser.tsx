@@ -10,7 +10,7 @@ import { FlatList, GestureDetector } from 'react-native-gesture-handler'
 import {
   Add01Icon, ArrowDown01Icon, ArrowRight01Icon, Camera01Icon, Cancel01Icon, Delete02Icon, Edit02Icon,
   File01Icon, FolderAddIcon, FolderExportIcon, FolderSyncIcon, GridViewIcon, Image01Icon, LaptopIcon,
-  LeftToRightListBulletIcon, MoreHorizontalIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
+  LeftToRightListBulletIcon, MoreHorizontalIcon, ViewOffSlashIcon, MusicNote01Icon, PlayIcon, Share08Icon, SmartPhone01Icon, StarIcon,
 } from '@hugeicons/core-free-icons'
 
 import {
@@ -329,7 +329,7 @@ function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }
   const count = n === 0 ? (src && !src.last ? 'Syncing…' : 'Empty') : `${n} ${n === 1 ? 'item' : 'items'}`
   const look = { size, label: item.name, count, color: item.meta?.look?.color, icon: (item.meta?.look?.icon as FolderIconName) ?? (src ? 'laptop' : 'folder'),
     thumbs: stat?.thumbs, peek: n ? Math.min(n, 3) : 0,
-    badge: src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined } as const
+    badge: src ? <Icon icon={LaptopIcon} size={11} color="ink3" strokeWidth={2} /> : item.meta?.hidden ? <Icon icon={ViewOffSlashIcon} size={11} color="ink3" strokeWidth={2} /> : item.starred ? <Icon icon={StarIcon} size={11} color="#e5a50a" strokeWidth={2.2} /> : undefined } as const
   // Long-press: the folder's menu in place (Select first), or while choosing, toggle it.
   const hold = () => (selecting ? onSelect() : showContextMenu(ref.current, <Folder {...look} onPress={() => {}} />, itemActions(item, { onSelect })))
   // The list's drag gesture takes a held touch before the folder's own long-press fires, so it calls this instead.
@@ -337,7 +337,7 @@ function FolderTile({ item, size, stat, selected, selecting, onPress, onSelect }
   return (
     <View ref={ref} collapsable={false}>
       <Folder {...look} selected={selected} selecting={selecting} onPress={onPress} onLongPress={hold}
-        accessibilityLabel={`${item.name}, folder, ${count}${src ? `, synced from ${src.name}` : ''}`} />
+        accessibilityLabel={`${item.name}, folder, ${count}${src ? `, synced from ${src.name}` : ''}${item.meta?.hidden ? ', hidden from teammates' : ''}`} />
     </View>
   )
 }

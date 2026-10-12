@@ -223,6 +223,63 @@ async def post_message(thread_id: str, body: MessageIn, user: User = Depends(cur
     return {"message": {**message, "run_id": run_id}, "run_id": run_id}
 
 
+class VaultSend(BaseModel):
+    thread_id: str
+    text: str = ""
+
+
+@app.post("/vault/{item_id}/send")
+async def send_vault_item(item_id: str, body: VaultSend, user: User = Depends(current_user)):
+    """A vault file or folder sent into a chat as the user's message: files ride along as attachments (a folder's
+    first ones; the teammate gets the rest by name through the vault tool), so the teammate reads and works on them."""
+    thread = await owned("threads", body.thread_id, user, "conversation")
+    rows = await vault.items(user["id"])
+    row = next((r for r in rows if r["id"] == item_id), None)
+    if not row:
+        raise HTTPException(404, "That item is gone.")
+    by_id = {r["id"]: r for r in rows}
+
+    def path(r: dict[str, Any]) -> str:
+        parts, at = [], r
+        while at:
+            parts.append(at["name"])
+            at = by_id.get(at.get("parent") or "")
+        return "/".join(reversed(parts))
+
+    if row["kind"] == "file":
+        files_ = [row]
+    else:
+        inside, todo = [], [row["id"]]
+        while todo:
+            kids = [r for r in rows if r.get("parent") == todo.pop()]
+            inside += [k for k in kids if k["kind"] == "file"]
+            todo += [k["id"] for k in kids if k["kind"] == "folder"]
+        files_ = sorted(inside, key=lambda r: path(r).lower())
+    sendable = [r for r in files_ if r["size"] <= 25e6][:SEND_MAX]
+    attachments = []
+    for r in sendable:
+        data = await asyncio.to_thread(vault.read_bytes, user["id"], r["id"])
+        attachments.append(await files.upload(user["id"], r["name"], data))
+    text = body.text.strip() or (f"From my vault: {row['name']}" + ("" if row["kind"] == "file" else f" ({len(files_)} {'file' if len(files_) == 1 else 'files'})"))
+    rest = [r for r in files_ if r not in sendable]
+    note = ""
+    if row["kind"] == "folder":
+        note = (f"\n\n[They shared their vault folder {path(row)}/ with you. Its files: "
+                + ", ".join(path(r) for r in files_[:60]) + (" ..." if len(files_) > 60 else "") + "."
+                + (f" {len(rest)} of them aren't attached (too many or too big): read them with the vault tool by path." if rest else "") + "]")
+    elif rest:
+        note = f"\n\n[{row['name']} is too big to attach; it's in their vault at {path(row)}.]"
+    message = await db.insert("messages", {"thread_id": body.thread_id, "owner_id": user["id"], "sender_type": "user",
+                                           "text": text, "mentions": [], "meta": {"attachments": attachments, "vault": item_id}})
+    prompt = text + note + await files.describe(user["id"], attachments)
+    run_id = await runs.start(user["id"], body.thread_id, prompt, teammate_id=thread.get("teammate_id"), message_id=message["id"])
+    await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
+    return {"message": {**message, "run_id": run_id}, "run_id": run_id, "attached": len(attachments), "files": len(files_)}
+
+
+SEND_MAX = 10  # a folder's files that ride along as attachments
+
+
 @app.post("/messages/{message_id}/retry")
 async def retry_message(message_id: str, user: User = Depends(current_user)):
     """Run the user's message again, in place: no second copy of it; the failed attempt's error notes go."""
