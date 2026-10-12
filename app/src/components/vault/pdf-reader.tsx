@@ -80,7 +80,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   }, [page, doc, key])
   const seen = useCallback((v: { viewableItems: ViewToken<number>[] }) => { if (v.viewableItems[0]) setPage((v.viewableItems[0].index ?? 0) + 1) }, [])
 
-  const side = rail ? RAIL + 12 : 0 // the page tray floats on the left; pages fit beside it
+  const side = 0 // the page tray floats over the pages; they keep their size
   const base = width - 24 - side // a page's width at zoom 1
   const pw = base * zoom
   const layoutAt = useCallback((z: number) => (doc?.sizes ?? []).reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
@@ -122,12 +122,6 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
     live.set(1)
   }, [landing, live, offX, offY])
 
-  // The sidebar changes the pages' size: stay on the same page.
-  const [railFor, setRailFor] = useState(rail)
-  if (railFor !== rail) {
-    setRailFor(rail)
-    if (layout[page - 1]) setLanding({ x: 0, y: Math.max(0, layoutAt(zoom)[page - 1].offset - chrome.top - GAP) })
-  }
 
   const pinch = Gesture.Pinch()
     .onStart((e) => { fx.set(e.focalX); fy.set(e.focalY) })
@@ -243,21 +237,25 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
         </Animated.View>
       )}
 
-      {/* Where you are, and search */}
+      {/* Where you are (tap to go to a page) */}
       {!finding && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
           style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
-          <Squircle style={{ borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.9)', flexDirection: 'row', alignItems: 'center', height: 44, paddingLeft: 10, paddingRight: 4 }}>
-            <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
-              style={{ paddingHorizontal: 8, height: 40, justifyContent: 'center' }}>
-              <Text variant="label" color="#fff" tabular>{page} / {pages}</Text>
-            </Pressable>
-            {!!Phone?.pdfSearch && (
-              <Pressable onPress={openFind} accessibilityLabel="Search in this PDF" hitSlop={6} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon icon={Search01Icon} size={19} color="#fff" strokeWidth={1.8} />
-              </Pressable>
-            )}
-          </Squircle>
+          <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
+            style={{ height: 44, borderRadius: 22, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
+            <Text variant="label" color="#fff" tabular>{page} / {pages}</Text>
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {/* Search, on its own in the other corner */}
+      {!finding && !!Phone?.pdfSearch && (
+        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+          style={{ position: 'absolute', right: 16, bottom: chrome.bottom + 18 }}>
+          <Pressable onPress={openFind} accessibilityLabel="Search in this PDF" hitSlop={6}
+            style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
+            <Icon icon={Search01Icon} size={19} color="#fff" strokeWidth={1.8} />
+          </Pressable>
         </Animated.View>
       )}
 
@@ -284,12 +282,12 @@ function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
       style={{ position: 'absolute', top: 0, left: 0, right: 0, height: top, paddingTop: top - 56, backgroundColor: c.canvas, borderBottomWidth: 1, borderColor: c.line }}>
       <View style={{ height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 2 }}>
         <IconButton icon={ArrowLeft01Icon} iconSize={22} accessibilityLabel="Close search" onPress={onClose} />
-        <Squircle style={{ flex: 1, height: 40, borderRadius: 12, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 }}>
+        <View style={{ flex: 1, height: 40, borderRadius: 20, backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 8 }}>
           <Icon icon={Search01Icon} size={16} color="ink3" />
           <TextInput value={q} onChangeText={setQ} autoFocus placeholder="Find in document" placeholderTextColor={c.ink4} returnKeyType="search"
             onSubmitEditing={() => onStep(1)} selectionColor={c.tube} cursorColor={c.tube} style={{ flex: 1, color: c.ink, fontSize: 15, paddingVertical: 0 }} />
           {matches && <Text variant="footnote" color="ink3" tabular>{n ? `${hit + 1} of ${n}${n >= 500 ? '+' : ''}` : 'None'}</Text>}
-        </Squircle>
+        </View>
         <IconButton icon={ArrowUp01Icon} iconSize={20} accessibilityLabel="Previous match" disabled={!n} onPress={() => onStep(-1)} />
         <IconButton icon={ArrowDown01Icon} iconSize={20} accessibilityLabel="Next match" disabled={!n} onPress={() => onStep(1)} />
       </View>
@@ -297,13 +295,13 @@ function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
   )
 }
 
-/** The page tray: every page small and dimmed, the one you're on lit with its number in a tube pill, and along
- * the edge a little lit tube showing where you are in the whole document (Tubelight's own mark). */
+/** The page tray, floating over the pages: every page small and dimmed, the one you're on lit with its number in a
+ * tube pill. No scrollbar: the lit page keeps itself in view. */
 function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, number][]; page: number; onPick: (n: number) => void }) {
   const { c } = useTheme()
   const ref = useRef<FlatList<number>>(null)
   const [box, setBox] = useState(0)
-  const tw = RAIL - 32 // a thumbnail's width (the tube runs down the right edge)
+  const tw = RAIL - 24 // a thumbnail's width
   const rows = useMemo(() => sizes.reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
     const prev = out[out.length - 1]
     out.push({ length: (tw * h) / w + 32, offset: prev ? prev.offset + prev.length : 12 })
@@ -312,15 +310,10 @@ function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, numbe
   const near = (p: number) => Math.max(0, (rows[p - 1]?.offset ?? 0) - box * 0.35)
   const [start] = useState(() => near(page))
   useEffect(() => { if (box) ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page, box]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The tube: its length is one page's share of the track, its place is the page's place in the document.
-  const track = Math.max(0, box - 28)
-  const tube = Math.max(18, Math.min(track, track / sizes.length))
-  const at = sizes.length > 1 ? ((page - 1) / (sizes.length - 1)) * (track - tube) : 0
-  const tubeStyle = useAnimatedStyle(() => ({ transform: [{ translateY: withTiming(at, FAST) }] }), [at])
   return (
     <View style={{ flex: 1 }} onLayout={(e) => setBox(e.nativeEvent.layout.height)}>
       <FlatList ref={ref} data={sizes.map((_, i) => i)} keyExtractor={(i) => String(i)} contentOffset={{ x: 0, y: start }}
-        getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 10 }} showsVerticalScrollIndicator={false}
+        getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 12 }} showsVerticalScrollIndicator={false}
         renderItem={({ item: i }) => {
           const on = i === page - 1
           const h = (tw * sizes[i][1]) / sizes[i][0]
@@ -337,11 +330,6 @@ function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, numbe
           )
         }}
       />
-      {track > 0 && (
-        <View pointerEvents="none" style={{ position: 'absolute', right: 8, top: 14, width: 3, height: track, borderRadius: 2, backgroundColor: c.line }}>
-          <Animated.View style={[{ position: 'absolute', left: -0.5, width: 4, height: tube, borderRadius: 2, backgroundColor: c.tube, boxShadow: `0 0 8px ${c.tubeGlow}` }, tubeStyle]} />
-        </View>
-      )}
     </View>
   )
 }
