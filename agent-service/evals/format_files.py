@@ -196,7 +196,7 @@ def xlsx(path: Path) -> None:
     ws["A3"].font = Font(italic=True)
     ws["A4"].font = Font(color="C00000")
     ws["B5"].fill = PatternFill("solid", fgColor="FFF2CC")
-    ws["A14"].alignment = Alignment(wrap_text=True)
+    ws["A13"].alignment = Alignment(wrap_text=True)  # the long text row
     thin = Side(style="thin", color="999999")
     ws["B6"].border = Border(left=thin, right=thin, top=thin, bottom=thin)
     ws.column_dimensions["A"].width = 28

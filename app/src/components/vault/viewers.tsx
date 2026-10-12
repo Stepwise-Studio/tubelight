@@ -289,7 +289,9 @@ const ROW_H = 34 // one line a cell, as a spreadsheet shows them; the bar on top
  * a row (the column comes from where you tapped), cells as plain text. */
 /** A cell's look from the file: bold, italic, underline, text colour, fill, alignment, wrap. */
 interface CellStyle { b?: 1; i?: 1; u?: 1; c?: string; f?: string; a?: 'left' | 'center' | 'right'; w?: 1 }
-interface SheetData { name: string; rows: string[][]; total: number; styles?: Record<string, CellStyle>; merges?: [number, number, number, number][]; widths?: number[] }
+interface SheetData { name: string; rows: string[][]; total: number; styles?: Record<string, CellStyle>; merges?: [number, number, number, number][]; widths?: number[]
+  /** Per row, '1' for each number or date cell (Excel); CSV has none, so its text is guessed from how it looks. */
+  kinds?: string[] }
 /** Per row: its cells' styles, merged cells (span: columns a merged cell covers from here; skip: columns drawn by one). */
 interface RowExtra { st?: Record<number, CellStyle>; span?: Record<number, number>; skip?: Set<number>; blank?: Set<number>; tall?: boolean }
 
@@ -345,7 +347,8 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
     const from = Math.max(0, edges.findIndex((e) => e + numW > x - screen * 0.5))
     let to = edges.findIndex((e) => e + numW > x + screen * 1.5)
     if (to < 0) to = cols.length - 1
-    return { from: Math.floor(from / 4) * 4, to: Math.min(cols.length - 1, Math.ceil((to + 1) / 4) * 4) }
+    const last = Math.max(0, cols.length - 1)
+    return { from: Math.min(last, Math.floor(from / 4) * 4), to: Math.min(last, Math.ceil((to + 1) / 4) * 4) }
   }, [edges, numW, x, screen, cols.length])
   return (
     <View style={{ flex: 1, paddingTop: chrome.top }}>
@@ -356,7 +359,12 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
         </View>
         <Text variant="caption" color={pick ? 'ink' : 'ink4'} numberOfLines={1} selectable style={{ flex: 1 }}>{pick ? value || 'Empty' : 'Tap a cell to see it here'}</Text>
       </View>
-      <ScrollView horizontal bounces={false} style={{ flex: 1 }} scrollEventThrottle={64}
+      {!sheet.rows.length ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: chrome.bottom + 72 }}>
+          <Text variant="caption" color="ink3">This sheet is empty.</Text>
+        </View>
+      ) : (
+      <ScrollView key={at} horizontal bounces={false} style={{ flex: 1 }} scrollEventThrottle={64}
         onScroll={(e) => { const nx = e.nativeEvent.contentOffset.x; if (Math.abs(nx - x) > screen * 0.25) setX(nx) }}
         onMomentumScrollEnd={(e) => setX(e.nativeEvent.contentOffset.x)}>
         <View style={{ width: numW + (edges[edges.length - 1] ?? 0), height: '100%' }}>
@@ -368,20 +376,21 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
             extraData={`${pick?.r}:${pick?.c}:${span.from}:${span.to}`}
             contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
             renderItem={({ item: row, index }) => (
-              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} />
+              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} kind={sheet.kinds?.[index]} />
             )}
-            ListFooterComponent={sheet.total > sheet.rows.length
+            ListFooterComponent={sheet.total > sheet.rows.length && sheet.rows.length >= 1000
               ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
           />
         </View>
       </ScrollView>
+      )}
       {/* Sheets, as tabs along the bottom */}
       {sheets.length > 1 && (
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: chrome.bottom + 12, alignItems: 'center' }} pointerEvents="box-none">
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, maxWidth: '100%' }} contentContainerStyle={{ paddingHorizontal: 16 }}>
             <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.92)' }}>
               {sheets.map((sh, i) => (
-                <Pressable key={sh.name} onPress={() => { haptic.tap(); setAt(i); setPick(null) }} accessibilityRole="tab" accessibilityState={{ selected: i === at }}
+                <Pressable key={sh.name} onPress={() => { haptic.tap(); setAt(i); setPick(null); setX(0) }} accessibilityRole="tab" accessibilityState={{ selected: i === at }}
                   style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: 'center', backgroundColor: i === at ? '#fff' : 'transparent' }}>
                   <Text variant="label" color={i === at ? '#18181b' : '#d4d4d8'} numberOfLines={1}>{sh.name}</Text>
                 </Pressable>
@@ -410,9 +419,9 @@ const HeadRow = memo(function HeadRow({ cols, numW, lit, look }: { cols: number[
 })
 
 /** One row: drawn again only when its cells, its lit cell or the column sizes change. */
-const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap, extra }: {
+const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap, extra, kind }: {
   row: string[]; index: number; cols: number[]; edges: number[]; numW: number; from: number; to: number; lit: number; look: SheetLook
-  onTap: (r: number, x: number) => void; extra?: RowExtra
+  onTap: (r: number, x: number) => void; extra?: RowExtra; kind?: string
 }) {
   const before = from > 0 ? edges[from - 1] : 0
   const after = edges[edges.length - 1] - (edges[to] ?? 0)
@@ -429,7 +438,7 @@ const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, t
     const st = extra?.st?.[j]
     const fill = st?.f ? `#${st.f}` : undefined
     const ink = st?.c ? `#${st.c}` : fill ? (lightHex(st!.f!) ? '#18181b' : '#fafafa') : undefined
-    const align = st?.a ?? (span > 1 ? 'center' : text && NUMERIC.test(text) ? 'right' : 'left')
+    const align = st?.a ?? (span > 1 ? 'center' : (kind !== undefined ? kind[j] === '1' : text && NUMERIC.test(text)) ? 'right' : 'left')
     cells.push(
       <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: fill,
         alignItems: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' },

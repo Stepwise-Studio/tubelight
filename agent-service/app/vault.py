@@ -18,7 +18,8 @@ import re
 import shutil
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,7 @@ MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a reques
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 5000, 60  # what a sheet preview carries
-PREVIEW_V = 5  # 5: list indents; bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
+PREVIEW_V = 6  # 6: typed cells; 5: list indents; bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",
@@ -404,8 +405,10 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
         last_r, last_c = sh["last"]
         rows: list[list[str]] = []
         styles: dict[str, dict[str, Any]] = {}
+        kinds: list[str] = []  # per row, "1" for each number or date cell (Excel lines these up on the right)
         for r in range(1, last_r + 1):
             line = []
+            kind: list[str] = []
             for c in range(1, last_c + 1):
                 coord = f"{get_column_letter(c)}{r}"
                 v = saved.get(coord)
@@ -417,11 +420,12 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
                 cell = looks.get(coord)
                 fmt = getattr(cell, "number_format", None) if not light else None
                 line.append(v if isinstance(v, str) and v.startswith("#") else fmt_value(v, fmt))
-                if not light and cell is not None:
-                    st = _cell_style(cell)
-                    if st:
-                        styles[f"{r - 1}:{c - 1}"] = st
+                st = _cell_style(cell) if not light and cell is not None else {}
+                kind.append("1" if isinstance(v, (int, float, datetime, date, dt_time)) and not isinstance(v, bool) else "0")
+                if st:
+                    styles[f"{r - 1}:{c - 1}"] = st
             rows.append(line)
+            kinds.append("".join(kind).rstrip("0"))
         merges = []
         if not light:
             for m in getattr(ws, "merged_cells", None) and ws.merged_cells.ranges or []:
@@ -432,7 +436,7 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
             for c in range(1, last_c + 1):
                 d = ws.column_dimensions.get(get_column_letter(c))
                 widths.append(round(d.width, 1) if d is not None and d.width and d.customWidth else 0)
-        result.append({"name": name, "rows": rows, "total": max(sh["total"], len(rows)), "styles": styles, "merges": merges, "widths": widths})
+        result.append({"name": name, "rows": rows, "total": max(sh["total"], len(rows)), "styles": styles, "merges": merges, "widths": widths, "kinds": kinds})
     return result
 
 
