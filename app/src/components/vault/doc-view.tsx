@@ -57,11 +57,11 @@ function runStyle(r: DocRun, x: Ctx, base: number): TextStyle {
     fontSize: px,
     // Serif text in Instrument Serif (its own italic; bold is drawn heavier by Android), sans in Inter Display
     // (Android has no italic or bold of an embedded font unless it's embedded too: asking falls back to Roboto)
-    fontFamily: mono ? 'monospace' : serif ? (r.i ? fonts.serifItalic : fonts.serif) : r.b ? (r.i ? fonts.semiboldItalic : fonts.semibold) : r.i ? fonts.italic : fonts.regular,
-    fontWeight: mono && r.b ? '700' : undefined,
+    fontFamily: mono ? fonts.mono : serif ? (r.i ? fonts.serifItalic : fonts.serif) : r.b ? (r.i ? fonts.semiboldItalic : fonts.semibold) : r.i ? fonts.italic : fonts.regular,
+    fontWeight: undefined,
     // Instrument Serif has no bold (asking Android for one swaps in its sans): a hairline of the same colour thickens it
-    ...(serif && r.b ? { textShadowColor: r.hl ? '#18181b' : readable(r.color, x), textShadowRadius: 0.8, textShadowOffset: { width: 0.4, height: 0 } } : null),
-    fontStyle: r.i && mono ? 'italic' : undefined,
+    ...((serif || mono) && r.b ? { textShadowColor: r.hl ? '#18181b' : readable(r.color, x), textShadowRadius: 0.8, textShadowOffset: { width: 0.4, height: 0 } } : null),
+    fontStyle: undefined,
     ...(serif ? { fontSize: px * 1.12 } : null), // Instrument Serif runs small for its size
     textDecorationLine: r.u && r.s ? 'underline line-through' : r.u ? 'underline' : r.s ? 'line-through' : undefined,
     color: r.hl ? '#18181b' : readable(r.color, x),

@@ -42,7 +42,7 @@ export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover }: {
   if (kind === 'video') return <Video item={item} />
   if (kind === 'audio') return <Audio item={item} />
   if (kind === 'pdf') return <PdfReader item={item} chrome={chrome} onCover={onCover ?? (() => {})} fallback={(note) => <Other item={item} note={note} />} />
-  if (kind === 'markdown' || kind === 'text' || kind === 'code') return <TextFile item={item} markdown={kind === 'markdown'} chrome={chrome} />
+  if (kind === 'markdown' || kind === 'text' || kind === 'code') return <TextFile item={item} kind={kind} chrome={chrome} />
   if (kind === 'word' || kind === 'sheet' || kind === 'slides') return <Preview item={item} chrome={chrome} />
   return <Other item={item} />
 }
@@ -187,8 +187,8 @@ function Audio({ item }: { item: Viewable }) {
 }
 
 // ------------------------------------------------------------------ text and Markdown
-function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolean; chrome: { top: number; bottom: number } }) {
-  const { c } = useTheme()
+function TextFile({ item, kind, chrome }: { item: Viewable; kind: 'markdown' | 'text' | 'code'; chrome: { top: number; bottom: number } }) {
+  const markdown = kind === 'markdown'
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const tooBig = item.size > 2_000_000
@@ -203,20 +203,42 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   if (text === null) return <Loading />
   if (!text.trim()) return <Other item={item} note="This file is empty." />
   if (markdown) return <Doc text={text} chrome={chrome} />
-  if (text.length > LONG) {
-    // A big text file: blocks of lines that draw as they scroll in (long lines wrap)
-    const lines = text.split('\n')
-    const blocks = Array.from({ length: Math.ceil(lines.length / 80) }, (_, i) => lines.slice(i * 80, i * 80 + 80).join('\n'))
+  return <Code text={text} chrome={chrome} prose={kind === 'text'} />
+}
+
+const CODE_PX = 13
+const CHAR_W = CODE_PX * 0.6 // JetBrains Mono's advance: every character the same width
+
+/** Code and plain text as an editor shows it: JetBrains Mono, line numbers in a quiet gutter, lines kept whole (the
+ * page scrolls sideways for long ones), tabs as four spaces, drawn as they scroll in (any length). */
+function Code({ text, chrome, prose }: { text: string; chrome: { top: number; bottom: number }; prose?: boolean }) {
+  const { c } = useTheme()
+  const lines = useMemo(() => text.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n'), [text])
+  const gutter = 16 + String(lines.length).length * CHAR_W
+  const longest = useMemo(() => lines.reduce((m, l) => Math.max(m, [...l].length), 0), [lines])
+  const { width } = useWindowDimensions()
+  const inner = Math.max(width, gutter + 16 + longest * CHAR_W + 24)
+  const lineStyle = useMemo(() => ({ ...type.mono, fontSize: CODE_PX, lineHeight: 20, color: c.ink }), [c.ink])
+  const numStyle = useMemo(() => ({ ...type.mono, fontSize: 11, lineHeight: 20, color: c.ink4, width: gutter, textAlign: 'right' as const }), [c.ink4, gutter])
+  if (prose) {
+    // A plain text file reads as text: the app's font, lines wrapping to the screen
     return (
-      <FlashList data={blocks} keyExtractor={(_, i) => String(i)} contentContainerStyle={{ paddingTop: chrome.top + 12, paddingBottom: chrome.bottom + 40, paddingHorizontal: 16 }}
-        renderItem={({ item }) => <Text selectable style={[type.mono, { color: c.ink }]}>{item}</Text>} />
+      <FlashList data={lines} keyExtractor={(_, i) => String(i)} contentContainerStyle={{ paddingTop: chrome.top + 16, paddingBottom: chrome.bottom + 40, paddingHorizontal: 20 }}
+        renderItem={({ item }) => <Text selectable>{item || ' '}</Text>} />
     )
   }
   return (
-    <ScrollView contentContainerStyle={{ paddingTop: chrome.top + 12, paddingBottom: chrome.bottom + 40 }}>
-      <ScrollView horizontal contentContainerStyle={{ paddingHorizontal: 16 }}>
-        <Text selectable style={[type.mono, { color: c.ink }]}>{text}</Text>
-      </ScrollView>
+    <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
+      <View style={{ width: inner, height: '100%' }}>
+        <FlashList data={lines} keyExtractor={(_, i) => String(i)}
+          contentContainerStyle={{ paddingTop: chrome.top + 12, paddingBottom: chrome.bottom + 40 }}
+          renderItem={({ item, index }) => (
+            <View style={{ flexDirection: 'row', gap: 16, paddingRight: 24 }}>
+              <RNText style={numStyle} allowFontScaling={false}>{index + 1}</RNText>
+              <RNText style={lineStyle} selectable allowFontScaling={false}>{item || ' '}</RNText>
+            </View>
+          )} />
+      </View>
     </ScrollView>
   )
 }

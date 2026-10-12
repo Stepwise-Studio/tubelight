@@ -154,7 +154,8 @@
             "./assets/fonts/InterDisplay-Italic.ttf",
             "./assets/fonts/InterDisplay-SemiBoldItalic.ttf",
             "./assets/fonts/InstrumentSerif-Regular.ttf",
-            "./assets/fonts/InstrumentSerif-Italic.ttf"
+            "./assets/fonts/InstrumentSerif-Italic.ttf",
+            "./assets/fonts/JetBrainsMono-Regular.ttf"
           ]
         }
       ],

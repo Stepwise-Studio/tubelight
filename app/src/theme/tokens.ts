@@ -98,6 +98,8 @@ export const fonts = {
   /** Instrument Serif: documents' serif text (Word's Times, Cambria, Georgia…); regular and italic only. */
   serif: 'InstrumentSerif-Regular',
   serifItalic: 'InstrumentSerif-Italic',
+  /** JetBrains Mono: code (Android's 'monospace' is a proportional font on some phones, Samsung's included). */
+  mono: 'JetBrainsMono-Regular',
 }
 
 /** Type scale 12 / 13 / 15 / 17 / 20 / 28 / 34. Weights 400 / 500 / 600. */
@@ -112,7 +114,7 @@ export const type = {
   caption: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, letterSpacing: 0 },
   footnote: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 16, letterSpacing: 0 },
   overline: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, letterSpacing: 0.2 },
-  mono: { fontFamily: Platform.select({ ios: 'Menlo', web: 'ui-monospace, Menlo, monospace', default: 'monospace' }), fontSize: 13, lineHeight: 19, letterSpacing: 0 },
+  mono: { fontFamily: Platform.select({ ios: 'Menlo', web: 'ui-monospace, Menlo, monospace', default: 'JetBrainsMono-Regular' }), fontSize: 13, lineHeight: 19, letterSpacing: 0 },
 } as const
 
 export type TypeVariant = keyof typeof type
