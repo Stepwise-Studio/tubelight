@@ -8,7 +8,8 @@ import { Image } from 'expo-image'
 import { memo, useMemo } from 'react'
 import { Linking, ScrollView, Text, View, useWindowDimensions, type TextStyle } from 'react-native'
 
-import { fonts, useTheme } from '@/theme'
+import { fonts, radius, useTheme } from '@/theme'
+import { Squircle } from '@/ui'
 
 export interface DocRun { t?: string; b?: boolean; i?: boolean; u?: boolean; s?: boolean; color?: string; size?: number; hl?: string; va?: 'sup' | 'sub'; font?: string; link?: string; img?: string | null; w?: number; h?: number }
 export interface DocPara { k: 'p'; runs: DocRun[]; align?: 'left' | 'center' | 'right' | 'justify'; indent?: number; first?: number; before?: number; after?: number; line?: number; shade?: string; h?: number; marker?: string; level?: number }
@@ -26,6 +27,7 @@ interface Ctx {
   dark: boolean
   ink: string
   line: string
+  wash: string // a table's header row
   width: number // room for text at the top level
 }
 
@@ -51,9 +53,11 @@ function runStyle(r: DocRun, x: Ctx, base: number): TextStyle {
   const mono = !!r.font && MONO.test(r.font)
   return {
     fontSize: px,
-    fontFamily: mono ? 'monospace' : serif ? 'serif' : r.b ? fonts.semibold : fonts.regular,
+    // Serif text in Instrument Serif (its own italic; bold is drawn heavier by Android), sans in Inter Display
+    fontFamily: mono ? 'monospace' : serif ? (r.i ? fonts.serifItalic : fonts.serif) : r.b ? fonts.semibold : fonts.regular,
     fontWeight: (serif || mono) && r.b ? '700' : undefined,
-    fontStyle: r.i ? 'italic' : undefined,
+    fontStyle: r.i && !serif ? 'italic' : undefined,
+    ...(serif ? { fontSize: px * 1.12 } : null), // Instrument Serif runs small for its size
     textDecorationLine: r.u && r.s ? 'underline line-through' : r.u ? 'underline' : r.s ? 'line-through' : undefined,
     color: r.hl ? '#18181b' : readable(r.color, x),
     backgroundColor: r.hl ? `#${r.hl}` : undefined,
@@ -131,48 +135,48 @@ const Table = memo(function Table({ t, x, base, room }: { t: DocTable; x: Ctx; b
     let at = 0
     return r.cells.map((c) => { const start = at; at += c.span ?? 1; return start })
   })
-  const below = (ri: number, col: number) => {
-    const next = t.rows[ri + 1]
-    if (!next) return false
-    const k = grid[ri + 1].indexOf(col)
-    return k >= 0 && next.cells[k].vmerge === 'continue'
-  }
   const total = widths.reduce((a, b) => a + b, 0)
+  // Stepwise's table: a rounded frame, the header row on a wash in semibold, hairlines between rows (a merged
+  // cell carries on without one), Word's own cell shading kept.
   const body = (
-    <View style={{ width: total, borderTopWidth: 1, borderLeftWidth: 1, borderColor: x.line, marginVertical: 8 }}>
-      {t.rows.map((row, ri) => (
-        <View key={ri} style={{ flexDirection: 'row' }}>
-          {row.cells.map((cell, ci) => {
-            const col = grid[ri][ci]
-            const w = widths.slice(col, col + (cell.span ?? 1)).reduce((a, b) => a + b, 0)
-            const head = row.header || (ri === 0 && t.rows.length > 2)
-            return (
-              <View key={ci} style={{ width: w, paddingHorizontal: 8, paddingTop: 6, paddingBottom: 2, borderRightWidth: 1, borderBottomWidth: below(ri, col) ? 0 : 1, borderColor: x.line,
-                justifyContent: cell.valign === 'center' ? 'center' : cell.valign === 'bottom' ? 'flex-end' : 'flex-start',
-                backgroundColor: cell.shade ? (x.dark ? mix(cell.shade, 0, 0.7) : `#${cell.shade}`) : head && !cell.vmerge ? (x.dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.025)') : undefined }}>
-                {cell.vmerge !== 'continue' && cell.blocks.map((b, bi) => <Block key={bi} b={b} x={x} base={base} room={w - 16} tight />)}
-              </View>
-            )
-          })}
-        </View>
-      ))}
-    </View>
+    <Squircle style={{ width: total, borderRadius: radius.md, borderWidth: 1, borderColor: x.line, overflow: 'hidden', marginVertical: 8 }}>
+      {t.rows.map((row, ri) => {
+        const head = !!row.header || (ri === 0 && t.rows.length > 1)
+        return (
+          <View key={ri} style={{ flexDirection: 'row', backgroundColor: head ? x.wash : undefined }}>
+            {row.cells.map((cell, ci) => {
+              const col = grid[ri][ci]
+              const w = widths.slice(col, col + (cell.span ?? 1)).reduce((a, b) => a + b, 0)
+              return (
+                <View key={ci} style={{ width: w, paddingHorizontal: 12, paddingTop: 9, paddingBottom: 5, borderTopWidth: ri && cell.vmerge !== 'continue' ? 1 : 0, borderColor: x.line,
+                  justifyContent: cell.valign === 'center' ? 'center' : cell.valign === 'bottom' ? 'flex-end' : 'flex-start',
+                  backgroundColor: cell.shade ? (x.dark ? mix(cell.shade, 0, 0.7) : `#${cell.shade}`) : undefined }}>
+                  {cell.vmerge !== 'continue' && cell.blocks.map((b, bi) => <Block key={bi} b={b} x={x} base={base} room={w - 24} tight head={head} />)}
+                </View>
+              )
+            })}
+          </View>
+        )
+      })}
+    </Squircle>
   )
   return total > room + 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -PAD }} contentContainerStyle={{ paddingHorizontal: PAD }}>{body}</ScrollView> : body
 })
 
-function Block({ b, x, base, room, tight }: { b: DocBlock; x: Ctx; base: number; room: number; tight?: boolean }) {
+function Block({ b, x, base, room, tight, head }: { b: DocBlock; x: Ctx; base: number; room: number; tight?: boolean; head?: boolean }) {
   if (b.k === 'table') return <Table t={b} x={x} base={base} room={room} />
-  // In a cell, paragraph spacing is tightened (Word's 10 pt after every paragraph reads loose in a narrow cell).
-  return <Para p={tight ? { ...b, after: Math.min(b.after ?? 0, 4), before: Math.min(b.before ?? 0, 4) } : b} x={x} base={base} room={room} />
+  // In a cell, paragraph spacing is tightened (Word's 10 pt after every paragraph reads loose in a narrow cell);
+  // header cells are semibold.
+  const p = tight ? { ...b, after: Math.min(b.after ?? 0, 4), before: Math.min(b.before ?? 0, 4) } : b
+  return <Para p={head ? { ...p, runs: p.runs.map((r) => ({ ...r, b: true })) } : p} x={x} base={base} room={room} />
 }
 
 export function DocView({ doc, chrome }: { doc: DocData; chrome: { top: number; bottom: number } }) {
   const { c, scheme } = useTheme()
   const { width } = useWindowDimensions()
   const base = doc.base || 11
-  const x = useMemo<Ctx>(() => ({ k: 15 / Math.max(9, Math.min(base, 14)), dark: scheme === 'dark', ink: c.ink, line: scheme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)', width: width - PAD * 2 }),
-    [base, scheme, c.ink, width])
+  const x = useMemo<Ctx>(() => ({ k: 15 / Math.max(9, Math.min(base, 14)), dark: scheme === 'dark', ink: c.ink, line: c.line, wash: c.panel2, width: width - PAD * 2 }),
+    [base, scheme, c.ink, c.line, c.panel2, width])
   if (!doc.blocks.length) return <Text style={{ color: c.ink3, padding: PAD, paddingTop: chrome.top + 16 }}>This document is empty.</Text>
   return (
     <FlashList data={doc.blocks} keyExtractor={(_, i) => String(i)}

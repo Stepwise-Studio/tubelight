@@ -249,7 +249,7 @@ function Doc({ text, chrome }: { text: string; chrome: { top: number; bottom: nu
 type PreviewData =
   | { type: 'markdown'; text: string }
   | DocData
-  | { type: 'sheets'; sheets: { name: string; rows: string[][]; total: number }[] }
+  | { type: 'sheets'; sheets: SheetData[] }
   | { type: 'slides'; slides: Slide[] }
   | { type: 'none' | 'error'; message?: string }
 
@@ -280,22 +280,49 @@ function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bott
 
 const colName = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : colName(Math.floor(i / 26) - 1) + colName(i % 26))
 
-const NUMERIC = /^[-+]?(?:[\d,]*\.?\d+)(?:%|e[-+]?\d+)?$/i
+const NUMERIC = /^[-+(]?[₹$€£¥]?(?:[\d,]*\.?\d+)(?:%|e[-+]?\d+)?\)?$/i
 const ROW_H = 34 // one line a cell, as a spreadsheet shows them; the bar on top shows a cell's whole value
 
 /** A spreadsheet, the light version of Excel: column letters and row numbers, numbers to the right, the first row
  * bold, a tapped cell outlined with its address and whole value in the bar on top, sheets as tabs along the bottom.
  * Fast with big sheets: fixed row heights, rows memoised (a tap redraws only the rows it touches), one touch target
  * a row (the column comes from where you tapped), cells as plain text. */
-function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; total: number }[]; chrome: { top: number; bottom: number } }) {
+/** A cell's look from the file: bold, italic, underline, text colour, fill, alignment, wrap. */
+interface CellStyle { b?: 1; i?: 1; u?: 1; c?: string; f?: string; a?: 'left' | 'center' | 'right'; w?: 1 }
+interface SheetData { name: string; rows: string[][]; total: number; styles?: Record<string, CellStyle>; merges?: [number, number, number, number][]; widths?: number[] }
+/** Per row: its cells' styles, merged cells (span: columns a merged cell covers from here; skip: columns drawn by one). */
+interface RowExtra { st?: Record<number, CellStyle>; span?: Record<number, number>; skip?: Set<number>; blank?: Set<number>; tall?: boolean }
+
+function rowExtras(sheet: SheetData): RowExtra[] {
+  const out: RowExtra[] = sheet.rows.map(() => ({}))
+  for (const [key, st] of Object.entries(sheet.styles ?? {})) {
+    const [r, c] = key.split(':').map(Number)
+    if (!out[r]) continue
+    ;(out[r].st ??= {})[c] = st
+    if (st.w) out[r].tall = true
+  }
+  for (const [r1, c1, r2, c2] of sheet.merges ?? []) {
+    for (let r = r1; r <= r2 && r < out.length; r++) {
+      ;(out[r].span ??= {})[c1] = c2 - c1 + 1
+      for (let c = c1 + 1; c <= c2; c++) (out[r].skip ??= new Set()).add(c)
+      if (r > r1) (out[r].blank ??= new Set()).add(c1) // the merged cell's text shows once, in its first row
+    }
+  }
+  return out
+}
+
+function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number; bottom: number } }) {
   const { c } = useTheme()
   const [at, setAt] = useState(0)
   const [pick, setPick] = useState<{ r: number; c: number } | null>(null)
   const sheet = sheets[at] ?? sheets[0]
   const cols = useMemo(() => {
     const n = Math.max(0, ...sheet.rows.map((r) => r.length))
-    return Array.from({ length: n }, (_, j) => Math.round(Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length))))))
+    // The file's own column widths when it sets them (Excel's unit ≈ a character), otherwise from the content.
+    return Array.from({ length: n }, (_, j) => sheet.widths?.[j] ? Math.round(Math.min(360, Math.max(48, sheet.widths[j] * 7 + 10)))
+      : Math.round(Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length))))))
   }, [sheet])
+  const extras = useMemo(() => rowExtras(sheet), [sheet])
   const edges = useMemo(() => cols.reduce<number[]>((out, w) => [...out, (out[out.length - 1] ?? 0) + w], []), [cols]) // right edge of each column
   const numW = 26 + 8 * String(sheet.rows.length).length
   const tap = useCallback((r: number, x: number) => {
@@ -341,7 +368,7 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
             extraData={`${pick?.r}:${pick?.c}:${span.from}:${span.to}`}
             contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
             renderItem={({ item: row, index }) => (
-              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} />
+              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} />
             )}
             ListFooterComponent={sheet.total > sheet.rows.length
               ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
@@ -383,32 +410,56 @@ const HeadRow = memo(function HeadRow({ cols, numW, lit, look }: { cols: number[
 })
 
 /** One row: drawn again only when its cells, its lit cell or the column sizes change. */
-const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap }: {
+const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap, extra }: {
   row: string[]; index: number; cols: number[]; edges: number[]; numW: number; from: number; to: number; lit: number; look: SheetLook
-  onTap: (r: number, x: number) => void
+  onTap: (r: number, x: number) => void; extra?: RowExtra
 }) {
   const before = from > 0 ? edges[from - 1] : 0
   const after = edges[edges.length - 1] - (edges[to] ?? 0)
+  const height = extra?.tall ? ROW_H * 2 : ROW_H
+  const cells = []
+  for (let j = from; j <= to; j++) {
+    if (extra?.skip?.has(j)) {
+      if (j === from) cells.push(<View key={j} pointerEvents="none" style={{ width: cols[j] }} />) // part of a merged cell that starts off screen
+      continue
+    }
+    const span = extra?.span?.[j] ?? 1
+    const w = span > 1 ? edges[j + span - 1] - (j ? edges[j - 1] : 0) : cols[j]
+    const text = extra?.blank?.has(j) ? '' : row[j] ?? ''
+    const st = extra?.st?.[j]
+    const fill = st?.f ? `#${st.f}` : undefined
+    const ink = st?.c ? `#${st.c}` : fill ? (lightHex(st!.f!) ? '#18181b' : '#fafafa') : undefined
+    const align = st?.a ?? (span > 1 ? 'center' : text && NUMERIC.test(text) ? 'right' : 'left')
+    cells.push(
+      <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: fill,
+        alignItems: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' },
+        j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
+        {!!text && (
+          <RNText numberOfLines={st?.w ? 3 : 1} maxFontSizeMultiplier={1.3}
+            style={[index === 0 || st?.b ? look.bold : look.cell, ink && { color: ink }, st?.i && { fontStyle: 'italic' }, st?.u && { textDecorationLine: 'underline' }]}>
+            {text}
+          </RNText>
+        )}
+      </View>,
+    )
+  }
   return (
-    <Pressable onPress={(e) => onTap(index, e.nativeEvent.locationX)} style={{ flexDirection: 'row', height: ROW_H, borderBottomWidth: 1, borderColor: look.line }}>
+    <Pressable onPress={(e) => onTap(index, e.nativeEvent.locationX)} style={{ flexDirection: 'row', height, borderBottomWidth: 1, borderColor: look.line }}>
       <View pointerEvents="none" style={{ width: numW, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: lit >= 0 ? look.tubeSoft : look.panel2 }}>
         <RNText style={lit >= 0 ? look.numOn : look.num} allowFontScaling={false}>{index + 1}</RNText>
       </View>
       {before > 0 && <View pointerEvents="none" style={{ width: before }} />}
-      {cols.slice(from, to + 1).map((w, k) => {
-        const j = from + k
-        const text = row[j] ?? ''
-        return (
-          <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderColor: look.line, alignItems: text && NUMERIC.test(text) ? 'flex-end' : 'flex-start' },
-            j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
-            {!!text && <RNText numberOfLines={1} style={index === 0 ? look.bold : look.cell} maxFontSizeMultiplier={1.3}>{text}</RNText>}
-          </View>
-        )
-      })}
+      {cells}
       {after > 0 && <View pointerEvents="none" style={{ width: after }} />}
     </Pressable>
   )
 })
+
+/** A fill light enough to need dark text. */
+function lightHex(hex: string) {
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55
+}
 
 interface Slide { title: string; subtitle?: string; items: { text: string; level: number }[]; table?: string[][]; notes?: string }
 

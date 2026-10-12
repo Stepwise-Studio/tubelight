@@ -163,13 +163,96 @@ def show(v: Any) -> str:
     if isinstance(v, bool):
         return "TRUE" if v else "FALSE"
     if isinstance(v, float):
-        return str(int(v)) if v.is_integer() else f"{v:,.2f}".rstrip("0").rstrip(".") if abs(v) < 1e15 else f"{v:g}"
+        return str(int(v)) if v.is_integer() and abs(v) < 1e15 else f"{v:,.2f}".rstrip("0").rstrip(".") if abs(v) < 1e15 else f"{v:g}"
     if isinstance(v, int):
         return str(v)
     return str(v)
 
 
+# ------------------------------------------------------------------ number formats
+DATE_TOKENS = [("yyyy", "%Y"), ("yy", "%y"), ("mmmm", "%B"), ("mmm", "%b"), ("dddd", "%A"), ("ddd", "%a"), ("dd", "%d"), ("ss", "%S")]
+
+
+def _date_format(fmt: str) -> str:
+    """Excel's date/time codes as strftime's (mm is minutes after an hour or before seconds, else the month)."""
+    f = re.sub(r'\[[^\]]*\]|"', "", fmt.split(";")[0]).replace("\\", "")
+    ampm = bool(re.search(r"am/pm|a/p", f, re.I))
+    f = re.sub(r"am/pm|a/p", "%p", f, flags=re.I)
+    out, i = "", 0
+    while i < len(f):
+        low = f[i:].lower()
+        for tok, rep in DATE_TOKENS:
+            if low.startswith(tok):
+                out, i = out + rep, i + len(tok)
+                break
+        else:
+            if low.startswith("hh") or low.startswith("h"):
+                n = 2 if low.startswith("hh") else 1
+                out, i = out + ("%I" if ampm else "%H"), i + n
+            elif low.startswith("mm") or low.startswith("m"):
+                n = 2 if low.startswith("mm") else 1
+                minutes = "%H" in out[-4:] or "%I" in out[-4:] or f[i + n:].lstrip(":").lower().startswith("s")
+                out, i = out + ("%M" if minutes else "%m"), i + n
+            elif low.startswith("d"):
+                out, i = out + "%d", i + 1
+            elif low.startswith("s"):
+                out, i = out + "%S", i + 1
+            else:
+                out, i = out + f[i], i + 1
+    return out
+
+
+def fmt_value(v: Any, fmt: str | None) -> str:
+    """A cell as Excel shows it: its number format applied (decimals, thousands, %, currency, scientific, dates)."""
+    import datetime as dt
+
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    fmt = (fmt or "General").strip()
+    if isinstance(v, (dt.datetime, dt.date, dt.time)):
+        if fmt == "General" or not re.search(r"[dmyhs]", fmt, re.I):
+            return v.strftime("%Y-%m-%d %H:%M" if isinstance(v, dt.datetime) and (v.hour or v.minute) else "%Y-%m-%d") if not isinstance(v, dt.time) else v.strftime("%H:%M")
+        try:
+            out = v.strftime(_date_format(fmt))
+        except ValueError:
+            return str(v)
+        return re.sub(r"\b0(\d)(?=[:\s]|$)", r"\1", out) if re.search(r"(^|[^h])h(?!h)", fmt) else out
+    if not isinstance(v, (int, float)) or fmt == "General" or fmt == "@":
+        return show(v)
+    parts = fmt.split(";")
+    sec = parts[1] if v < 0 and len(parts) > 1 else parts[0]
+    neg = v < 0 and len(parts) > 1
+    sec = re.sub(r"\[[^\]]*\]", "", sec)  # colours and conditions
+    lit = re.findall(r'"([^"]*)"|\\(.)', sec)
+    prefix = "".join(a or b for a, b in lit[:1]) if re.match(r'\s*("|\\)', sec) else ""
+    body = re.sub(r'"[^"]*"|\\.|_.|\*.', "", sec)
+    x = abs(v) if neg else v
+    if "%" in body:
+        x *= 100
+    m = re.search(r"\.([0#?]+)", body)
+    places = len(m.group(1).rstrip("#")) if m else 0
+    if re.search(r"E[+-]", body, re.I):
+        text = f"{x:.{places}E}".replace("E+0", "E+").replace("E-0", "E-")
+    else:
+        text = f"{x:,.{places}f}" if "," in body.split(".")[0] else f"{x:.{places}f}"
+    symbols = "".join(ch for ch in re.sub(r'"[^"]*"', "", sec) if ch in "₹$€£¥")
+    suffix = "".join(a for a, _ in lit[1:]) if prefix else "".join(a or b for a, b in lit) if not re.match(r'\s*("|\\)', sec) else ""
+    out = f"{prefix or symbols}{text}{'%' if '%' in body else ''}{suffix}"
+    if neg and "(" in sec:
+        return f"({out})"
+    return f"-{out}" if neg else out
+
+
 if __name__ == "__main__":
+    import datetime as _dt
+
+    for v, f, want in [(1234567, "#,##0", "1,234,567"), (3.14159, "0.00", "3.14"), (0.256, "0.0%", "25.6%"), (125000, '"₹"#,##0', "₹125,000"),
+                       (1999.99, '"$"#,##0.00', "$1,999.99"), (-42.5, "0.0", "-42.5"), (6.022e23, "0.00E+00", "6.02E+23"),
+                       (_dt.datetime(2026, 10, 12), "dd mmm yyyy", "12 Oct 2026"), (_dt.datetime(2026, 10, 12, 14, 30), "yyyy-mm-dd hh:mm", "2026-10-12 14:30"),
+                       (_dt.time(9, 45), "h:mm AM/PM", "9:45 AM"), (-5, "#,##0;(#,##0)", "(5)"), (0.5, "General", "0.5")]:
+        assert fmt_value(v, f) == want, (v, f, fmt_value(v, f), want)
     b = Book({"Budget": {"B2": 100, "C2": 40, "D2": "=B2-C2", "B3": 50, "C3": "=B3/2", "D3": "=B3-C3", "D4": "=SUM(D2:D3)",
                          "E1": '="Left: "&D4', "F1": "=IF(D4>50,\"over\",\"under\")", "G1": "=Team!A1*2", "H1": "=FOO(1)",
                          "I1": "=I1+1", "J1": "=AVERAGE(B2:B3)", "K1": "=ROUND(10/3,2)"},

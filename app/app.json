@@ -150,7 +150,9 @@
             "./assets/fonts/InterDisplay-Regular.ttf",
             "./assets/fonts/InterDisplay-Medium.ttf",
             "./assets/fonts/InterDisplay-SemiBold.ttf",
-            "./assets/fonts/InterDisplay-Bold.ttf"
+            "./assets/fonts/InterDisplay-Bold.ttf",
+            "./assets/fonts/InstrumentSerif-Regular.ttf",
+            "./assets/fonts/InstrumentSerif-Italic.ttf"
           ]
         }
       ],

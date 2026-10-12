@@ -93,6 +93,9 @@ export const fonts = {
   medium: 'InterDisplay-Medium',
   semibold: 'InterDisplay-SemiBold',
   bold: 'InterDisplay-Bold',
+  /** Instrument Serif: documents' serif text (Word's Times, Cambria, Georgia…); regular and italic only. */
+  serif: 'InstrumentSerif-Regular',
+  serifItalic: 'InstrumentSerif-Italic',
 }
 
 /** Type scale 12 / 13 / 15 / 17 / 20 / 28 / 34. Weights 400 / 500 / 600. */

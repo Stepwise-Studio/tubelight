@@ -28,8 +28,8 @@ ROOT = Path(os.environ.get("VAULT_DIR") or Path(os.environ.get("WORKSPACES_DIR",
 MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a request
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
-MAX_ROWS, MAX_COLS = 1000, 60  # what a sheet preview carries
-PREVIEW_V = 3  # bump when previews change: older cached ones are made again (2: sheet formulas worked out; 3: Word with formatting)
+MAX_ROWS, MAX_COLS = 5000, 60  # what a sheet preview carries
+PREVIEW_V = 4  # bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",
@@ -360,53 +360,108 @@ def preview_of(name: str, data: bytes) -> dict[str, Any]:
 
 
 def _sheets(data: bytes) -> list[dict[str, Any]]:
-    """Each sheet's rows as text, formulas worked out (saved results first; files made by programs have none, so
-    sheetcalc computes them)."""
+    """Each sheet as Excel shows it: cells as text with their number formats applied and formulas worked out (saved
+    results first; files made by programs have none, so sheetcalc computes them), plus what makes it look like the
+    file: cell styles (bold, italic, colour, fill, alignment, wrap), merged cells and column widths. Files over
+    4 MB are read lighter, without styles."""
     import io
 
     from .documents import _no_broken_numpy
 
     _no_broken_numpy()
     from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
 
-    from .sheetcalc import Book, show
+    from .sheetcalc import Book, fmt_value
 
-    vals = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    raw = load_workbook(io.BytesIO(data), read_only=True)  # formulas
-    cells: dict[str, dict[str, Any]] = {}
-    saved: dict[str, dict[str, Any]] = {}
-    for ws, wf in zip(vals.worksheets, raw.worksheets):
-        cells[ws.title], saved[ws.title] = {}, {}
-        for rv, rf in zip(ws.iter_rows(max_row=MAX_ROWS * 2), wf.iter_rows(max_row=MAX_ROWS * 2)):
-            for v, f in zip(rv, rf):
-                if getattr(f, "coordinate", None) is None:
-                    continue
-                cells[ws.title][f.coordinate] = f.value
-                saved[ws.title][f.coordinate] = v.value
-    book = Book(cells)
+    light = len(data) > 4_000_000
+    vals = load_workbook(io.BytesIO(data), read_only=light, data_only=True)
+    raw = load_workbook(io.BytesIO(data), read_only=light)  # formulas
     out = []
-    for name, grid in cells.items():
-        def at(coord: str, name: str = name) -> Any:
-            v = saved[name].get(coord)
-            if v is None and isinstance(grid.get(coord), str) and grid[coord].startswith("="):
-                v = book.value(name, coord)
-            return grid.get(coord) if v is None else v
-        from openpyxl.utils.cell import coordinate_from_string, column_index_from_string, get_column_letter
-        if not grid:
-            out.append({"name": name, "rows": [], "total": 0})
-            continue
-        spots = [coordinate_from_string(c) for c in grid]
-        width = min(MAX_COLS, max(column_index_from_string(c) for c, _ in spots))
-        last = max(r for _, r in spots)
-        rows = []
-        for r in range(1, last + 1):
-            line = [show(at(f"{get_column_letter(c)}{r}")) for c in range(1, width + 1)]
+    for ws, wf in zip(vals.worksheets, raw.worksheets):
+        grid: dict[str, Any] = {}
+        saved: dict[str, Any] = {}
+        looks: dict[str, Any] = {}
+        last_r = last_c = 0
+        total = ws.max_row or 0  # before reading: walking rows makes openpyxl create empty ones
+        upto = max(1, min(total, MAX_ROWS))
+        for rv, rf in zip(ws.iter_rows(max_row=upto), wf.iter_rows(max_row=upto)):
+            for v, f in zip(rv, rf):
+                coord = getattr(f, "coordinate", None)
+                if coord is None:
+                    continue
+                grid[coord] = f.value
+                saved[coord] = v.value
+                looks[coord] = v
+                if f.value is not None:
+                    last_r, last_c = max(last_r, f.row), max(last_c, f.column)
+        out.append({"name": ws.title, "grid": grid, "saved": saved, "looks": looks, "last": (last_r, min(last_c, MAX_COLS)), "ws": ws,
+                    "total": total})
+    book = Book({sh["name"]: sh["grid"] for sh in out})
+    result = []
+    for sh in out:
+        name, grid, saved, looks, ws = sh["name"], sh["grid"], sh["saved"], sh["looks"], sh["ws"]
+        last_r, last_c = sh["last"]
+        rows: list[list[str]] = []
+        styles: dict[str, dict[str, Any]] = {}
+        for r in range(1, last_r + 1):
+            line = []
+            for c in range(1, last_c + 1):
+                coord = f"{get_column_letter(c)}{r}"
+                v = saved.get(coord)
+                if v is None and isinstance(grid.get(coord), str) and str(grid[coord]).startswith("="):
+                    v = book.value(name, coord)
+                    v = None if v is None else v
+                if v is None and not (isinstance(grid.get(coord), str) and str(grid.get(coord)).startswith("=")):
+                    v = grid.get(coord)
+                cell = looks.get(coord)
+                fmt = getattr(cell, "number_format", None) if not light else None
+                line.append(v if isinstance(v, str) and v.startswith("#") else fmt_value(v, fmt))
+                if not light and cell is not None:
+                    st = _cell_style(cell)
+                    if st:
+                        styles[f"{r - 1}:{c - 1}"] = st
             rows.append(line)
-        while rows and not any(rows[-1]):
-            rows.pop()
-        used = max((max((i + 1 for i, v in enumerate(r) if v), default=0) for r in rows), default=0)
-        out.append({"name": name, "rows": [r[:used] for r in rows[:MAX_ROWS]], "total": len(rows)})
-    return out
+        merges = []
+        if not light:
+            for m in getattr(ws, "merged_cells", None) and ws.merged_cells.ranges or []:
+                if m.min_row <= last_r and m.min_col <= last_c:
+                    merges.append([m.min_row - 1, m.min_col - 1, min(m.max_row, last_r) - 1, min(m.max_col, last_c) - 1])
+        widths = []
+        if not light:
+            for c in range(1, last_c + 1):
+                d = ws.column_dimensions.get(get_column_letter(c))
+                widths.append(round(d.width, 1) if d is not None and d.width and d.customWidth else 0)
+        result.append({"name": name, "rows": rows, "total": max(sh["total"], len(rows)), "styles": styles, "merges": merges, "widths": widths})
+    return result
+
+
+def _cell_style(cell: Any) -> dict[str, Any]:
+    """A cell's look, only what differs from plain: b, i, u, colour, fill, horizontal alignment, wrap."""
+    st: dict[str, Any] = {}
+    f = cell.font
+    if f is not None:
+        if f.b:
+            st["b"] = 1
+        if f.i:
+            st["i"] = 1
+        if f.u:
+            st["u"] = 1
+        rgb = getattr(f.color, "rgb", None) if f.color is not None else None
+        if isinstance(rgb, str) and re.fullmatch(r"[0-9A-Fa-f]{8}", rgb) and rgb[-6:] != "000000":  # theme colours aren't strings
+            st["c"] = rgb[-6:]
+    fill = cell.fill
+    if fill is not None and getattr(fill, "fill_type", None) == "solid":
+        rgb = getattr(fill.fgColor, "rgb", None)
+        if isinstance(rgb, str) and re.fullmatch(r"[0-9A-Fa-f]{8}", rgb) and rgb[-6:] not in ("FFFFFF", "000000"):
+            st["f"] = rgb[-6:]
+    al = cell.alignment
+    if al is not None:
+        if al.horizontal in ("center", "right", "left"):
+            st["a"] = al.horizontal
+        if al.wrap_text:
+            st["w"] = 1
+    return st
 
 
 def _slides(data: bytes) -> list[dict[str, Any]]:
