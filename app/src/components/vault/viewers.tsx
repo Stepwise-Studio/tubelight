@@ -221,11 +221,28 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   )
 }
 
+const SUPS: Record<string, string> = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' }
+const sup = (label: string) => (/^\d+$/.test(label) ? [...label].map((d) => SUPS[d]).join('') : `[${label}]`)
+
+/** What the Markdown renderer doesn't draw, made readable first: task boxes (☐ ☑), footnotes (raised numbers, their
+ * notes kept where they're written), and simple inline HTML (bold, italic, line breaks; other tags dropped). */
+function tidyMarkdown(md: string) {
+  return md
+    .replace(/^(\s*[-*+]\s+)\[([ xX])\]\s+/gm, (_, lead: string, mark: string) => `${lead}${mark === ' ' ? '☐' : '☑'} `)
+    .replace(/^\[\^([^\]]+)\]:\s*/gm, (_, label: string) => `${sup(label)} `)
+    .replace(/\[\^([^\]]+)\]/g, (_, label: string) => sup(label))
+    .replace(/<\/?(b|strong)>/gi, '**')
+    .replace(/<\/?(i|em)>/gi, '*')
+    .replace(/<br\s*\/?>/gi, '  \n')
+    .replace(/<\/?(u|span|div|p|sup|sub|small|font|center)(\s[^>]*)?>/gi, '')
+}
+
 const LONG = 12_000 // characters past which a document draws in sections as it scrolls
 
 /** A Markdown document. Short ones draw at once; long ones split at their headings (and big sections between
  * paragraphs) into sections a list draws as they scroll in, so opening and scrolling stay quick. */
-function Doc({ text, chrome }: { text: string; chrome: { top: number; bottom: number } }) {
+function Doc({ text: raw, chrome }: { text: string; chrome: { top: number; bottom: number } }) {
+  const text = useMemo(() => tidyMarkdown(raw), [raw])
   const parts = useMemo(() => {
     if (text.length <= LONG) return [text]
     const out: string[] = []
@@ -296,7 +313,7 @@ interface SheetData { name: string; rows: string[][]; total: number; styles?: Re
 interface RowExtra { st?: Record<number, CellStyle>; span?: Record<number, number>; skip?: Set<number>; blank?: Set<number>; tall?: boolean }
 
 function rowExtras(sheet: SheetData): RowExtra[] {
-  const out: RowExtra[] = sheet.rows.map(() => ({}))
+  const out: RowExtra[] = sheet.rows.map((r) => (r.some((cell) => cell.includes('\n')) ? { tall: true } : {})) // line breaks in a cell
   for (const [key, st] of Object.entries(sheet.styles ?? {})) {
     const [r, c] = key.split(':').map(Number)
     if (!out[r]) continue
@@ -444,7 +461,7 @@ const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, t
         alignItems: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' },
         j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
         {!!text && (
-          <RNText numberOfLines={st?.w ? 3 : 1} maxFontSizeMultiplier={1.3}
+          <RNText numberOfLines={st?.w || text.includes('\n') ? 3 : 1} maxFontSizeMultiplier={1.3}
             style={[index === 0 || st?.b ? look.bold : look.cell, ink && { color: ink }, st?.i && { fontFamily: index === 0 || st?.b ? fonts.semiboldItalic : fonts.italic }, st?.u && { textDecorationLine: 'underline' }]}>
             {text}
           </RNText>

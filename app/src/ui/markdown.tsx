@@ -155,12 +155,15 @@ function useStyles(c: Palette): MarkedStyles {
     text,
     paragraph: { paddingVertical: 0, marginBottom: 8 },
     strong: { fontFamily: fonts.semibold, fontWeight: 'normal' },
-    em: { fontFamily: fonts.italic }, // the embedded italic (fontStyle on Inter falls back to Roboto)
+    // The embedded italic, upright style: asking Android for italic of an embedded font finds no variant and draws upright
+    em: { fontFamily: fonts.italic, fontStyle: 'normal' },
     link: { color: c.tube, textDecorationLine: 'none', fontStyle: 'normal' },
     h1: { ...typeScale.heading, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },
     h2: { ...typeScale.headline, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },
     h3: { ...typeScale.bodyMedium, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink, marginBottom: 4 },
-    h4: { ...typeScale.bodyMedium, color: c.ink2 },
+    h4: { ...typeScale.bodyMedium, color: c.ink2, marginBottom: 4 },
+    h5: { ...typeScale.label, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink2, marginBottom: 4 },
+    h6: { ...typeScale.label, color: c.ink3, marginBottom: 4 },
     blockquote: { borderLeftWidth: 2, borderLeftColor: c.lineStrong, paddingLeft: 10, marginBottom: 8 },
     hr: { height: 1, backgroundColor: c.line, marginVertical: 10 },
     list: { marginBottom: 8 },
