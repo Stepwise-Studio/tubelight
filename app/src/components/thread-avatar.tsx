@@ -26,7 +26,7 @@ export function GroupAvatar({ color, icon, size = 48, working = false }: { color
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color || c.panel2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.imageOutline }}>
         <Icon icon={GROUP_ICONS[icon as GroupIcon] ?? GROUP_ICONS.group} size={Math.round(size * 0.46)} color="#18181b" strokeWidth={1.75} />
       </View>
-      {working && <View pointerEvents="none" style={{ position: 'absolute', inset: -3, borderRadius: size, borderWidth: 2, borderColor: c.tube }} />}
+      {working && <View pointerEvents="none" style={{ position: 'absolute', inset: -3, borderRadius: size, borderWidth: 2, borderColor: color || c.tube }} />}
     </View>
   )
 }

@@ -7,7 +7,7 @@ import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
 import { chatTitle, isExtraChat, useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
-import { Button, Icon, IconButton, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
+import { Button, IconButton, Press, Sheet, Text, TextField, confirm, haptic, showMenu, toast } from '@/ui'
 
 /** The header button of a DM: its chats with this teammate (a dot when another one has something new). */
 export function ChatsButton({ teammateId, threadId, onPress }: { teammateId: string; threadId: string; onPress: () => void }) {
@@ -77,16 +77,7 @@ export function ChatsSheet({ open: shown, onClose, teammateId, threadId, name }:
   return (
     <Sheet open={shown} onClose={close} title={`Chats with ${name}`}>
       <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
-        <Text variant="caption" color="ink3" style={{ marginHorizontal: 8, marginBottom: 10 }}>
-          Separate chats, one {name}: it knows what’s going on in each of them.
-        </Text>
-        <Press radius={14} onPress={create} disabled={busy} accessibilityLabel="New chat"
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 8, paddingVertical: 10 }}>
-          <View style={{ width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon icon={Add01Icon} size={20} color="tube" />
-          </View>
-          <Text variant="bodyMedium" color="tube">New chat</Text>
-        </Press>
+        <Button label="New chat" icon={Add01Icon} fullWidth loading={busy} onPress={create} style={{ marginHorizontal: 8, marginBottom: 12 }} />
         {chats.map((t) => <ChatItem key={t.id} t={t} current={t.id === threadId} name={name}
           onPress={() => { close(); if (t.id !== threadId) open(t.id) }}
           onLongPress={() => showMenu({

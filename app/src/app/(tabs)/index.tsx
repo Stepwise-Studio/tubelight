@@ -37,7 +37,7 @@ export default function Chats() {
 
 const CREW_ROW = 64
 
-/** Like WhatsApp's locked chats: sits above the first chat, scrolled out of sight until you pull the list down. */
+/** Your crew, after the last chat. */
 function CrewRow() {
   const { c } = useTheme()
   const ws = useWorkspace()
@@ -70,7 +70,6 @@ function Inbox({ query }: { query: string }) {
   const ws = useWorkspace()
   const inset = useTabBarInset()
   const [refreshing, setRefreshing] = useState(false)
-  const [height, setHeight] = useState(0)
   const list = useRef<FlatList<Thread>>(null)
   const refresh = async () => { setRefreshing(true); await ws.refresh(); setRefreshing(false) }
 
@@ -117,13 +116,8 @@ function Inbox({ query }: { query: string }) {
     <FlatList
       ref={list}
       data={threads}
-      // Start with the Crew row scrolled away; the list is always tall enough to hide it, and stops at it on the way up.
-      onLayout={(e) => { if (!height) { setHeight(e.nativeEvent.layout.height); requestAnimationFrame(() => list.current?.scrollToOffset({ offset: CREW_ROW, animated: false })) } }}
-      ListHeaderComponent={q ? null : <CrewRow />}
-      snapToOffsets={q ? undefined : [0, CREW_ROW]}
-      snapToEnd={false}
       keyExtractor={(t) => t.id}
-      contentContainerStyle={{ paddingBottom: inset + 96, minHeight: q ? undefined : height + CREW_ROW }}
+      contentContainerStyle={{ paddingBottom: inset + 96 }}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
@@ -133,7 +127,9 @@ function Inbox({ query }: { query: string }) {
         </Animated.View>
       )}
       ListEmptyComponent={q ? <EmptyState title="No chats match" body={`Nothing in your inbox matches "${query.trim()}".`} /> : null}
-      ListFooterComponent={ws.projects.length === 0 && !q ? (
+      ListFooterComponent={q ? null : <>
+      <CrewRow />
+      {ws.projects.length === 0 && (
         <Press radius={16} onPress={() => openSheet('project')} outerStyle={{ marginHorizontal: 16, marginTop: 12 }} style={{ padding: 16, borderWidth: 1, borderColor: c.line, borderStyle: 'dashed', flexDirection: 'row', gap: 12, alignItems: 'center' }}>
           <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon icon={UserGroupIcon} size={20} color="ink2" />
@@ -143,7 +139,8 @@ function Inbox({ query }: { query: string }) {
             <Text variant="caption" color="ink3">A group chat where several teammates work together.</Text>
           </View>
         </Press>
-      ) : null}
+      )}
+      </>}
     />
   )
 }

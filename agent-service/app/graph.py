@@ -204,24 +204,26 @@ def local_now(ctx: RunCtx) -> datetime:
 
 
 async def other_chats(ctx: RunCtx) -> str:
-    """A DM teammate's other chats with the user (`dm:<id>` and `dm:<id>:<n>`), newest first, each as its brief."""
+    """In a DM: the teammate's other chats with the user and the groups it's in, newest first, each as its brief."""
     if ctx.project or not ctx.thread_id.startswith("dm:"):
         return ""
-    rows = await db.select("threads", {"owner_id": f"eq.{ctx.owner_id}", "kind": "eq.dm", "id": f"neq.{ctx.thread_id}",
-                                       "teammate_id": f"eq.{ctx.members[0]['id']}", "last_message_at": "not.is.null",
-                                       "order": "last_message_at.desc", "limit": "6", "select": "id,title,last_message_at"})
+    rows = [r for r in await brief.teammate_chats(ctx.owner_id, ctx.members[0]["id"]) if r["id"] != ctx.thread_id][:6]
+    names = {p["id"]: p["name"] for p in await db.select("projects", {
+        "id": f"in.({','.join(r['project_id'] for r in rows if r.get('project_id'))})", "select": "id,name"})} \
+        if any(r.get("project_id") for r in rows) else {}
     out = []
     for r in rows:
         # ponytail: 6 briefs cut to 600 chars; a search tool over briefs if users keep dozens of chats
         text = await brief.get(r["id"])
         if not text:  # a chat older than the keeper (or not folded in yet): its latest lines instead
             last = await db.select("messages", {"thread_id": f"eq.{r['id']}", "kind": "eq.text", "order": "created_at.desc",
-                                                "limit": "8", "select": "sender_type,text"})
-            text = "\n".join(f"{ctx.user_name if m['sender_type'] == 'user' else 'You'}: {m['text'][:160]}"
-                              for m in reversed(last))
+                                                "limit": "8", "select": "sender_type,teammate_id,text"})
+            text = "\n".join(f"{ctx.user_name if m['sender_type'] == 'user' else 'You' if m['teammate_id'] == ctx.members[0]['id'] else 'A teammate'}: "
+                              f"{m['text'][:160]}" for m in reversed(last))
         if text:
-            out.append(f"### {r.get('title') or ('Main chat' if r['id'].count(':') == 1 else 'Untitled chat')} "
-                       f"(last active {r['last_message_at'][:10]})\n{text[:600]}")
+            name = (f"Group \"{names.get(r.get('project_id'), 'a project')}\"" if r["kind"] == "project"
+                    else r.get("title") or ("Main chat" if r["id"].count(":") == 1 else "Untitled chat"))
+            out.append(f"### {name} (last active {r['last_message_at'][:10]})\n{text[:600]}")
     return "\n".join(out)
 
 
@@ -375,9 +377,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "statuses, results), check rather than repeat:\n" + ctx.brief)
     others = await other_chats(ctx)
     if others:
-        lines.append(f"## Your other chats with {ctx.user_name}\nThe same you, in separate chats {ctx.user_name} keeps "
-                     "with you. Use them when asked about another chat or when they bear on this one; search_chat "
-                     "searches them too:\n" + others)
+        lines.append(f"## Your other chats\nThe same you, in {ctx.user_name}'s other chats with you and the project "
+                     "groups you're in. Use them when asked about another chat or when they bear on this one; "
+                     "search_chat searches them too:\n" + others)
     if ctx.apps:
         lines.append(f"{ctx.user_name} @mentioned {', '.join(connectors.name_of(a) for a in ctx.apps)} in this request: "
                      "use those apps for it.")

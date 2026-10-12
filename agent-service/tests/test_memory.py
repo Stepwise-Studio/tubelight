@@ -83,8 +83,29 @@ async def test_a_teammates_chats_know_about_each_other(api, env):
     await settle()
     assert "## Your other chats" in fake.calls[0][0].content and "free tier stays at 3" in fake.calls[0][0].content
     assert '(in the other chat "main chat")' in seen["result"]
+    assert "Group" not in fake.calls[0][0].content  # not in any group yet
     await brief.refresh(OWNER, side, "Akhil", "UTC")
     assert fdb.rows("threads", id=side)[0]["title"] == "Pricing check"
+
+
+async def test_a_dm_knows_the_groups_its_teammate_is_in(api, env):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    proj = project(fdb, [dev])
+    group = f"proj:{proj['id']}"
+    next(t for t in fdb.tables["threads"] if t["id"] == group)["last_message_at"] = "2026-09-28T04:00:00+00:00"
+    said(fdb, group, "2026-09-28T03:30:00+00:00", "launch moves to friday")
+    seen = {}
+
+    def answer(messages):
+        seen["result"] = next(m.content for m in reversed(messages) if isinstance(m, ToolMessage))
+        return ai("Friday.")
+
+    fake.script = [ai(calls=[("search_chat", {"query": "launch friday"})]), answer]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "when is the launch, per the group?"})
+    await settle()
+    assert 'Group "Launch"' in fake.calls[0][0].content and "launch moves to friday" in fake.calls[0][0].content
+    assert '(in the other chat "group Launch")' in seen["result"]
 
 
 def later(**kw) -> str:

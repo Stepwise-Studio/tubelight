@@ -1,3 +1,4 @@
+import re
 """Fakes: an in-memory PostgREST (db.*), a scripted chat model, and in-memory LangGraph memory."""
 import asyncio
 import hashlib
@@ -29,7 +30,8 @@ class FakeDB:
         if key in ("select", "order", "limit"):
             return True
         if key == "or":  # (text.ilike.*a*,text.ilike.*b*)
-            return any(FakeDB._ok(row, *c.split(".", 1)) for c in cond.strip("()").split(","))
+            parts = re.split(r",(?![^()]*\))", cond[1:-1])  # commas outside an in.(...) list
+            return any(FakeDB._ok(row, *c.split(".", 1)) for c in parts)
         op, _, val = cond.partition(".")
         if "->>" in key:
             col, sub = key.split("->>")

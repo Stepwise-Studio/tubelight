@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, computers, config, connectors, db, documents, files, followups, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
+from . import automations, brief, computers, config, connectors, db, documents, files, followups, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -290,10 +290,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         words = re.findall(r"[\w'-]{3,}", query.lower())[:5]
         if not words:
             return "Give a few keywords to look for."
-        # In a DM: every chat with this teammate (`dm:<id>` and its extra `dm:<id>:<n>` chats), labelled by chat.
+        # In a DM: every chat this teammate is in (its DMs and its groups), labelled by chat.
         dm = f"dm:{ctx.members[0]['id']}" if ctx.thread_id.startswith("dm:") and not ctx.project else None
+        scope = [r["id"] for r in await brief.teammate_chats(ctx.owner_id, ctx.members[0]["id"])] if dm else []
         rows = await db.select("messages", {
-            "thread_id": f"like.{dm}*" if dm else f"eq.{ctx.thread_id}", "owner_id": f"eq.{ctx.owner_id}",
+            "thread_id": f"in.({','.join(dict.fromkeys([ctx.thread_id, *scope]))})", "owner_id": f"eq.{ctx.owner_id}",
             "kind": "in.(text,handoff)", "order": "created_at.desc", "limit": "40",
             "or": "(" + ",".join(f"text.ilike.*{w}*" for w in words) + ")",
             "select": "created_at,sender_type,teammate_id,text,thread_id"})
@@ -303,7 +304,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         best = sorted(rows, key=lambda r: -sum(w in r["text"].lower() for w in words))[:8]  # most words matched first
         others = {r["thread_id"] for r in best} - {ctx.thread_id}
         titles = {t["id"]: t.get("title") or ("main chat" if t["id"] == dm else "untitled chat") for t in await db.select(
-            "threads", {"id": f"in.({','.join(others)})", "select": "id,title"})} if others else {}
+            "threads", {"id": f"in.({','.join(others)})", "select": "id,title,project_id"}) if not t.get("project_id")} if others else {}
+        if any(t.startswith("proj:") for t in others):
+            titles |= {f"proj:{p['id']}": f"group {p['name']}" for p in await db.select("projects", {
+                "id": f"in.({','.join(t[5:] for t in others if t.startswith('proj:'))})", "select": "id,name"})}
         return "\n".join(f"[{datetime.fromisoformat(r['created_at']).astimezone(zone):%a %b %d, %I:%M %p}] "
                          + (f"(in the other chat \"{titles.get(r['thread_id'], 'another chat')}\") " if r["thread_id"] != ctx.thread_id else "") +
                          f"{ctx.user_name if r['sender_type'] == 'user' else names.get(r['teammate_id'], 'Teammate')}: "

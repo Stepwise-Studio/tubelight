@@ -43,7 +43,7 @@ export const faceSeed = (t: Pick<Teammate, 'avatar_shape' | 'name'>): Face => {
 export interface TeammateAvatarProps {
   teammate: Pick<Teammate, 'avatar_shape' | 'color' | 'name'>
   size?: number
-  /** `working` while the teammate has a live run: an accent ring, no motion. */
+  /** `working` while the teammate has a live run: a ring in their own colour, no motion. */
   state?: AvatarState
   interactive?: boolean
   /** Kept for callers from the animated avatars; the faces are static now. */
@@ -76,7 +76,7 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
       {working && (
         <View
           pointerEvents="none"
-          style={{ position: 'absolute', inset: -3, borderRadius: size, borderWidth: 2, borderColor: c.tube }}
+          style={{ position: 'absolute', inset: -3, borderRadius: size, borderWidth: 2, borderColor: teammate.color || c.tube }}
         />
       )}
     </View>

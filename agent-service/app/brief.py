@@ -84,6 +84,17 @@ async def _members(thread: dict) -> list[dict]:
     return await db.select("teammates", {"id": f"in.({','.join(ids)})", "select": "id,name,handle"}) if ids else []
 
 
+async def teammate_chats(owner_id: str, teammate_id: str) -> list[dict]:
+    """Every chat a teammate is in: its DMs with the user (`dm:<id>`, `dm:<id>:<n>`) and the project groups it's a
+    member of, most recently active first."""
+    links = await db.select("project_members", {"teammate_id": f"eq.{teammate_id}", "select": "project_id"})
+    groups = ",".join(l["project_id"] for l in links)
+    return await db.select("threads", {
+        "owner_id": f"eq.{owner_id}", "last_message_at": "not.is.null", "order": "last_message_at.desc",
+        "or": f"(teammate_id.eq.{teammate_id}" + (f",project_id.in.({groups})" if groups else "") + ")",
+        "select": "id,kind,title,project_id,last_message_at"})
+
+
 def is_extra(thread_id: str) -> bool:
     """A teammate's extra chat (`dm:<teammate>:<id>`), beside the main one (`dm:<teammate>`)."""
     return thread_id.count(":") == 2
