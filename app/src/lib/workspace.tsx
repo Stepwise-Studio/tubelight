@@ -1,6 +1,9 @@
 import { createContext, use, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
+import AsyncStorage from '@react-native-async-storage/async-storage'
+
 import { onReturn } from './app-state'
+import * as outbox from './outbox'
 import { liveChannel } from './realtime'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Message, Project, ProjectMember, Run, Teammate, Thread } from '@/lib/types'
@@ -35,6 +38,8 @@ export interface Workspace {
   threadTitle: (threadId: string) => string
   isWorking: (teammateId: string) => boolean
   isThreadLive: (threadId: string) => boolean
+  /** The last refresh couldn't reach Supabase: what's shown is the saved copy. */
+  offline: boolean
   chatsWith: (teammateId: string) => Thread[]
   newChat: (teammateId: string) => Promise<string>
   renameChat: (threadId: string, title: string) => Promise<void>
@@ -72,6 +77,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const [pendingApprovals, setPending] = useState<Approval[]>([])
   const [liveRuns, setLiveRuns] = useState<Run[]>([])
   const [previews, setPreviews] = useState<Record<string, Preview>>({})
+  const [offline, setOffline] = useState(false)
   const loaded = useRef(false)
 
   const refresh = useCallback(async () => {
@@ -86,11 +92,15 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     ])
     const failed = [t, p, m, th, a, r].find((x) => x.error)
     if (failed) {
-      setError('Unable to load your workspace. Check your connection and pull to refresh.')
+      // Offline with the saved copy (or an earlier load) on screen: keep it, like WhatsApp; say so quietly.
+      if (loaded.current) setOffline(true)
+      else setError('Unable to load your workspace. Check your connection and pull to refresh.')
       setLoading(false)
       return
     }
     setError(null)
+    setOffline(false)
+    outbox.flush()
     setTeammates(t.data as Teammate[])
     known.current = new Set((t.data as Teammate[]).map((x) => x.id))
     setProjects(p.data as Project[])
@@ -111,6 +121,20 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     const next: Record<string, Preview> = {}
     for (const row of rows) if (row.data) next[row.data.thread_id] = row.data as Preview
     setPreviews(next)
+    AsyncStorage.setItem(`tl.ws.${userId}`, JSON.stringify({ t: t.data, p: p.data, m: m.data, th: th.data, a: a.data, previews: next })).catch(() => {})
+  }, [userId])
+
+  // The last workspace is kept on the phone: the inbox shows at once on a cold start, and with no connection at all.
+  useEffect(() => {
+    if (!userId) return
+    AsyncStorage.getItem(`tl.ws.${userId}`).then((v) => {
+      if (!v || loaded.current) return
+      const c = JSON.parse(v)
+      setTeammates(c.t); known.current = new Set((c.t as Teammate[]).map((x) => x.id))
+      setProjects(c.p); setMembers(c.m); setThreads(c.th); setPending(c.a); setPreviews(c.previews)
+      loaded.current = true
+      setLoading(false)
+    }, () => {})
   }, [userId])
 
   // Teammates speak in the user's local time: keep the device's time zone in their auth metadata.
@@ -217,7 +241,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const crew = teammates.filter((t) => !isComputer(t) && !isPhone(t))
   return (
     <Ctx value={{
-      loading, error, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
+      loading, error, offline, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
       refresh, markRead, teammate, project, thread, membersOf, threadTeammates, threadTitle, isWorking, isThreadLive,
       chatsWith, newChat, renameChat, deleteChat,
     }}>

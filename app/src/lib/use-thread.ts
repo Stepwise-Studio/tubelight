@@ -1,15 +1,18 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, api } from '@/lib/api'
 import { syncNotifications } from '@/lib/phone'
 import { supabase } from '@/lib/supabase'
+import * as outbox from '@/lib/outbox'
 import { liveChannel } from '@/lib/realtime'
 import type { Approval, Attachment, DeltaEvent, DoneEvent, LiveState, Message, StatusEvent } from '@/lib/types'
 
 const PAGE = 50
 
 /** A message as the UI holds it: DB rows plus optimistic sends. */
-export type ChatMessage = Message & { local?: 'sending' | 'failed' }
+/** `queued`: written while the server was out of reach; lib/outbox sends it when it's back. */
+export type ChatMessage = Message & { local?: 'sending' | 'queued' | 'failed' }
 export interface Ghost { stream_id: string; run_id: string; teammate_id: string; text: string; done: boolean; event_type?: string }
 export interface LiveStatus { run_id: string; teammate_id: string; state: LiveState; label?: string }
 export interface SendOptions { reply_to?: string | null; attachments?: Attachment[]; voiceTask?: boolean; apps?: string[] }
@@ -79,13 +82,14 @@ export function useThread(threadId: string, ownerId: string | undefined) {
       supabase.from('approvals').select('*').eq('thread_id', threadId),
     ])
     if (m.error || a.error) {
-      setError('Unable to load this chat. Check your connection and try again.')
+      // Offline with a saved copy on screen: keep showing it, like WhatsApp.
+      setMessages((prev) => { if (!prev.length) setError('Unable to load this chat. Check your connection and try again.'); return prev })
       setLoading(false)
       return
     }
     setError(null)
     const rows = m.data as Message[]
-    setMessages((prev) => [...prev.filter((x) => x.local), ...rows])
+    setMessages((prev) => [...prev.filter((x) => x.local && !rows.some((r) => r.id === x.id)), ...rows])
     oldest.current = rows.at(-1)?.created_at ?? null
     setHasMore(rows.length === PAGE)
     setApprovals(Object.fromEntries((a.data as Approval[]).map((x) => [x.id, x])))
@@ -117,6 +121,33 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     const sid = row.meta?.stream_id
     if (sid) setGhosts((g) => { if (!g[sid]) return g; const { [sid]: _, ...rest } = g; return rest })
   }, [])
+
+  // The last page is kept on the phone: the chat opens at once, and offline it still shows.
+  const cacheKey = `tl.chat.${threadId}`
+  useEffect(() => {
+    let off = false
+    Promise.all([AsyncStorage.getItem(cacheKey).catch(() => null), outbox.queuedFor(threadId)]).then(([v, queued]) => {
+      if (off) return
+      const saved = (v ? JSON.parse(v) : []) as Message[]
+      const waiting: ChatMessage[] = queued.map((q) => ({ ...q.local, local: 'queued' }))
+      setMessages((prev) => (prev.some((x) => !x.local) ? [...waiting.filter((w) => !prev.some((p) => p.id === w.id)), ...prev]
+        : [...waiting, ...prev.filter((p) => !waiting.some((w) => w.id === p.id)), ...saved]))
+      if (saved.length) setLoading(false)
+    })
+    const stop = outbox.onOutbox(({ localId, sent, failed }) => setMessages((prev) => {
+      if (failed) return prev.map((p) => (p.id === localId ? { ...p, local: 'failed' } : p))
+      const rest = prev.filter((p) => p.id !== localId)
+      return sent && !rest.some((p) => p.id === sent.id) ? [sent, ...rest] : rest
+    }))
+    return () => { off = true; stop() }
+  }, [threadId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const keep = messages.filter((m) => !m.local).slice(0, PAGE)
+      if (keep.length) AsyncStorage.setItem(cacheKey, JSON.stringify(keep)).catch(() => {})
+    }, 800)
+    return () => clearTimeout(t)
+  }, [messages, cacheKey])
 
   // One hook instance per thread screen (the route remounts per threadId), so no reset here.
   useEffect(() => {
@@ -152,7 +183,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
         },
         approval: (e) => { if (e.eventType !== 'DELETE') { const a = e.new as Approval; setApprovals((m) => ({ ...m, [a.id]: a })) } },
         // Rows can land between the first load and the join (or during a dropped socket): reload on every join.
-        joined: load,
+        joined: () => { load(); outbox.flush() },
       })
     })()
     return () => {
@@ -164,16 +195,19 @@ export function useThread(threadId: string, ownerId: string | undefined) {
   const post = async (local: ChatMessage, mentions: string[]) => {
     await syncNotifications().catch(() => {}) // "what did Kishore send me?" needs the phone's latest
     try {
-      const res = await api<{ message: Message; run_id: string }>(`/threads/${encodeURIComponent(threadId)}/messages`, {
-        method: 'POST',
-        json: { text: local.text, mentions, reply_to: local.reply_to ?? null, attachments: local.meta.attachments ?? [], apps: local.meta.apps ?? [], voice_task: !!local.meta.voice_task },
-      })
+      const res = await outbox.send({ local, mentions })
       setMessages((prev) => {
         const withoutLocal = prev.filter((p) => p.id !== local.id)
         return withoutLocal.some((p) => p.id === res.message.id) ? withoutLocal : [res.message, ...withoutLocal]
       })
       return null
     } catch (e) {
+      if (outbox.unreachable(e)) {  // no connection: wait on the phone and go out when it's back
+        const { local: _, ...row } = local
+        await outbox.enqueue({ local: row, mentions })
+        setMessages((prev) => prev.map((p) => (p.id === local.id ? { ...p, local: 'queued' } : p)))
+        return null
+      }
       setMessages((prev) => prev.map((p) => (p.id === local.id ? { ...p, local: 'failed' } : p)))
       return e instanceof ApiError ? e.message : 'Unable to send. Check your connection and try again.'
     }
@@ -182,7 +216,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
   /** Optimistic send. Resolves to an error message, or null when sent. */
   const send = (text: string, mentions: string[], opts: SendOptions = {}) => {
     const local: ChatMessage = {
-      id: `local-${++localSeq}`, thread_id: threadId, owner_id: ownerId ?? '', sender_type: 'user', teammate_id: null,
+      id: `local-${Date.now().toString(36)}-${++localSeq}`, /* unique across restarts: queued ones outlive the app */ thread_id: threadId, owner_id: ownerId ?? '', sender_type: 'user', teammate_id: null,
       text, mentions, kind: 'text',
       meta: { ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.voiceTask ? { voice_task: true } : {}), ...(opts.apps?.length ? { apps: opts.apps } : {}) },
       reply_to: opts.reply_to ?? null, proactive: false, run_id: null, created_at: new Date().toISOString(), local: 'sending',
@@ -207,7 +241,7 @@ export function useThread(threadId: string, ownerId: string | undefined) {
     }
   }
 
-  const discard = (id: string) => setMessages((prev) => prev.filter((p) => p.id !== id))
+  const discard = (id: string) => { outbox.remove(id); setMessages((prev) => prev.filter((p) => p.id !== id)) }
 
   /** Your reaction on a message (the same emoji again removes it): shown at once, then confirmed by the server. */
   const react = async (m: ChatMessage, emoji: string) => {

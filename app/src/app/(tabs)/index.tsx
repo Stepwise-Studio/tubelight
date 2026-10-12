@@ -118,6 +118,13 @@ function Inbox({ query }: { query: string }) {
     <FlatList
       ref={list}
       data={threads}
+      // Showing the saved copy: say so quietly (WhatsApp's "Connecting…"); pull to refresh tries again.
+      ListHeaderComponent={ws.offline ? (
+        <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 8 }}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.ink3 }} />
+          <Text variant="footnote" color="ink3">Waiting for connection</Text>
+        </Animated.View>
+      ) : null}
       keyExtractor={(t) => t.id}
       contentContainerStyle={{ paddingBottom: inset + 96 }}
       keyboardShouldPersistTaps="handled"

@@ -5,7 +5,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, FlashIcon, VaultIcon,
+  Alert02Icon, Clock01Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, FlashIcon, VaultIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -420,7 +420,7 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
           onLongPress={() => { haptic.light(); messageMenu(m, m.local ? undefined : onReply, onReact) }}
           delayLongPress={350}
           style={{ maxWidth: '82%' }}
-          accessibilityLabel={`You: ${m.text}${m.local === 'failed' ? '. Not sent' : ''}`}
+          accessibilityLabel={`You: ${m.text}${m.local === 'failed' ? '. Not sent' : m.local === 'queued' ? '. Waiting for connection' : ''}`}
         >
           <Bubble side="right" first={first} last={last} tone="mine" highlighted={highlighted} style={{ opacity: m.local === 'sending' ? 0.6 : 1 }}>
             {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
@@ -429,6 +429,15 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
           </Bubble>
         </Pressable>
         <Reactions m={m} side="right" />
+        {m.local === 'queued' && (
+          <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+            <Icon icon={Clock01Icon} size={13} color="ink3" />
+            <Text variant="footnote" color="ink3">Sends when you’re back online</Text>
+            <Press radius={8} static onPress={() => onDiscardMessage(m)} style={{ paddingHorizontal: 8, minHeight: 32, justifyContent: 'center' }}>
+              <Text variant="label" color="ink3">Delete</Text>
+            </Press>
+          </Animated.View>
+        )}
         {m.local === 'failed' && (
           <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
             <Icon icon={Alert02Icon} size={14} color="danger" />
