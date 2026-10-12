@@ -203,9 +203,9 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   if (locked && !doc) return <Locked name={item.name} onUnlock={async (pw) => { const info = await Phone!.pdfUnlock!(locked, pw); setDoc({ uri: locked, sizes: info.sizes, start: 1 }); setPage(1) }} />
   if (!doc) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={c.ink3} /></View>
   const pages = doc.sizes.length
-  const go = (n: number, animated = true) => {
+  const go = (n: number) => {
     const i = Math.min(Math.max(n, 1), pages) - 1
-    list.current?.scrollToOffset({ offset: layout[i].offset - chrome.top - GAP + 1, animated })
+    list.current?.scrollToOffset({ offset: layout[i].offset - chrome.top - GAP + 1, animated: true })
   }
 
   return (
@@ -267,7 +267,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
 
       {/* Where you are: hold and slide to scrub through the pages (screen readers step it up and down) */}
       {!finding && (!bare || rail || holding) && (
-        <PageScrubber pages={pages} page={page} bottom={chrome.bottom + 18} onScrub={(n) => go(n, false)}
+        <PageScrubber pages={pages} page={page} bottom={chrome.bottom + 18 + 44} onScrub={(n) => go(n)}
           onHold={(h) => { setHolding(h); if (!h) poke() }}>
           {(shown) => (
             <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
