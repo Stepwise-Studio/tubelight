@@ -9,7 +9,7 @@ import { Image } from 'expo-image'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewToken } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeInLeft, FadeOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
+import Animated, { FadeInDown, FadeInLeft, FadeOutDown, FadeOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
 import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
 
 import { Phone } from '@/lib/phone'
@@ -23,7 +23,11 @@ import { FileIcon } from './file-icon'
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
 const GAP = 12
 const MAX_ZOOM = 4
-const RAIL = 88 // the page tray's width
+const THUMB = 64 // a page's width in the tray
+const COLS = 3
+const RAIL = COLS * THUMB + (COLS - 1) * 10 + 24 // the page tray's width: three pages a row
+const SLIDE_IN = FadeInDown.duration(motion.duration.fast).easing(motion.ease.smoothOut)
+const SLIDE_OUT = FadeOutDown.duration(motion.duration.quick)
 const QUICK = motion.timing(motion.duration.quick) // plain objects, so worklets can use them
 const FAST = motion.timing(motion.duration.fast)
 const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen (a constant: lists can't take new settings)
@@ -44,6 +48,15 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   const [rail, setRail] = useState(false)
   const [jump, setJump] = useState(false)
   const [finding, setFinding] = useState(false)
+  // The corner controls step aside while you read (as the system's viewers do) and come back when you scroll.
+  const [bare, setBare] = useState(false)
+  const [nudge, setNudge] = useState(0) // a scroll ended: wait again before hiding
+  useEffect(() => {
+    if (bare) return
+    const t = setTimeout(() => setBare(true), 2500)
+    return () => clearTimeout(t)
+  }, [bare, nudge])
+  const poke = useCallback(() => { setBare(false); setNudge((n) => n + 1) }, [])
   const [matches, setMatches] = useState<Match[] | null>(null)
   const [hit, setHit] = useState(0)
   const list = useRef<FlatList<number>>(null)
@@ -127,6 +140,9 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
     .onStart((e) => { fx.set(e.focalX); fy.set(e.focalY) })
     .onUpdate((e) => { live.set(Math.min(Math.max(e.scale, 1 / zoomed.get()), MAX_ZOOM / zoomed.get())) })
     .onEnd(() => { runOnJS(commit)(live.get(), fx.get(), fy.get()) })
+  // A tap shows or hides the corner controls (after waiting out a double-tap).
+  const flip = useCallback(() => setBare((b) => !b), [])
+  const singleTap = Gesture.Tap().numberOfTaps(1).onEnd(() => { runOnJS(flip)() })
   const doubleTap = Gesture.Tap().numberOfTaps(2).maxDelay(250).onEnd((e) => {
     const target = zoomed.get() > 1.05 ? 1 : 2.5
     const ratio = target / zoomed.get()
@@ -187,7 +203,7 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
 
   return (
     <View style={{ flex: 1, overflow: 'hidden' }}>
-      <GestureDetector gesture={Gesture.Simultaneous(pinch, doubleTap)}>
+      <GestureDetector gesture={Gesture.Simultaneous(pinch, Gesture.Exclusive(doubleTap, singleTap))}>
         <Animated.View style={[{ flex: 1 }, liveStyle]}>
           <ScrollView ref={across} horizontal scrollEnabled={zoom > 1} showsHorizontalScrollIndicator={false} bounces={false}
             onScroll={(e) => offX.set(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32}
@@ -203,7 +219,9 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
               initialScrollIndex={doc.start - 1}
               onViewableItemsChanged={seen}
               viewabilityConfig={PAGE_SEEN}
-              onScroll={(e) => offY.set(e.nativeEvent.contentOffset.y)}
+              onScroll={(e) => { offY.set(e.nativeEvent.contentOffset.y); if (bare) setBare(false) }}
+              onScrollEndDrag={poke}
+              onMomentumScrollEnd={poke}
               scrollEventThrottle={32}
               windowSize={zoom > 1.5 ? 3 : 5}
               renderItem={({ item: i }) => (
@@ -227,8 +245,8 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
       )}
 
       {/* Pages, on their own in the corner */}
-      {!finding && (
-        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+      {!finding && (!bare || rail) && (
+        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
           style={{ position: 'absolute', left: 16, bottom: chrome.bottom + 18 }}>
           <Pressable onPress={() => { haptic.tap(); setRail((r) => !r) }} accessibilityLabel={rail ? 'Hide pages' : 'Show pages'} hitSlop={6}
             style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: rail ? c.tube : 'rgba(24,24,27,0.9)' }}>
@@ -238,8 +256,8 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
       )}
 
       {/* Where you are (tap to go to a page) */}
-      {!finding && (
-        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+      {!finding && (!bare || rail) && (
+        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
           style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
           <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
             style={{ height: 44, borderRadius: 22, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
@@ -249,8 +267,8 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
       )}
 
       {/* Search, on its own in the other corner */}
-      {!finding && !!Phone?.pdfSearch && (
-        <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}
+      {!finding && (!bare || rail) && !!Phone?.pdfSearch && (
+        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
           style={{ position: 'absolute', right: 16, bottom: chrome.bottom + 18 }}>
           <Pressable onPress={openFind} accessibilityLabel="Search in this PDF" hitSlop={6}
             style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
@@ -295,40 +313,45 @@ function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
   )
 }
 
-/** The page tray, floating over the pages: every page small and dimmed, the one you're on lit with its number in a
- * tube pill. No scrollbar: the lit page keeps itself in view. */
+/** The page tray, floating over the pages: three pages a row, small and dimmed, the one you're on lit with its
+ * number in a tube pill. No scrollbar: the lit page keeps itself in view. */
 function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, number][]; page: number; onPick: (n: number) => void }) {
   const { c } = useTheme()
-  const ref = useRef<FlatList<number>>(null)
+  const ref = useRef<FlatList<number[]>>(null)
   const [box, setBox] = useState(0)
-  const tw = RAIL - 24 // a thumbnail's width
-  const rows = useMemo(() => sizes.reduce<{ length: number; offset: number }[]>((out, [w, h]) => {
-    const prev = out[out.length - 1]
-    out.push({ length: (tw * h) / w + 32, offset: prev ? prev.offset + prev.length : 12 })
-    return out
-  }, []), [sizes, tw])
-  const near = (p: number) => Math.max(0, (rows[p - 1]?.offset ?? 0) - box * 0.35)
+  const cell = Math.round(THUMB * 1.42) // every page sits in an A4-ish box (wider pages centre in it)
+  const rowH = cell + 30
+  const rows = useMemo(() => Array.from({ length: Math.ceil(sizes.length / COLS) }, (_, r) => sizes.slice(r * COLS, r * COLS + COLS).map((_, k) => r * COLS + k)), [sizes])
+  const near = (p: number) => Math.max(0, 12 + Math.floor((p - 1) / COLS) * rowH - box * 0.35)
   const [start] = useState(() => near(page))
   useEffect(() => { if (box) ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page, box]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <View style={{ flex: 1 }} onLayout={(e) => setBox(e.nativeEvent.layout.height)}>
-      <FlatList ref={ref} data={sizes.map((_, i) => i)} keyExtractor={(i) => String(i)} contentOffset={{ x: 0, y: start }}
-        getItemLayout={(_, i) => ({ ...rows[i], index: i })} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 12 }} showsVerticalScrollIndicator={false}
-        renderItem={({ item: i }) => {
-          const on = i === page - 1
-          const h = (tw * sizes[i][1]) / sizes[i][0]
-          return (
-            <Pressable onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} accessibilityState={{ selected: on }}
-              style={{ width: tw, height: h + 32, alignItems: 'center' }}>
-              <View style={{ opacity: on ? 1 : 0.5, borderRadius: 6, borderWidth: 1, borderColor: on ? c.edge : c.line, overflow: 'hidden' }}>
-                <Thumb uri={uri} index={i} width={tw - 2} height={h - 2} />
-              </View>
-              <View style={{ marginTop: 5, minWidth: 22, height: 18, paddingHorizontal: 6, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : undefined }}>
-                <Text variant="footnote" color={on ? 'tube' : 'ink4'} tabular style={{ fontSize: 11, fontWeight: on ? '600' : '400' }}>{i + 1}</Text>
-              </View>
-            </Pressable>
-          )
-        }}
+      <FlatList ref={ref} data={rows} keyExtractor={(r) => String(r[0])} contentOffset={{ x: 0, y: start }}
+        getItemLayout={(_, i) => ({ length: rowH, offset: 12 + i * rowH, index: i })}
+        contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 12 }} showsVerticalScrollIndicator={false}
+        renderItem={({ item: row }) => (
+          <View style={{ flexDirection: 'row', gap: 10, height: rowH }}>
+            {row.map((i) => {
+              const on = i === page - 1
+              const [w, h] = sizes[i]
+              const fit = Math.min(THUMB / w, cell / h)
+              return (
+                <Pressable key={i} onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} accessibilityState={{ selected: on }}
+                  style={{ width: THUMB, alignItems: 'center' }}>
+                  <View style={{ height: cell, justifyContent: 'center' }}>
+                    <View style={{ opacity: on ? 1 : 0.5, borderRadius: 5, borderWidth: 1, borderColor: on ? c.edge : c.line, overflow: 'hidden' }}>
+                      <Thumb uri={uri} index={i} width={Math.round(w * fit) - 2} height={Math.round(h * fit) - 2} />
+                    </View>
+                  </View>
+                  <View style={{ marginTop: 5, minWidth: 22, height: 18, paddingHorizontal: 6, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : undefined }}>
+                    <Text variant="footnote" color={on ? 'tube' : 'ink4'} tabular style={{ fontSize: 11, fontWeight: on ? '600' : '400' }}>{i + 1}</Text>
+                  </View>
+                </Pressable>
+              )
+            })}
+          </View>
+        )}
       />
     </View>
   )
