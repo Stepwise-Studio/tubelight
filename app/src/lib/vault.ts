@@ -92,9 +92,15 @@ let snap: { items: VaultItem[] | null; usage: VaultUsage | null; uploads: Upload
 const emit = () => { snap = { items, usage, uploads, error }; subs.forEach((f) => f()) }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
 
+// The last list is kept on the phone, so the Vault opens with it at once while the server answers (as Tasks does).
+const CACHE = 'tl.vault.list'
+AsyncStorage.getItem(CACHE).then((v) => {
+  if (v && items === null) { const r = JSON.parse(v); items = r.items; usage = r.usage; emit() }
+}, () => {})
+
 export function refreshVault() {
   loading ??= api<{ items: VaultItem[]; usage: VaultUsage }>('/vault')
-    .then((r) => { items = r.items; usage = r.usage; error = null; emit() },
+    .then((r) => { items = r.items; usage = r.usage; error = null; emit(); AsyncStorage.setItem(CACHE, JSON.stringify(r)).catch(() => {}) },
       (e) => { error = e instanceof Error ? e.message : String(e); emit() })
     .finally(() => { loading = null })
   return loading
