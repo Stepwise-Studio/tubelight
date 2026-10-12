@@ -2,14 +2,14 @@
 import { useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
-import { MoreHorizontalIcon, Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
+import { Share08Icon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { shareItem } from '@/components/vault/actions'
 import { ViewerScreen } from '@/components/vault/viewer-screen'
 import { Phone } from '@/lib/phone'
 import { uploadFiles, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { IconButton, Text, showMenu, toast } from '@/ui'
+import { Text, toast } from '@/ui'
 
 export default function OpenedFile() {
   const { uri } = useLocalSearchParams<{ uri: string }>()
@@ -24,17 +24,12 @@ export default function OpenedFile() {
   if (!file) return <View style={{ flex: 1, backgroundColor: c.canvas }} />
   const item: Viewable = { id: file.uri, name: file.name, mime: file.mime, size: file.size, meta: {}, src: file.uri, preview: `upload:${file.uri}` }
   return (
-    <ViewerScreen item={item} actions={(ink) => (
-      <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More: save to Vault, share" onPress={() => showMenu({
-        title: file.name,
-        items: [
+    <ViewerScreen item={item} menuLabel="More: save to Vault, share" menu={() => [
           { label: 'Save to Vault', icon: VaultIcon, onPress: async () => {
             const r = await uploadFiles([{ uri: file.uri, name: file.name, mime: file.mime, size: file.size }], '')
             toast(r.done ? { title: 'Saved to your vault', body: file.name, tone: 'success' } : { title: 'Unable to save it', tone: 'error' })
           } },
           { label: 'Share or open in…', icon: Share08Icon, onPress: () => shareItem(item) },
-        ],
-      })} />
-    )} />
+    ]} />
   )
 }

@@ -25,7 +25,7 @@ import { PdfReader } from './pdf-reader'
 // Module constants: a list can't take new viewability settings while mounted.
 const SWIPE_SEEN = { itemVisiblePercentThreshold: 60 }
 
-export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover }: {
+export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover, finds }: {
   item: Viewable
   /** Photos in the same place, for swiping between them. */
   siblings: Viewable[]
@@ -36,12 +36,14 @@ export function FileBody({ item, siblings, onIndex, chrome, onTap, onCover }: {
   onTap?: () => void
   /** The body covers the frame's header (PDF search). */
   onCover?: (covered: boolean) => void
+  /** PDF: goes up each time Search is chosen in the header's menu. */
+  finds?: number
 }) {
   const kind = kindOf(item.name, item.mime)
   if (kind === 'image') return <Photos items={siblings.length ? siblings : [item]} start={item} onIndex={onIndex} onTap={onTap} />
   if (kind === 'video') return <Video item={item} />
   if (kind === 'audio') return <Audio item={item} />
-  if (kind === 'pdf') return <PdfReader item={item} chrome={chrome} onCover={onCover ?? (() => {})} fallback={(note) => <Other item={item} note={note} />} />
+  if (kind === 'pdf') return <PdfReader item={item} chrome={chrome} onCover={onCover ?? (() => {})} finds={finds} fallback={(note) => <Other item={item} note={note} />} />
   if (kind === 'markdown' || kind === 'text' || kind === 'code') return <TextFile item={item} kind={kind} chrome={chrome} />
   if (kind === 'word' || kind === 'sheet' || kind === 'slides') return <Preview item={item} chrome={chrome} />
   return <Other item={item} />

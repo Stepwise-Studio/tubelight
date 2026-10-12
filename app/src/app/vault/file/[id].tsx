@@ -1,13 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
 import { View } from 'react-native'
-import { MoreHorizontalIcon } from '@hugeicons/core-free-icons'
 
-import { itemMenu } from '@/components/vault/actions'
+import { itemActions } from '@/components/vault/actions'
 import { ViewerScreen } from '@/components/vault/viewer-screen'
 import { byFolderThenNewest, kindOf, useVault, viewable, type Viewable } from '@/lib/vault'
 import { useTheme } from '@/theme'
-import { IconButton } from '@/ui'
 
 /** One file, full screen: photos and video on black under a floating header; documents on the canvas. */
 export default function VaultFile() {
@@ -23,8 +21,6 @@ export default function VaultFile() {
   if (!item) return <View style={{ flex: 1, backgroundColor: c.canvas }} />
   return (
     <ViewerScreen item={viewable(opened ?? item)} shown={viewable(item)} siblings={siblings.map(viewable)} onIndex={(r: Viewable) => setCurrentId(r.id)}
-      actions={(ink) => (
-        <IconButton icon={MoreHorizontalIcon} color={ink} accessibilityLabel="More: star, share, rename, move, delete" onPress={() => itemMenu(item)} />
-      )} />
+      menuLabel="More: star, share, rename, move, delete" menu={() => itemActions(item)} />
   )
 }

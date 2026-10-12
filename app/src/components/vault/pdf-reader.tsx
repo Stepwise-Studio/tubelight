@@ -1,21 +1,21 @@
 // The PDF reader: pages drawn by Android itself (PdfRenderer), the way Preview reads.
 // - Zoom: pinch (live, around your fingers) or double-tap; on release the pages are laid out again at that size and
 //   redrawn sharp, so zoomed text is real resolution, and you scroll the zoomed document both ways.
-// - Pages: a floating tray of thumbnails (its button in the corner) to scroll through and jump from; hold the page count and slide to scrub through the pages (page-scrubber).
-// - Search: Android 15+ reads the text layer; every match is highlighted on its page, with next/previous.
+// - Pages: hold the page count and slide to scrub through them (page-scrubber).
+// - Search (from the header's ⋯ menu): Android 15+ reads the text layer; every match is highlighted on its page, with next/previous.
 // It opens where you left off.
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Image } from 'expo-image'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Keyboard, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewToken } from 'react-native'
+import { ActivityIndicator, FlatList, Keyboard, ScrollView, TextInput, View, useWindowDimensions, type ViewToken } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeInDown, FadeInLeft, FadeOutDown, FadeOutLeft, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
-import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon, SidebarLeftIcon } from '@hugeicons/core-free-icons'
+import Animated, { FadeInDown, FadeOutDown, runOnJS, useAnimatedStyle, useSharedValue, withTiming, FadeIn, FadeOut } from 'react-native-reanimated'
+import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon } from '@hugeicons/core-free-icons'
 
 import { Phone } from '@/lib/phone'
 import { type Viewable } from '@/lib/vault'
 import { motion, useTheme } from '@/theme'
-import { Button, Icon, IconButton, Skeleton, Squircle, Text, TextField, elevation, haptic } from '@/ui'
+import { Button, Icon, IconButton, Skeleton, Text, TextField, haptic } from '@/ui'
 
 import { localCopy } from './actions'
 import { PageScrubber } from './page-scrubber'
@@ -24,31 +24,34 @@ import { FileIcon } from './file-icon'
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
 const GAP = 12
 const MAX_ZOOM = 4
-const THUMB = 80 // a page's width in the tray
-const COLS = 3
-const RAIL = COLS * THUMB + (COLS - 1) * 10 + 24 // the page tray's width: three pages a row
 const SLIDE_IN = FadeInDown.duration(motion.duration.fast).easing(motion.ease.smoothOut)
 const SLIDE_OUT = FadeOutDown.duration(motion.duration.quick)
 const QUICK = motion.timing(motion.duration.quick) // plain objects, so worklets can use them
 const FAST = motion.timing(motion.duration.fast)
 const PAGE_SEEN = { viewAreaCoveragePercentThreshold: 50 } // the page covering most of the screen (a constant: lists can't take new settings)
 
-export function PdfReader({ item, chrome, onCover, fallback }: {
+export function PdfReader({ item, chrome, onCover, finds, fallback }: {
   item: Viewable
   chrome: { top: number; bottom: number }
   /** Search covers the frame's header while it's open. */
   onCover: (covered: boolean) => void
+  /** Goes up each time Search is chosen in the header's menu. */
+  finds?: number
   fallback: (note?: string) => React.ReactNode
 }) {
-  const { c, scheme } = useTheme()
+  const { c } = useTheme()
   const { width, height } = useWindowDimensions()
   const [doc, setDoc] = useState<{ uri: string; sizes: [number, number][]; start: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(1)
-  const [rail, setRail] = useState(false)
   const [holding, setHolding] = useState(false) // scrubbing: the controls stay
   const [finding, setFinding] = useState(false)
+  const [asked, setAsked] = useState(finds) // Search chosen in the header's menu (the frame covers its header itself)
+  if (finds !== asked) {
+    setAsked(finds)
+    setFinding(true)
+  }
   // The corner controls step aside while you read (as the system's viewers do) and come back when you scroll.
   const [bare, setBare] = useState(false)
   const [nudge, setNudge] = useState(0) // a scroll ended: wait again before hiding
@@ -189,7 +192,6 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
     setHit(n)
     show(matches[n])
   }
-  const openFind = () => { haptic.tap(); setRail(false); setFinding(true); onCover(true) }
   const closeFind = () => { Keyboard.dismiss(); setFinding(false); setMatches(null); onCover(false) }
 
   const byPage = useMemo(() => {
@@ -244,29 +246,8 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
         </Animated.View>
       </GestureDetector>
 
-      {/* Pages: a floating tray of thumbnails, with the tube marking where you are in the document */}
-      {rail && (
-        <Animated.View entering={FadeInLeft.duration(motion.duration.fast).easing(motion.ease.smoothOut)} exiting={FadeOutLeft.duration(motion.duration.quick)}
-          style={[{ position: 'absolute', left: 12, top: chrome.top + 12, bottom: chrome.bottom + 18 + 44 + 12, width: RAIL, borderRadius: 24 }, elevation(scheme)]}>
-          <Squircle style={{ flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
-            <Rail uri={doc.uri} sizes={doc.sizes} page={page} onPick={(n) => { haptic.tap(); go(n) }} />
-          </Squircle>
-        </Animated.View>
-      )}
-
-      {/* Pages, on their own in the corner */}
-      {!finding && (!bare || rail) && (
-        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
-          style={{ position: 'absolute', left: 16, bottom: chrome.bottom + 18 }}>
-          <Pressable onPress={() => { haptic.tap(); setRail((r) => !r) }} accessibilityLabel={rail ? 'Hide pages' : 'Show pages'} hitSlop={6}
-            style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: rail ? c.tube : 'rgba(24,24,27,0.9)' }}>
-            <Icon icon={SidebarLeftIcon} size={19} color={rail ? c.onTube : '#fff'} strokeWidth={1.8} />
-          </Pressable>
-        </Animated.View>
-      )}
-
       {/* Where you are: hold and slide to scrub through the pages (screen readers step it up and down) */}
-      {!finding && (!bare || rail || holding) && (
+      {!finding && (!bare || holding) && (
         <PageScrubber pages={pages} page={page} bottom={chrome.bottom + 18 + 44} onScrub={(n) => go(n)}
           onHold={(h) => { setHolding(h); if (!h) poke() }}>
           {(shown) => (
@@ -282,17 +263,6 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
             </Animated.View>
           )}
         </PageScrubber>
-      )}
-
-      {/* Search, on its own in the other corner */}
-      {!finding && (!bare || rail) && !!Phone?.pdfSearch && (
-        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
-          style={{ position: 'absolute', right: 16, bottom: chrome.bottom + 18 }}>
-          <Pressable onPress={openFind} accessibilityLabel="Search in this PDF" hitSlop={6}
-            style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
-            <Icon icon={Search01Icon} size={19} color="#fff" strokeWidth={1.8} />
-          </Pressable>
-        </Animated.View>
       )}
 
       {finding && <FindBar top={chrome.top} matches={matches} hit={hit} onFind={find} onStep={step} onClose={closeFind} />}
@@ -329,64 +299,6 @@ function FindBar({ top, matches, hit, onFind, onStep, onClose }: {
     </Animated.View>
   )
 }
-
-/** The page tray, floating over the pages: three pages a row, small and dimmed, the one you're on lit with its
- * number in a tube pill. No scrollbar: the lit page keeps itself in view. */
-function Rail({ uri, sizes, page, onPick }: { uri: string; sizes: [number, number][]; page: number; onPick: (n: number) => void }) {
-  const { c } = useTheme()
-  const ref = useRef<FlatList<number[]>>(null)
-  const [box, setBox] = useState(0)
-  const cell = Math.round(THUMB * 1.42) // every page sits in an A4-ish box (wider pages centre in it)
-  const rowH = cell + 30
-  const rows = useMemo(() => Array.from({ length: Math.ceil(sizes.length / COLS) }, (_, r) => sizes.slice(r * COLS, r * COLS + COLS).map((_, k) => r * COLS + k)), [sizes])
-  const near = (p: number) => Math.max(0, 12 + Math.floor((p - 1) / COLS) * rowH - box * 0.35)
-  const [start] = useState(() => near(page))
-  useEffect(() => { if (box) ref.current?.scrollToOffset({ offset: near(page), animated: true }) }, [page, box]) // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <View style={{ flex: 1 }} onLayout={(e) => setBox(e.nativeEvent.layout.height)}>
-      <FlatList ref={ref} data={rows} keyExtractor={(r) => String(r[0])} contentOffset={{ x: 0, y: start }}
-        getItemLayout={(_, i) => ({ length: rowH, offset: 12 + i * rowH, index: i })}
-        contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 12 }} showsVerticalScrollIndicator={false}
-        renderItem={({ item: row }) => (
-          <View style={{ flexDirection: 'row', gap: 10, height: rowH }}>
-            {row.map((i) => {
-              const on = i === page - 1
-              const [w, h] = sizes[i]
-              const fit = Math.min(THUMB / w, cell / h)
-              return (
-                <Pressable key={i} onPress={() => onPick(i + 1)} accessibilityLabel={`Page ${i + 1}`} accessibilityState={{ selected: on }}
-                  style={{ width: THUMB, alignItems: 'center' }}>
-                  <View style={{ height: cell, justifyContent: 'center' }}>
-                    <View style={{ opacity: on ? 1 : 0.5, borderRadius: 5, borderWidth: 1, borderColor: on ? c.edge : c.line, overflow: 'hidden' }}>
-                      <Thumb uri={uri} index={i} width={Math.round(w * fit) - 2} height={Math.round(h * fit) - 2} />
-                    </View>
-                  </View>
-                  <View style={{ marginTop: 5, minWidth: 22, height: 18, paddingHorizontal: 6, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tubeSoft : undefined }}>
-                    <Text variant="footnote" color={on ? 'tube' : 'ink4'} tabular style={{ fontSize: 11, fontWeight: on ? '600' : '400' }}>{i + 1}</Text>
-                  </View>
-                </Pressable>
-              )
-            })}
-          </View>
-        )}
-      />
-    </View>
-  )
-}
-
-const Thumb = memo(function Thumb({ uri, index, width, height }: { uri: string; index: number; width: number; height: number }) {
-  const [src, setSrc] = useState<string | null>(null)
-  useEffect(() => {
-    let live = true
-    Phone?.pdfPage(uri, index, 200).then((p) => live && setSrc(p.uri), () => {})
-    return () => { live = false }
-  }, [uri, index])
-  return (
-    <View style={{ width, height, borderRadius: 3, overflow: 'hidden', backgroundColor: '#fff' }}>
-      {src && <Image source={src} style={{ width, height }} contentFit="contain" transition={80} />}
-    </View>
-  )
-})
 
 /** One page: drawn at the screen's real pixels for its size (in steps, capped), the last drawing kept while a sharper
  * one comes, and search matches marked on it. */
