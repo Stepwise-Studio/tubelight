@@ -212,8 +212,14 @@ async def other_chats(ctx: RunCtx) -> str:
                                        "order": "last_message_at.desc", "limit": "6", "select": "id,title,last_message_at"})
     out = []
     for r in rows:
+        # ponytail: 6 briefs cut to 600 chars; a search tool over briefs if users keep dozens of chats
         text = await brief.get(r["id"])
-        if text:  # ponytail: 6 briefs cut to 600 chars; a search tool over briefs if users keep dozens of chats
+        if not text:  # a chat older than the keeper (or not folded in yet): its latest lines instead
+            last = await db.select("messages", {"thread_id": f"eq.{r['id']}", "kind": "eq.text", "order": "created_at.desc",
+                                                "limit": "8", "select": "sender_type,text"})
+            text = "\n".join(f"{ctx.user_name if m['sender_type'] == 'user' else 'You'}: {m['text'][:160]}"
+                              for m in reversed(last))
+        if text:
             out.append(f"### {r.get('title') or ('Main chat' if r['id'].count(':') == 1 else 'Untitled chat')} "
                        f"(last active {r['last_message_at'][:10]})\n{text[:600]}")
     return "\n".join(out)
