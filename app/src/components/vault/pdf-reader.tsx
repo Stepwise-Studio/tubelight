@@ -1,7 +1,7 @@
 // The PDF reader: pages drawn by Android itself (PdfRenderer), the way Preview reads.
 // - Zoom: pinch (live, around your fingers) or double-tap; on release the pages are laid out again at that size and
 //   redrawn sharp, so zoomed text is real resolution, and you scroll the zoomed document both ways.
-// - Pages: a floating tray of thumbnails (its button in the corner) to scroll through and jump from; the page count jumps to a page number.
+// - Pages: a floating tray of thumbnails (its button in the corner) to scroll through and jump from; hold the page count and slide to scrub through the pages (page-scrubber).
 // - Search: Android 15+ reads the text layer; every match is highlighted on its page, with next/previous.
 // It opens where you left off.
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -15,9 +15,10 @@ import { ArrowDown01Icon, ArrowLeft01Icon, ArrowUp01Icon, Search01Icon, SidebarL
 import { Phone } from '@/lib/phone'
 import { type Viewable } from '@/lib/vault'
 import { motion, useTheme } from '@/theme'
-import { Button, Icon, IconButton, Sheet, Skeleton, Squircle, Text, TextField, elevation, haptic } from '@/ui'
+import { Button, Icon, IconButton, Skeleton, Squircle, Text, TextField, elevation, haptic } from '@/ui'
 
 import { localCopy } from './actions'
+import { PageScrubber } from './page-scrubber'
 import { FileIcon } from './file-icon'
 
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
@@ -46,16 +47,16 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [rail, setRail] = useState(false)
-  const [jump, setJump] = useState(false)
+  const [holding, setHolding] = useState(false) // scrubbing: the controls stay
   const [finding, setFinding] = useState(false)
   // The corner controls step aside while you read (as the system's viewers do) and come back when you scroll.
   const [bare, setBare] = useState(false)
   const [nudge, setNudge] = useState(0) // a scroll ended: wait again before hiding
   useEffect(() => {
-    if (bare) return
+    if (bare || holding) return
     const t = setTimeout(() => setBare(true), 2500)
     return () => clearTimeout(t)
-  }, [bare, nudge])
+  }, [bare, nudge, holding])
   const poke = useCallback(() => { setBare(false); setNudge((n) => n + 1) }, [])
   const [matches, setMatches] = useState<Match[] | null>(null)
   const [hit, setHit] = useState(0)
@@ -202,10 +203,9 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
   if (locked && !doc) return <Locked name={item.name} onUnlock={async (pw) => { const info = await Phone!.pdfUnlock!(locked, pw); setDoc({ uri: locked, sizes: info.sizes, start: 1 }); setPage(1) }} />
   if (!doc) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={c.ink3} /></View>
   const pages = doc.sizes.length
-  const go = (n: number) => {
-    setJump(false)
+  const go = (n: number, animated = true) => {
     const i = Math.min(Math.max(n, 1), pages) - 1
-    list.current?.scrollToOffset({ offset: layout[i].offset - chrome.top - GAP + 1, animated: true })
+    list.current?.scrollToOffset({ offset: layout[i].offset - chrome.top - GAP + 1, animated })
   }
 
   return (
@@ -265,15 +265,23 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
         </Animated.View>
       )}
 
-      {/* Where you are (tap to go to a page) */}
-      {!finding && (!bare || rail) && (
-        <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
-          style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
-          <Pressable onPress={() => { haptic.tap(); setJump(true) }} accessibilityLabel={`Page ${page} of ${pages}. Go to a page`}
-            style={{ height: 44, borderRadius: 22, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: 'rgba(24,24,27,0.9)' }}>
-            <Text variant="label" color="#fff" tabular>{page} / {pages}</Text>
-          </Pressable>
-        </Animated.View>
+      {/* Where you are: hold and slide to scrub through the pages (screen readers step it up and down) */}
+      {!finding && (!bare || rail || holding) && (
+        <PageScrubber pages={pages} page={page} bottom={chrome.bottom + 18} onScrub={(n) => go(n, false)}
+          onHold={(h) => { setHolding(h); if (!h) poke() }}>
+          {(shown) => (
+            <Animated.View entering={SLIDE_IN} exiting={SLIDE_OUT}
+              style={{ position: 'absolute', bottom: chrome.bottom + 18, alignSelf: 'center' }}>
+              <View accessible accessibilityRole="adjustable" accessibilityLabel="Page" accessibilityValue={{ text: `${page} of ${pages}` }}
+                accessibilityHint="Hold and slide to move through the pages"
+                accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                onAccessibilityAction={(e) => go(page + (e.nativeEvent.actionName === 'increment' ? 1 : -1))}
+                style={{ height: 44, borderRadius: 22, paddingHorizontal: 18, justifyContent: 'center', backgroundColor: holding ? c.tube : 'rgba(24,24,27,0.9)' }}>
+                <Text variant="label" color={holding ? c.onTube : '#fff'} tabular>{shown} / {pages}</Text>
+              </View>
+            </Animated.View>
+          )}
+        </PageScrubber>
       )}
 
       {/* Search, on its own in the other corner */}
@@ -288,7 +296,6 @@ export function PdfReader({ item, chrome, onCover, fallback }: {
       )}
 
       {finding && <FindBar top={chrome.top} matches={matches} hit={hit} onFind={find} onStep={step} onClose={closeFind} />}
-      <PageJump open={jump} pages={pages} page={page} onGo={go} onClose={() => setJump(false)} />
     </View>
   )
 }
@@ -408,25 +415,6 @@ const PdfPage = memo(function PdfPage({ uri, index, width, height, scale, marks 
     </View>
   )
 })
-
-function PageJump({ open, pages, page, onGo, onClose }: { open: boolean; pages: number; page: number; onGo: (n: number) => void; onClose: () => void }) {
-  const [value, setValue] = useState('')
-  const n = Number(value)
-  const ok = Number.isInteger(n) && n >= 1 && n <= pages
-  return (
-    <Sheet open={open} onClose={onClose} title="Go to page">
-      <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 12 }}>
-        <TextField label={`Page (1–${pages})`} value={value} onChangeText={setValue} keyboardType="number-pad" autoFocus placeholder={String(page)}
-          returnKeyType="go" onSubmitEditing={() => ok && onGo(n)} />
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <View style={{ flex: 1 }}><Button label="First page" variant="soft" fullWidth onPress={() => onGo(1)} /></View>
-          <View style={{ flex: 1 }}><Button label="Last page" variant="soft" fullWidth onPress={() => onGo(pages)} /></View>
-        </View>
-        <Button label="Go" fullWidth size="lg" disabled={!ok} onPress={() => onGo(n)} />
-      </View>
-    </Sheet>
-  )
-}
 
 /** A password-protected PDF: its password, typed here, opens it (kept only while the app runs). */
 function Locked({ name, onUnlock }: { name: string; onUnlock: (password: string) => Promise<void> }) {
