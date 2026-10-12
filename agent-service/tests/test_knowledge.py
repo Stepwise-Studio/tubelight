@@ -43,7 +43,10 @@ async def test_a_study_teammate_answers_from_its_notes(api, env, tmp_path, monke
     await vault.add_bytes(OWNER, "genes.md", b"DNA is a double helix.", folder["id"])
     st = await knowledge.sync(OWNER, tutor["id"])
     assert len(st["files"]) == 3
+    # Unlinking while a read is queued: the queued read must not bring the link back.
+    knowledge.sync_later(OWNER, tutor["id"])
     await knowledge.link(OWNER, tutor["id"], [])
     await settle()
     st = await knowledge.sync(OWNER, tutor["id"])
+    assert st["links"] == []
     assert st["files"] == {} and await knowledge.search(tutor["id"], "DNA") == []

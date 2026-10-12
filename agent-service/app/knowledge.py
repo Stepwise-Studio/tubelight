@@ -4,7 +4,8 @@ page it came from.
 
 Links: Vault ids (a folder brings everything in it, now and later). A file is (re)read when it's new or changed
 (size + updated_at), in the background; the `knowledge` tool and each run's preamble search the passages (the same
-embeddings as memory). Store: ("knowledge", teammate) "state" = {links, files: {id: {name, stamp, chunks|error}}};
+embeddings as memory). Store: ("knowledge", teammate) "links" = {links} (the user's choice) and "files" = {files: {id: {name, stamp,
+chunks|error}}} (the reader's progress), kept apart so a read in progress never undoes a link change;
 passages in ("kb", teammate, file id). A file linked to two teammates is indexed for each (ponytail: share passages per
 owner if users link big libraries to many teammates).
 """
@@ -29,12 +30,14 @@ def _ns(teammate_id: str) -> tuple[str, ...]:
 
 
 async def state(teammate_id: str) -> dict[str, Any]:
-    item = await memory.store.aget(_ns(teammate_id), "state")
-    return item.value if item else {"links": [], "files": {}}
+    links = await memory.store.aget(_ns(teammate_id), "links")
+    got = await memory.store.aget(_ns(teammate_id), "files")
+    return {"links": links.value["links"] if links else [], "files": got.value["files"] if got else {}}
 
 
 async def _save(teammate_id: str, st: dict[str, Any]) -> None:
-    await memory.store.aput(_ns(teammate_id), "state", st, index=False)
+    """The reader's progress only: the links are the user's."""
+    await memory.store.aput(_ns(teammate_id), "files", {"files": st["files"]}, index=False)
 
 
 def _stamp(row: dict[str, Any]) -> str:
@@ -98,7 +101,8 @@ async def _index(owner_id: str, teammate_id: str, row: dict[str, Any]) -> dict[s
 
 
 async def sync(owner_id: str, teammate_id: str) -> dict[str, Any]:
-    """Bring the index in line with the links: read new or changed files, drop unlinked ones."""
+    """Bring the index in line with the links: read new or changed files, drop unlinked ones. The links are read once
+    the lock is held, so a sync queued behind another sees the latest choice."""
     async with _locks.setdefault(teammate_id, asyncio.Lock()):
         st = await state(teammate_id)
         want = wanted(await vault.items(owner_id), st["links"])
@@ -135,11 +139,9 @@ def sync_later(owner_id: str, teammate_id: str) -> None:
 
 
 async def link(owner_id: str, teammate_id: str, links: list[str]) -> dict[str, Any]:
-    st = await state(teammate_id)
-    st["links"] = list(dict.fromkeys(links))
-    await _save(teammate_id, st)
+    await memory.store.aput(_ns(teammate_id), "links", {"links": list(dict.fromkeys(links))}, index=False)
     sync_later(owner_id, teammate_id)
-    return st
+    return await state(teammate_id)
 
 
 async def stale(owner_id: str, teammate_id: str, st: dict[str, Any]) -> bool:
