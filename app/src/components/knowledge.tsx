@@ -60,7 +60,7 @@ function statusOf(link: VaultItem, k: KnowledgeState, all: VaultItem[]) {
  * The files a teammate knows (its knowledge base, agent knowledge.py): Vault files and folders it reads from and
  * quotes with file and page. "Upload notes" files into its own Vault folder, linked once, so later uploads count too.
  */
-export function KnowledgeSection({ t }: { t: Teammate }) {
+export function KnowledgeFiles({ t }: { t: Teammate }) {
   const { c } = useTheme()
   const { k, save } = useKnowledge(t.id)
   const { items } = useVault()
@@ -93,9 +93,8 @@ export function KnowledgeSection({ t }: { t: Teammate }) {
   })
 
   return (
-    <View style={{ gap: 12 }}>
-      <SectionHead title="Knows" hint={`Notes and files ${t.name} reads from, and quotes by page.`}
-        action={<Button label="Add" size="sm" variant="soft" onPress={add} />} />
+    <View style={{ gap: 8 }}>
+      <SubHead title="Files" action={linked.length ? <Button label="Add" size="sm" variant="ghost" onPress={add} /> : undefined} />
       {k === null ? (
         <Surface padding={16} style={{ gap: 10 }}><Skeleton width="60%" /><Skeleton width="40%" /></Surface>
       ) : linked.length === 0 ? (
@@ -135,6 +134,16 @@ export function KnowledgeSection({ t }: { t: Teammate }) {
       )}
       {k && <VaultPicker key={pickN} open={picking} onClose={() => setPicking(false)} chosen={k.links.map((l) => l.id)} name={t.name}
         onDone={(ids) => { setPicking(false); save(ids) }} />}
+    </View>
+  )
+}
+
+/** A part inside a section ("Files", "Facts"): a quiet label with an action on the right. */
+export function SubHead({ title, action }: { title: string; action?: React.ReactNode }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 34 }}>
+      <Text variant="overline" color="ink3" style={{ flex: 1 }}>{title}</Text>
+      {action}
     </View>
   )
 }

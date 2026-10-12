@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { Add01Icon, AtIcon, Cancel01Icon, SparklesIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, AtIcon, Cancel01Icon, SparklesIcon, UnfoldMoreIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
 import { ColorSwatches, FormSection, SwitchRow } from '@/components/form-bits'
@@ -15,7 +15,7 @@ import {
 import type { Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
 import {
-  Button, Chip, Divider, FACE_SEEDS, Icon, IconButton, PickerField, Press, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
+  Button, ChoiceSheet, Chip, Divider, FACE_SEEDS, Icon, IconButton, PickerField, Press, SearchField, Sheet, Skeleton, Surface, TeammateAvatar, Text, TextField, faceSeed,
   haptic, toast, type PickerOption,
 } from '@/ui'
 
@@ -96,7 +96,8 @@ function LookPicker({ draft, onChange }: { draft: TeammateDraft; onChange: (d: P
   )
 }
 
-function ModelField({ value, role, onChange }: { value: string; role: string; onChange: (id: string) => void }) {
+/** The models a teammate can think with, suggested ones first (the role's pick marked). */
+function useModelOptions(value: string, role: string) {
   const { models, error } = useModels()
   const listed = new Set((models ?? []).map((m) => m.id))
   const forRole = role.trim() ? recommendedModel(role) : null
@@ -116,6 +117,13 @@ function ModelField({ value, role, onChange }: { value: string; role: string; on
   if (!options.some((o) => o.value === value)) {
     options.unshift({ value, title: modelName(value, models), subtitle: hint(value) ?? PROVIDERS[modelProvider(value)], group: 'Current' })
   }
+  return { options, models, error }
+}
+
+const MODEL_INTRO = 'Every model here is free: Groq and OpenRouter free tiers, Gemini’s free tier, and Cloudflare’s daily allowance. If one is busy, the run falls back to another.'
+
+function ModelField({ value, role, onChange }: { value: string; role: string; onChange: (id: string) => void }) {
+  const { options, models, error } = useModelOptions(value, role)
   return (
     <>
       <PickerField
@@ -124,7 +132,7 @@ function ModelField({ value, role, onChange }: { value: string; role: string; on
         options={options}
         onChange={(id) => onChange(id)}
         disabled={!models}
-        intro="Every model here is free: Groq and OpenRouter free tiers, Gemini’s free tier, and Cloudflare’s daily allowance. If one is busy, the run falls back to another."
+        intro={MODEL_INTRO}
       />
       {error && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 2 }}>The model list is unavailable right now, so the current model stays. {error}</Text>}
     </>
@@ -197,7 +205,7 @@ const SEARCH_ROWS = 8
  * aren't connected yet (Connect or remove). "Connect another app" searches the whole catalog; an app connected
  * from here is switched on for this teammate.
  */
-function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+export function ToolkitPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const { c } = useTheme()
   const { height } = useWindowDimensions()
   const { connections, reload } = useConnections()
@@ -354,5 +362,23 @@ export function TeammateFields({ value, onChange, errors }: {
         <View style={{ gap: 12 }}><Skeleton width="30%" height={16} /><Skeleton height={64} radius={16} /><Skeleton height={180} radius={16} /></View>
       )}
     </View>
+  )
+}
+
+/** The profile's model line: the model's name as a quiet pill; tap to switch (saved at once by the caller). */
+export function ModelPill({ value, role, onChange }: { value: string; role: string; onChange: (id: string) => void }) {
+  const { c } = useTheme()
+  const { options, models } = useModelOptions(value, role)
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Press radius={16} disabled={!models} onPress={() => { haptic.tap(); setOpen(true) }}
+        accessibilityLabel={`Model, ${modelName(value, models)}`} accessibilityHint="Switch the model"
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingLeft: 12, paddingRight: 8, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
+        <Text variant="label" color="ink2">{modelName(value, models)}</Text>
+        <Icon icon={UnfoldMoreIcon} size={14} color="ink3" />
+      </Press>
+      <ChoiceSheet open={open} onClose={() => setOpen(false)} title="Model" value={value} options={options} onPick={onChange} intro={MODEL_INTRO} />
+    </>
   )
 }
