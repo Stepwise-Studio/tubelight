@@ -48,8 +48,15 @@ function useDoc(item: VaultItem, on: boolean) {
   useEffect(() => {
     if (!on || doc || item.size > 15e6) return
     let live = true
-    docQueue = docQueue.then(() => api<Doc>(`/vault/${item.id}/preview`)
-      .then((d) => { docs.set(item.id, d); if (live) setDoc(d) }, () => {}))
+    docQueue = docQueue.then(() => api<Doc | { type: 'doc'; blocks: { k: string; h?: number; runs?: { t?: string }[] }[] }>(`/vault/${item.id}/preview`)
+      .then((raw) => {
+        // A formatted Word document reads as its first lines on a cover (headings marked as such).
+        const d: Doc = raw.type === 'doc'
+          ? { type: 'markdown', text: raw.blocks.filter((b) => b.k === 'p').slice(0, 30).map((b) => (b.h !== undefined ? '# ' : '') + (b.runs ?? []).map((r) => r.t ?? '').join('')).join('\n') }
+          : raw
+        docs.set(item.id, d)
+        if (live) setDoc(d)
+      }, () => {}))
     return () => { live = false }
   }, [on, doc, item.id, item.size])
   return doc

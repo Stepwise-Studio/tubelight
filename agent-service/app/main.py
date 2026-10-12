@@ -1750,13 +1750,13 @@ async def preview_vault_item(item_id: str, user: User = Depends(current_user)):
 
 
 @app.post("/preview")
-async def preview_upload(file: UploadFile, user: User = Depends(current_user)):
+async def preview_upload(file: UploadFile, name: str = Form(""), user: User = Depends(current_user)):
     """A file on the phone (opened from another app) as the viewer draws it; nothing is kept."""
     data = await file.read(vault.MAX_BYTES + 1)
     if len(data) > vault.MAX_BYTES:
         raise HTTPException(413, "Files up to 100 MB.")
     try:
-        return await asyncio.to_thread(vault.preview_of, file.filename or "file", data)
+        return await asyncio.to_thread(vault.preview_of, name or file.filename or "file", data)
     except Exception as e:
         log.warning("upload preview failed: %s", e)
         return {"type": "error", "message": "This file couldn't be opened."}

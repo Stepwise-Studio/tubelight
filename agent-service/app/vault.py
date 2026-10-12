@@ -29,7 +29,7 @@ MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a reques
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 1000, 60  # what a sheet preview carries
-PREVIEW_V = 2  # bump when previews change: older cached ones are made again (2: sheet formulas worked out)
+PREVIEW_V = 3  # bump when previews change: older cached ones are made again (2: sheet formulas worked out; 3: Word with formatting)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",
@@ -328,8 +328,22 @@ def preview_of(name: str, data: bytes) -> dict[str, Any]:
     from . import documents
 
     ext = Path(name).suffix.lower()
+    if ext not in (".docx", ".xlsx", ".xlsm", ".pptx", ".csv", ".tsv", ".md", ".markdown", ".txt") and data[:2] == b"PK":
+        try:  # a name without its extension: Office files say what they are inside
+            import io
+            import zipfile
+
+            inside = set(zipfile.ZipFile(io.BytesIO(data)).namelist())
+            ext = ".docx" if "word/document.xml" in inside else ".xlsx" if "xl/workbook.xml" in inside else ".pptx" if "ppt/presentation.xml" in inside else ext
+        except zipfile.BadZipFile:
+            pass
     if ext == ".docx":
-        return {"type": "markdown", "text": documents.read_docx(data)}
+        try:  # with its formatting (docview); plain Markdown if that can't read it
+            from . import docview
+
+            return docview.read(data)
+        except Exception:
+            return {"type": "markdown", "text": documents.read_docx(data)}
     if ext in (".xlsx", ".xlsm"):
         return {"type": "sheets", "sheets": _sheets(data)}
     if ext in (".csv", ".tsv"):

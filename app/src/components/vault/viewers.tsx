@@ -19,6 +19,7 @@ import { Button, Icon, Markdown, Squircle, Text, haptic } from '@/ui'
 
 import { shareItem } from './actions'
 import { FileTile } from './file-tile'
+import { DocView, type DocData } from './doc-view'
 import { PdfReader } from './pdf-reader'
 
 // Module constants: a list can't take new viewability settings while mounted.
@@ -247,6 +248,7 @@ function Doc({ text, chrome }: { text: string; chrome: { top: number; bottom: nu
 // ------------------------------------------------------------------ Word, spreadsheets, slides
 type PreviewData =
   | { type: 'markdown'; text: string }
+  | DocData
   | { type: 'sheets'; sheets: { name: string; rows: string[][]; total: number }[] }
   | { type: 'slides'; slides: Slide[] }
   | { type: 'none' | 'error'; message?: string }
@@ -261,15 +263,16 @@ function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bott
     if (previews.has(key)) return
     const load = item.preview.startsWith('upload:')
       // Expo's fetch takes a file-system File as a form part (React Native's { uri } objects it refuses)
-      ? (() => { const form = new FormData(); form.append('file', new File(item.src) as unknown as Blob, item.name); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
+      ? (() => { const form = new FormData(); form.append('file', new File(item.src) as unknown as Blob, item.name); form.append('name', item.name); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
       : api<PreviewData>(item.preview)
-    load.then((d) => { if (d.type !== 'error') previews.set(key, d); setP(d) }, (e) => setP({ type: 'error', message: (e as Error).message }))
+    load.then((d) => { if (d.type !== 'error' && d.type !== 'none') previews.set(key, d); setP(d) }, (e) => setP({ type: 'error', message: (e as Error).message }))
   }, [key, item.preview, item.src, item.name, item.mime])
   if (!p) return <Loading />
   if (p.type === 'markdown') {
     if (!p.text.trim()) return <Other item={item} note="This document is empty." />
     return <Doc text={p.text} chrome={chrome} />
   }
+  if (p.type === 'doc') return <DocView doc={p} chrome={chrome} />
   if (p.type === 'sheets') return <Sheets sheets={p.sheets} chrome={chrome} />
   if (p.type === 'slides') return <Slides slides={p.slides} chrome={chrome} />
   return <Other item={item} note={p.message ?? 'This file can’t be shown here.'} />
