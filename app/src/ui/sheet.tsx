@@ -17,6 +17,7 @@ import { Portal } from './portal'
 import { Press } from './press'
 import { elevation } from './surface'
 import { AnimatedSquircle } from './squircle'
+import { Radio } from './radio'
 import { Text } from './text'
 
 const { duration, ease } = motion
@@ -117,6 +118,8 @@ export interface MenuItem {
   label: string
   /** The current setting, on the right (a menu item that opens its choices). */
   value?: string
+  /** One of several choices: a radio on the right, filled for the current one. */
+  checked?: boolean
   icon?: IconSvgElement
   destructive?: boolean
   onPress: () => void
@@ -186,8 +189,8 @@ export function MenuHost() {
             key={it.label}
             title={it.label}
             destructive={it.destructive}
-            accessory={it.value ? <Text variant="caption" color="ink3">{it.value}</Text> : undefined}
-            chevron={!!it.value}
+            accessory={it.checked !== undefined ? <Radio checked={it.checked} /> : it.value ? <Text variant="caption" color="ink3">{it.value}</Text> : undefined}
+            chevron={!!it.value && it.checked === undefined}
             leading={it.icon && <Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} />}
             onPress={() => { close(); it.onPress() }}
             style={{ minHeight: 52 }}

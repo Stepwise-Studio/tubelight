@@ -12,6 +12,7 @@ import { haptic } from './haptics'
 import { Icon } from './icon'
 import { setPortal } from './portal'
 import { Press } from './press'
+import { Radio } from './radio'
 import type { MenuItem } from './sheet'
 import { Squircle } from './squircle'
 import { elevation } from './surface'
@@ -87,6 +88,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
               style={{ height: ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12 }}>
               {it.icon && <Icon icon={it.icon} size={19} color={it.destructive ? 'danger' : 'ink2'} />}
               <Text variant="bodyMedium" color={it.destructive ? 'danger' : 'ink'} numberOfLines={1} style={{ flex: 1 }}>{it.label}</Text>
+              {it.checked !== undefined && <Radio checked={it.checked} />}
             </Press>
           ))}
         </Squircle>

@@ -163,12 +163,7 @@ export function VaultBrowser({ parent = '', category, header, root, bottom = 24,
                 <Text variant="overline" color="ink3" accessibilityRole="header" style={{ flex: 1 }}>{r.label}</Text>
                 {r.controls && (
                   <>
-                    <Press radius={10} static onPress={() => showMenu({ title: 'Sort by', items: SORTS.map((s) => ({ label: s.label, value: s.id === prefs.sort ? '✓' : undefined, onPress: () => setPrefs({ sort: s.id }) })) })}
-                      accessibilityLabel={`Sorted by ${SORTS.find((s) => s.id === prefs.sort)?.label}. Change`}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, minHeight: 32 }}>
-                      <Text variant="footnote" color="ink2">{SORTS.find((s) => s.id === prefs.sort)?.label}</Text>
-                      <Icon icon={ArrowDown01Icon} size={13} color="ink3" strokeWidth={2} />
-                    </Press>
+                    <SortButton sort={prefs.sort} onSort={(sort) => setPrefs({ sort })} />
                     {!media && (
                       <IconButton icon={view === 'grid' ? LeftToRightListBulletIcon : GridViewIcon} size={34} iconSize={17} color={c.ink2}
                         accessibilityLabel={view === 'grid' ? 'Show as a list' : 'Show as a grid'} onPress={() => { haptic.tap(); setPrefs({ view: view === 'grid' ? 'list' : 'grid' }) }} />
@@ -483,6 +478,26 @@ function Loading({ tile }: { tile: number }) {
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {[0, 1, 2].map((i) => <Skeleton key={i} width={tile} height={tile} radius={14} />)}
       </View>
+    </View>
+  )
+}
+
+/** How the files are sorted: tap for the choices, in a menu grown out of the button (radios). */
+function SortButton({ sort, onSort }: { sort: string; onSort: (id: (typeof SORTS)[number]['id']) => void }) {
+  const ref = useRef<View>(null)
+  const label = SORTS.find((s) => s.id === sort)?.label
+  const face = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, minHeight: 32 }}>
+      <Text variant="footnote" color="ink2">{label}</Text>
+      <Icon icon={ArrowDown01Icon} size={13} color="ink3" strokeWidth={2} />
+    </View>
+  )
+  return (
+    <View ref={ref} collapsable={false}>
+      <Press radius={10} static accessibilityLabel={`Sorted by ${label}. Change`}
+        onPress={() => showContextMenu(ref.current, face, SORTS.map((s) => ({ label: s.label, checked: s.id === sort, onPress: () => onSort(s.id) })))}>
+        {face}
+      </Press>
     </View>
   )
 }
