@@ -14,7 +14,7 @@ import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Ic
 import { api } from '@/lib/api'
 import { formatSize, kindOf, type Viewable } from '@/lib/vault'
 import { type, useTheme } from '@/theme'
-import { Button, Icon, Markdown, Segment, Squircle, Text, haptic } from '@/ui'
+import { Button, Icon, Markdown, Squircle, Text, haptic } from '@/ui'
 
 import { shareItem } from './actions'
 import { FileTile } from './file-tile'
@@ -247,51 +247,85 @@ function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bott
 
 const colName = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : colName(Math.floor(i / 26) - 1) + colName(i % 26))
 
+const NUMERIC = /^[-+]?(?:[\d,]*\.?\d+)(?:%|e[-+]?\d+)?$/i
+
+/** A spreadsheet, the light version of Excel: column letters and row numbers, numbers to the right, the first row
+ * bold, a tapped cell outlined with its address and whole value in the bar on top, sheets as tabs along the bottom. */
 function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; total: number }[]; chrome: { top: number; bottom: number } }) {
   const { c } = useTheme()
   const [at, setAt] = useState(0)
+  const [pick, setPick] = useState<{ r: number; c: number } | null>(null)
   const sheet = sheets[at] ?? sheets[0]
   const cols = useMemo(() => {
     const n = Math.max(0, ...sheet.rows.map((r) => r.length))
     return Array.from({ length: n }, (_, j) => Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length)))))
   }, [sheet])
   const numW = 26 + 8 * String(sheet.rows.length).length
-  const cell = (text: string, w: number, head?: boolean, key?: number | string) => (
-    <View key={key} style={{ width: w, paddingHorizontal: 8, paddingVertical: 7, borderRightWidth: 1, borderColor: c.line, backgroundColor: head ? c.panel2 : undefined }}>
-      <Text variant={head ? 'label' : 'caption'} color={head ? 'ink3' : 'ink'} numberOfLines={head ? 1 : 2} tabular>{text}</Text>
+  const head = (text: string, w: number, key?: number | string, on?: boolean) => (
+    <View key={key} style={{ width: w, paddingHorizontal: 8, paddingVertical: 6, borderRightWidth: 1, borderColor: c.line, backgroundColor: on ? c.tubeSoft : c.panel2, alignItems: 'center' }}>
+      <Text variant="footnote" color={on ? 'tube' : 'ink3'} numberOfLines={1} tabular>{text}</Text>
     </View>
   )
+  const value = pick ? sheet.rows[pick.r]?.[pick.c] ?? '' : ''
   return (
     <View style={{ flex: 1, paddingTop: chrome.top }}>
-      {sheets.length > 1 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12, gap: 8 }} style={{ flexGrow: 0 }}>
-          <Segment value={String(at)} onChange={(v) => setAt(Number(v))} accessibilityLabel="Sheet"
-            options={sheets.map((s, i) => ({ value: String(i), label: s.name }))} />
-        </ScrollView>
-      )}
-      <ScrollView horizontal bounces={false}>
+      {/* The cell bar: where you are and what's in it */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, height: 40, borderBottomWidth: 1, borderColor: c.line }}>
+        <View style={{ minWidth: 44, height: 26, paddingHorizontal: 8, borderRadius: 8, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+          <Text variant="footnote" color="ink2" tabular>{pick ? `${colName(pick.c)}${pick.r + 1}` : '—'}</Text>
+        </View>
+        <Text variant="caption" color={pick ? 'ink' : 'ink4'} numberOfLines={1} selectable style={{ flex: 1 }}>{pick ? value || 'Empty' : 'Tap a cell to see it here'}</Text>
+      </View>
+      <ScrollView horizontal bounces={false} style={{ flex: 1 }}>
         <FlatList
           data={sheet.rows}
           keyExtractor={(_, i) => String(i)}
           stickyHeaderIndices={[0]}
           initialNumToRender={40}
-          contentContainerStyle={{ paddingBottom: chrome.bottom + 40 }}
+          extraData={pick}
+          contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
           ListHeaderComponent={
             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: c.line, backgroundColor: c.panel2 }}>
-              {cell('', numW, true)}
-              {cols.map((w, j) => cell(colName(j), w, true, j))}
+              {head('', numW)}
+              {cols.map((w, j) => head(colName(j), w, j, pick?.c === j))}
             </View>
           }
           renderItem={({ item: row, index }) => (
             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: c.line }}>
-              {cell(String(index + 1), numW, true)}
-              {cols.map((w, j) => cell(row[j] ?? '', w, false, j))}
+              {head(String(index + 1), numW, undefined, pick?.r === index)}
+              {cols.map((w, j) => {
+                const text = row[j] ?? ''
+                const on = pick?.r === index && pick?.c === j
+                const num = NUMERIC.test(text)
+                return (
+                  <Pressable key={j} onPress={() => { haptic.tap(); setPick(on ? null : { r: index, c: j }) }}
+                    style={{ width: w, paddingHorizontal: 8, paddingVertical: 7, borderRightWidth: 1, borderColor: c.line, alignItems: num ? 'flex-end' : 'flex-start',
+                      ...(on ? { borderWidth: 2, borderColor: c.tube, paddingHorizontal: 7, paddingVertical: 6 } : null) }}>
+                    <Text variant="caption" numberOfLines={2} tabular style={index === 0 ? { fontWeight: '600' } : undefined}>{text}</Text>
+                  </Pressable>
+                )
+              })}
             </View>
           )}
           ListFooterComponent={sheet.total > sheet.rows.length
             ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
         />
       </ScrollView>
+      {/* Sheets, as tabs along the bottom */}
+      {sheets.length > 1 && (
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: chrome.bottom + 12, alignItems: 'center' }} pointerEvents="box-none">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, maxWidth: '100%' }} contentContainerStyle={{ paddingHorizontal: 16 }}>
+            <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.92)' }}>
+              {sheets.map((sh, i) => (
+                <Pressable key={sh.name} onPress={() => { haptic.tap(); setAt(i); setPick(null) }} accessibilityRole="tab" accessibilityState={{ selected: i === at }}
+                  style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: 'center', backgroundColor: i === at ? '#fff' : 'transparent' }}>
+                  <Text variant="label" color={i === at ? '#18181b' : '#d4d4d8'} numberOfLines={1}>{sh.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      )}
     </View>
   )
 }
