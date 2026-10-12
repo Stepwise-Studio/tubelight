@@ -75,8 +75,9 @@ async def _image(data: bytes, mime: str, name: str) -> str:
     return out.text or ""
 
 
-async def text_of(name: str, mime: str, data: bytes) -> str:
-    """A file as text a teammate model can read (images described by the vision model). Raises on unreadable files."""
+async def text_of(name: str, mime: str, data: bytes, limit: int | None = MAX_CHARS) -> str:
+    """A file as text a teammate model can read (images described by the vision model). Raises on unreadable files.
+    `limit=None` keeps all of it (the knowledge base indexes whole books)."""
     if mime.startswith("image/"):
         body = await _image(data, mime, name)
         return f"### {name} (image)\n{body.strip() or 'No description available.'}"
@@ -93,8 +94,8 @@ async def text_of(name: str, mime: str, data: bytes) -> str:
     else:
         return f"### {name}\n(A {mime or 'binary'} file I can't read as text.)"
     text = text.strip()
-    clipped = len(text) > MAX_CHARS
-    return f"### {name}\n{text[:MAX_CHARS]}" + ("\n[truncated]" if clipped else "")
+    clipped = limit is not None and len(text) > limit
+    return f"### {name}\n{text[:limit] if clipped else text}" + ("\n[truncated]" if clipped else "")
 
 
 async def _one(owner_id: str, a: dict[str, Any]) -> str:

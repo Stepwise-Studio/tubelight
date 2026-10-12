@@ -22,7 +22,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, drive, events, files, followups, images, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1501,6 +1501,38 @@ async def followup_now(followup_id: str, user: User = Depends(current_user)):
 
 
 # ------------------------------------------------------------------ vault: the user's files on this server
+class KnowledgeBody(BaseModel):
+    links: list[str]
+
+
+async def _knowledge_view(teammate_id: str, user: User) -> dict[str, Any]:
+    st = await knowledge.state(teammate_id)
+    rows = {r["id"]: r for r in await vault.items(user["id"])}
+    return {
+        "links": [vault.public(user["id"], rows[k]) for k in st["links"] if k in rows],
+        "files": [{"id": k, "name": f["name"], "reading": bool(f.get("reading")), "chunks": f.get("chunks", 0),
+                   "error": f.get("error")} for k, f in st["files"].items()],
+    }
+
+
+@app.get("/teammates/{teammate_id}/knowledge")
+async def get_knowledge(teammate_id: str, user: User = Depends(current_user)):
+    """A teammate's knowledge base: the Vault files and folders it was given, and how reading each file went."""
+    await owned("teammates", teammate_id, user, "teammate")
+    st = await knowledge.state(teammate_id)
+    if st["links"] and await knowledge.stale(user["id"], teammate_id, st):
+        knowledge.sync_later(user["id"], teammate_id)
+    return await _knowledge_view(teammate_id, user)
+
+
+@app.put("/teammates/{teammate_id}/knowledge")
+async def put_knowledge(teammate_id: str, body: KnowledgeBody, user: User = Depends(current_user)):
+    await owned("teammates", teammate_id, user, "teammate")
+    mine = {r["id"] for r in await vault.items(user["id"])}
+    await knowledge.link(user["id"], teammate_id, [k for k in body.links if k in mine])
+    return await _knowledge_view(teammate_id, user)
+
+
 @app.get("/vault")
 async def list_vault(user: User = Depends(current_user)):
     rows = await vault.items(user["id"])

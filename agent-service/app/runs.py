@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import automations, brief, computers, db, followups, graph, learn, llm, mem, memory, phone, sandbox
+from . import automations, brief, computers, db, followups, graph, knowledge, learn, llm, mem, memory, phone, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -43,7 +43,20 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         project_computer=await computers.for_project(owner_id, project['id']) if project else None,
         phone_notes=await phone.has_notes(owner_id),
         phone_mate=await phone.mate(owner_id),
+        kb=await _knowledge(owner_id, members),
     )
+
+
+async def _knowledge(owner_id: str, members: list[dict]) -> dict[str, list[str]]:
+    """Each member's knowledge base (file names), read in the background when its files changed."""
+    out = {}
+    for m in members:
+        st = await knowledge.state(m["id"])
+        if st["links"]:
+            if await knowledge.stale(owner_id, m["id"], st):
+                knowledge.sync_later(owner_id, m["id"])
+            out[m["id"]] = [f["name"] for f in st["files"].values()]
+    return out
 
 
 async def sweep_orphans() -> None:

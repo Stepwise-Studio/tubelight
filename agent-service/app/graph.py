@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, brief, computers, config, connectors, db, floor, followups, genui, llm, mem, memory, push, reactions, repo, tools as T
+from . import automations, brief, computers, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class RunCtx:
     apps: list[str] = field(default_factory=list)  # @mentioned in the current request (see scope)
     only: list[str] | None = None  # an automation run: just these apps (see scope)
     brief: str = ""  # the running summary of this chat (brief.py)
+    kb: dict = field(default_factory=dict)  # teammate id -> its knowledge base's file names (knowledge.py)
     sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
     outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
     ui_snaps: dict[str, str] = field(default_factory=dict)  # computer use: snapshot id -> the app it shows
@@ -375,6 +376,14 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "out of the messages you see. Pick up its open loops when they come due or come up. It records what "
                      "people said, not verified facts: anything you can check now with a tool (files, counts, versions, "
                      "statuses, results), check rather than repeat:\n" + ctx.brief)
+    if tm["id"] in ctx.kb:
+        names = ctx.kb[tm["id"]]
+        hits = await knowledge.search(tm["id"], query, limit=3) if query and names else []
+        lines.append(f"## Your knowledge base\nFiles {ctx.user_name} gave you to know ({len(names)}): "
+                     + ", ".join(names[:25]) + (" and more" if len(names) > 25 else "")
+                     + ". The knowledge tool searches them; answer from them when they cover the question and say "
+                     "where (file, page)." + ("\nPassages that may bear on this message:\n" + "\n\n".join(
+                         knowledge.cite({**h, "text": h["text"][:700]}) for h in hits) if hits else ""))
     others = await other_chats(ctx)
     if others:
         lines.append(f"## Your other chats\nThe same you, in {ctx.user_name}'s other chats with you and the project "

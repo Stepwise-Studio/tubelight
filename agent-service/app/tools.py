@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, computers, config, connectors, db, documents, files, followups, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
+from . import automations, brief, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -76,7 +76,7 @@ INTERNAL = {
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
     "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
-    "todos": "read", "vault": "read",
+    "todos": "read", "vault": "read", "knowledge": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -84,7 +84,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -641,6 +641,16 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 return str(e)
             return "action is list, add, update or delete."
 
+        async def knowledge_search(query: str, file: str = "") -> str:
+            st = await knowledge.state(tm["id"])
+            fid = next((k for k, f in st["files"].items() if file and f["name"].lower() == file.lower()), "")
+            if file and not fid:
+                return f"No file named {file} in your knowledge base. It has: " + ", ".join(f["name"] for f in st["files"].values())
+            hits = await knowledge.search(tm["id"], query, limit=6, file=fid)
+            reading = [f["name"] for f in st["files"].values() if f.get("reading")]
+            note = f"\n(Still reading: {', '.join(reading)}; its passages aren't searchable yet.)" if reading else ""
+            return ("\n\n".join(knowledge.cite(h) for h in hits) or "Nothing in your knowledge base matches.") + note
+
         async def vault_files(action: str, path: str = "", query: str = "", folder: str = "") -> str:
             rows = vault.visible(await vault.items(ctx.owner_id))  # folders they hid from teammates stay out
             by_id = {r["id"]: r for r in rows}
@@ -702,6 +712,13 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "status backlog|todo|doing|done) | update (todo: its [id]; any of title, notes, status, "
                             "priority, due; due '' clears it) | delete. Add one when they ask you to note a task for "
                             "them; a follow-up is for when YOU will come back."),
+            *([StructuredTool.from_function(
+                coroutine=knowledge_search, name="knowledge",
+                description=f"Search your knowledge base: the files {ctx.user_name} gave you to know (notes, books, "
+                            "PDFs), read in full. Returns the passages that best match, each with its file and page. "
+                            "Use it for anything those files may cover, search again with other words if the first "
+                            "passages miss, answer from them and say where (file, page). file: limit to one file's "
+                            "name, optional.")] if tm["id"] in ctx.kb else []),
             StructuredTool.from_function(
                 coroutine=vault_files, name="vault",
                 description="Their vault: their own files (photos, PDFs, notes, documents) on their server. action: list "
