@@ -455,7 +455,7 @@ def pdf(path: Path, locked: Path) -> None:
     d.add_page(format=(100, 150))
     d.set_font("Helvetica", size=9)
     d.multi_cell(0, 5, "A small page (100 × 150 mm), like a receipt or a ticket.")
-    for i in range(12):
+    for i in range(45):  # 50 pages in all: enough to scrub past a screen of bars
         d.add_page()
         d.set_font("Helvetica", "B", 16)
         d.cell(0, 10, f"Text page {i + 1}", new_x="LMARGIN", new_y="NEXT")
