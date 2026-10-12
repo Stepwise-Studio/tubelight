@@ -24,7 +24,7 @@ import { FileIcon } from './file-icon'
 type Match = { page: number; rects: [number, number, number, number][]; text: string }
 const GAP = 12
 const MAX_ZOOM = 4
-const THUMB = 64 // a page's width in the tray
+const THUMB = 80 // a page's width in the tray
 const COLS = 3
 const RAIL = COLS * THUMB + (COLS - 1) * 10 + 24 // the page tray's width: three pages a row
 const SLIDE_IN = FadeInDown.duration(motion.duration.fast).easing(motion.ease.smoothOut)
