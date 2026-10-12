@@ -17,7 +17,7 @@ import type { Thread } from '@/lib/types'
 import { chatTitle, isComputer, useWorkspace, type Preview } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import {
-  Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, showMenu,
+  AvatarStack, Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, showMenu,
 } from '@/ui'
 
 const openThread = (threadId: string) => router.push({ pathname: '/chat/[threadId]', params: { threadId } })
@@ -35,32 +35,34 @@ export default function Chats() {
   )
 }
 
-const CREW_ROW = 64
-
-/** Your crew, after the last chat. */
+/**
+ * The end of the inbox: your crew's faces and a quiet line about where they are (the ones on a run are at work, the
+ * rest "in the break room"). Opens the crew.
+ */
 function CrewRow() {
-  const { c } = useTheme()
   const ws = useWorkspace()
-  const working = new Set(ws.liveRuns.filter((r) => r.status === 'running').map((r) => r.teammate_id)).size
+  const busy = new Set(ws.liveRuns.filter((r) => r.status === 'running').map((r) => r.teammate_id ?? ''))
+  const n = ws.teammates.filter((t) => busy.has(t.id)).length
+  const line = n === 0 ? 'The crew’s in the break room'
+    : n === ws.teammates.length ? 'The whole crew’s at work. Rare sight'
+      : `${n} at work, the rest in the break room`
   return (
     <Press
-      radius={16}
-      static
+      radius={20}
       onPress={() => router.push('/crew')}
-      accessibilityLabel={`Crew, ${ws.teammates.length} teammates${working ? `, ${working} working` : ''}`}
+      accessibilityLabel={`${line}. ${ws.teammates.length} teammates`}
       accessibilityHint="Opens your crew"
-      outerStyle={{ marginHorizontal: 8 }}
-      style={{ height: CREW_ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 8 }}
+      outerStyle={{ alignSelf: 'center', marginTop: 28 }}
+      style={{ alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 14 }}
     >
-      <View style={{ width: 48, alignItems: 'center' }}>
-        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon icon={UserGroupIcon} size={18} color="ink2" />
+      <AvatarStack teammates={ws.teammates} size={30} max={5} working={busy} />
+      <View style={{ alignItems: 'center', gap: 2 }}>
+        <Text variant="footnote" color="ink3">That’s every chat.</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Text variant="label" color="ink2">{line}</Text>
+          <Icon icon={ArrowRight01Icon} size={14} color="ink3" />
         </View>
       </View>
-      <Text variant="bodyMedium" style={{ flex: 1 }}>Crew</Text>
-      {working > 0 && <Text variant="footnote" color="tube" tabular>{working} working</Text>}
-      <Text variant="footnote" color="ink3" tabular>{ws.teammates.length}</Text>
-      <Icon icon={ArrowRight01Icon} size={16} color="ink3" />
     </Press>
   )
 }

@@ -1,7 +1,7 @@
 import { router } from 'expo-router'
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
-import { Add01Icon, Delete02Icon, Edit02Icon, MessageMultiple01Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, Delete02Icon, Edit02Icon, Layers01Icon } from '@hugeicons/core-free-icons'
 
 import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
@@ -16,7 +16,7 @@ export function ChatsButton({ teammateId, threadId, onPress }: { teammateId: str
   const elsewhere = ws.chatsWith(teammateId).some((t) => t.id !== threadId && (isUnread(t) || ws.isThreadLive(t.id)))
   return (
     <View>
-      <IconButton icon={MessageMultiple01Icon} round accessibilityLabel={`Chats${elsewhere ? ', something new in another chat' : ''}`} onPress={onPress} />
+      <IconButton icon={Layers01Icon} round accessibilityLabel={`Chats${elsewhere ? ', something new in another chat' : ''}`} onPress={onPress} />
       {elsewhere && <View pointerEvents="none" style={{ position: 'absolute', top: 9, right: 9, width: 8, height: 8, borderRadius: 4, backgroundColor: c.tube, borderWidth: 1.5, borderColor: c.canvas }} />}
     </View>
   )
