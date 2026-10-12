@@ -30,7 +30,7 @@ MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a reques
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 5000, 60  # what a sheet preview carries
-PREVIEW_V = 6  # 6: typed cells; 5: list indents; bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
+PREVIEW_V = 7  # 7: Word headers, footers, notes, text boxes, sheets' frozen panes; 6: typed cells; 5: list indents; bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",
@@ -372,6 +372,7 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
     _no_broken_numpy()
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
+    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
 
     from .sheetcalc import Book, fmt_value
 
@@ -436,7 +437,13 @@ def _sheets(data: bytes) -> list[dict[str, Any]]:
             for c in range(1, last_c + 1):
                 d = ws.column_dimensions.get(get_column_letter(c))
                 widths.append(round(d.width, 1) if d is not None and d.width and d.customWidth else 0)
-        result.append({"name": name, "rows": rows, "total": max(sh["total"], len(rows)), "styles": styles, "merges": merges, "widths": widths, "kinds": kinds})
+        sheet = {"name": name, "rows": rows, "total": max(sh["total"], len(rows)), "styles": styles, "merges": merges, "widths": widths, "kinds": kinds}
+        pane = getattr(ws, "freeze_panes", None) if not light else None
+        if pane:  # rows above and columns left of the pane's top-left cell stay put
+            col, row = coordinate_from_string(pane)
+            if row > 1 or col != "A":
+                sheet["freeze"] = [min(row - 1, last_r), min(column_index_from_string(col) - 1, last_c)]
+        result.append(sheet)
     return result
 
 

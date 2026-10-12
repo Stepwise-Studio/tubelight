@@ -1,7 +1,8 @@
 // A Word document as the phone draws it (from agent-service docview.py): its real formatting reflowed to the
 // screen, the way Google Docs' mobile view shows one. Headings, bold/italic/underline/strike, colours and
 // highlights, sizes and fonts (serif and monospace kept), alignment, indents and spacing, numbered and bulleted
-// lists, links, images, and tables with their column widths, merged cells and shading. Colours made for white
+// lists, links, images, tables with their column widths, merged cells and shading, text boxes framed, the header
+// and footer at the top and bottom, footnotes as raised numbers with their notes at the end. Colours made for white
 // paper are adjusted for the dark theme so text stays readable. Long documents draw as they scroll.
 import { FlashList } from '@shopify/flash-list'
 import { Image } from 'expo-image'
@@ -15,7 +16,8 @@ export interface DocRun { t?: string; b?: boolean; i?: boolean; u?: boolean; s?:
 export interface DocPara { k: 'p'; runs: DocRun[]; align?: 'left' | 'center' | 'right' | 'justify'; indent?: number; first?: number; before?: number; after?: number; line?: number; shade?: string; h?: number; marker?: string; level?: number }
 export interface DocCell { blocks: DocBlock[]; span?: number; vmerge?: 'restart' | 'continue'; shade?: string; valign?: 'center' | 'bottom' }
 export interface DocTable { k: 'table'; widths: number[]; width: number; rows: { cells: DocCell[]; header?: boolean }[] }
-export type DocBlock = DocPara | DocTable
+export interface DocBox { k: 'box'; role: 'header' | 'footer' | 'notes' | 'frame'; blocks: DocBlock[] }
+export type DocBlock = DocPara | DocTable | DocBox
 export interface DocData { type: 'doc'; blocks: DocBlock[]; base: number; font?: string }
 
 const SERIF = /times|cambria|georgia|garamond|book antiqua|palatino|constantia|baskerville|minion|serif|century/i
@@ -175,8 +177,26 @@ const Table = memo(function Table({ t, x, base, room }: { t: DocTable; x: Ctx; b
   return total > room + 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -PAD }} contentContainerStyle={{ paddingHorizontal: PAD }}>{body}</ScrollView> : body
 })
 
+/** The page's header and footer (quiet, above and below a hairline), footnotes under a short rule, a text box in a
+ * frame. */
+function Box({ b, x, base, room }: { b: DocBox; x: Ctx; base: number; room: number }) {
+  const small = b.role === 'frame' ? x : { ...x, k: x.k * 0.85 }
+  const inner = b.blocks.map((c, i) => <Block key={i} b={c} x={small} base={base} room={b.role === 'frame' ? room - 26 : room} tight />)
+  if (b.role === 'frame') {
+    return <Squircle style={{ borderRadius: radius.md, borderWidth: 1, borderColor: x.line, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4, marginVertical: 8 }}>{inner}</Squircle>
+  }
+  if (b.role === 'notes') return <View style={{ marginTop: 24 }}><View style={{ width: 64, height: 1, backgroundColor: x.line, marginBottom: 10 }} />{inner}</View>
+  const head = b.role === 'header'
+  return (
+    <View style={{ opacity: 0.6, borderColor: x.line, ...(head ? { borderBottomWidth: 1, paddingBottom: 6, marginBottom: 16 } : { borderTopWidth: 1, paddingTop: 10, marginTop: 28 }) }}>
+      {inner}
+    </View>
+  )
+}
+
 function Block({ b, x, base, room, tight, head }: { b: DocBlock; x: Ctx; base: number; room: number; tight?: boolean; head?: boolean }) {
   if (b.k === 'table') return <Table t={b} x={x} base={base} room={room} />
+  if (b.k === 'box') return <Box b={b} x={x} base={base} room={room} />
   // In a cell, paragraph spacing is tightened (Word's 10 pt after every paragraph reads loose in a narrow cell);
   // header cells are semibold.
   const p = tight ? { ...b, after: Math.min(b.after ?? 0, 4), before: Math.min(b.before ?? 0, 4) } : b

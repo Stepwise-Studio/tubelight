@@ -10,8 +10,10 @@ and theme fonts are looked up in the document's theme. Out come:
 - tables: column widths (as shares of the table), rows with cells (span, vertical merges, shading, their own
   paragraphs), whether the header row repeats
 - images: small ones inline as data URIs (others are noted)
+- boxes: the first section's header and footer, text boxes (where they're anchored), and footnotes/endnotes
+  (raised numbers in the text, their notes at the end)
 
-Headers, footers, footnotes, text boxes and page layout are left out.
+Page layout (columns, positions, page numbers) is left out.
 """
 import base64
 import io
@@ -25,7 +27,8 @@ W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 NS = {"w": W, "r": R, "a": A, "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
-      "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture"}
+      "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
+      "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006"}
 MAX_IMAGE = 600_000  # bytes an inline image may carry
 HIGHLIGHT = {"yellow": "FFFF00", "green": "00FF00", "cyan": "00FFFF", "magenta": "FF00FF", "blue": "0000FF", "red": "FF0000",
              "darkBlue": "000080", "darkCyan": "008080", "darkGreen": "008000", "darkMagenta": "800080", "darkRed": "800000",
@@ -78,6 +81,8 @@ class Doc:
         self.rels: dict[str, tuple[str, str]] = {}
         self.num: dict[str, dict[int, dict[str, Any]]] = {}
         self.counters: dict[tuple[str, int], int] = {}
+        self.notes: list[tuple[str, str, int]] = []  # (kind, id, number) of footnotes/endnotes in the order they're referenced
+        self._boxes: list[dict[str, Any]] = []  # text boxes met in the paragraph being read, placed after it
         self._load()
 
     def _xml(self, name: str):
@@ -99,10 +104,7 @@ class Doc:
             self.defaults_p = st.find("w:docDefaults/w:pPrDefault/w:pPr", NS)
             for s in st.iterfind("w:style", NS):
                 self.styles[s.get(q("w:styleId"))] = s
-        rels = self._xml("word/_rels/document.xml.rels")
-        if rels is not None:
-            for r in rels:
-                self.rels[r.get("Id")] = (r.get("Target") or "", r.get("TargetMode") or "")
+        self.rels = self._rels("word/document.xml")
         num = self._xml("word/numbering.xml")
         if num is not None:
             abstract = {a.get(q("w:abstractNumId")): a for a in num.iterfind("w:abstractNum", NS)}
@@ -119,6 +121,23 @@ class Doc:
                                                    "start": int(val(l.find("w:start", NS)) or 1),
                                                    "indent": int(left) / 20 if left else None, "hang": int(hang) / 20 if hang else None}
                 self.num[n.get(q("w:numId"))] = lv
+
+    def _rels(self, part: str) -> dict[str, tuple[str, str]]:
+        folder, name = part.rsplit("/", 1)
+        rels = self._xml(f"{folder}/_rels/{name}.rels")
+        return {r.get("Id"): (r.get("Target") or "", r.get("TargetMode") or "") for r in rels} if rels is not None else {}
+
+    def part(self, rid: str) -> list[dict[str, Any]]:
+        """A header or footer (by its relationship from the document) as blocks; its images use its own links."""
+        name = "word/" + self.rels.get(rid, ("", ""))[0].lstrip("/").removeprefix("word/")
+        root = self._xml(name)
+        if root is None:
+            return []
+        keep, self.rels = self.rels, self._rels(name)
+        try:
+            return self.blocks(root)
+        finally:
+            self.rels = keep
 
     # ---------------------------------------------------------------- styles
     def _chain(self, sid: str | None) -> list:
@@ -278,7 +297,25 @@ class Doc:
                         text += "\t"
                     elif ct in ("br", "cr"):
                         text += "\n"
-                    elif ct in ("drawing", "pict"):
+                    elif ct in ("footnoteReference", "endnoteReference"):
+                        kind = ct[:-9]
+                        n = sum(1 for k, _, _ in self.notes if k == kind) + 1
+                        self.notes.append((kind, c.get(q("w:id")), n))
+                        if text:
+                            out.append(self._run(text, f, link))
+                            text = ""
+                        out.append(self._run(str(n) if kind == "footnote" else roman(n), {**f, "va": "sup"}, link))
+                    elif ct in ("drawing", "pict", "AlternateContent"):
+                        if ct == "AlternateContent":  # Word's newer drawing first; the older copy (Fallback) is the same thing
+                            c = c.find("mc:Choice", NS)
+                            if c is None:
+                                continue
+                        boxes = c.findall(".//w:txbxContent", NS)
+                        if boxes:  # a text box: its own paragraphs, framed, after this one
+                            keep, self._boxes = self._boxes, []
+                            inner = [b for tx in boxes for b in self.blocks(tx)]
+                            self._boxes = keep + [{"k": "box", "role": "frame", "blocks": inner}] if inner else keep
+                            continue
                         img = self.image(c)
                         if img:
                             if text:
@@ -376,6 +413,8 @@ class Doc:
             tag = etree.QName(el).localname
             if tag == "p":
                 out.append(self.para(el))
+                out += self._boxes
+                self._boxes = []
             elif tag == "tbl":
                 out.append(self.table(el))
             elif tag == "sdt":
@@ -387,7 +426,44 @@ class Doc:
     def body(self) -> list[dict[str, Any]]:
         root = self._xml("word/document.xml")
         body = root.find("w:body", NS) if root is not None else None
-        return self.blocks(body) if body is not None else []
+        if body is None:
+            return []
+        out = self.blocks(body)
+        sect = body.find("w:sectPr", NS)
+        if sect is None:
+            sect = body.find(".//w:pPr/w:sectPr", NS)  # the first section's, when the document has several
+
+        def ref(kind: str) -> str | None:
+            refs = {r.get(q("w:type")) or "default": r.get(q("r:id")) for r in sect.iterfind(f"w:{kind}Reference", NS)} if sect is not None else {}
+            return refs.get("default") or refs.get("first")
+
+        head = self.part(ref("header")) if ref("header") else []
+        foot = self.part(ref("footer")) if ref("footer") else []
+        text = lambda bs: any(b["k"] != "p" or any((r.get("t") or "").strip() or r.get("img") is not None for r in b["runs"]) for b in bs)
+        if text(head):
+            out.insert(0, {"k": "box", "role": "header", "blocks": head})
+        notes = []
+        for kind in ("footnote", "endnote"):
+            root = self._xml(f"word/{kind}s.xml")
+            if root is None:
+                continue
+            by_id = {n.get(q("w:id")): n for n in root.iterfind(f"w:{kind}", NS)}
+            for k, nid, n in self.notes:
+                if k != kind or nid not in by_id:
+                    continue
+                bs = self.blocks(by_id[nid])
+                mark = str(n) if kind == "footnote" else roman(n)
+                if bs and bs[0]["k"] == "p":  # "1. " in the note's own type, before its text
+                    runs = bs[0]["runs"]
+                    if runs and runs[0].get("t"):
+                        runs[0]["t"] = runs[0]["t"].lstrip()
+                    runs.insert(0, {**{k: v for k, v in (runs[0] if runs else {}).items() if k in ("size", "font", "color")}, "t": f"{mark}. "})
+                notes += bs
+        if notes:
+            out.append({"k": "box", "role": "notes", "blocks": notes})
+        if text(foot):
+            out.append({"k": "box", "role": "footer", "blocks": foot})
+        return out
 
 
 def read(data: bytes) -> dict[str, Any]:

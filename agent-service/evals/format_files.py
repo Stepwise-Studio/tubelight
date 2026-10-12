@@ -31,7 +31,8 @@ def docx(path: Path) -> None:
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_COLOR_INDEX
     from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls, qn
     from docx.shared import Inches, Pt, RGBColor
 
     d = Document()
@@ -156,6 +157,17 @@ def docx(path: Path) -> None:
             c.text = f"A longer value in row {r + 1}" if i == 1 else str((r + 1) * (i + 1))
     d.add_paragraph("A nine-column table, wider than a phone.")
 
+    d.add_heading("Notes and boxes", 1)
+    para = d.add_paragraph("A sentence with a footnote")
+    para._p.append(parse_xml(f'<w:r {nsdecls("w")}><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteReference w:id="1"/></w:r>'))
+    para.add_run(" and another one")
+    para._p.append(parse_xml(f'<w:r {nsdecls("w")}><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:footnoteReference w:id="2"/></w:r>'))
+    para.add_run(", both listed at the end.")
+    box = d.add_paragraph("A text box is anchored to this paragraph:")
+    box._p.append(parse_xml(f'<w:r {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml"><w:pict><v:shape style="width:200pt;height:60pt">'
+                            '<v:textbox><w:txbxContent><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Text in a box</w:t></w:r></w:p>'
+                            '<w:p><w:r><w:t>Its second line.</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></w:r>'))
+
     d.add_heading("Unicode", 1)
     d.add_paragraph("Hindi: नमस्ते दुनिया · Telugu: నమస్కారం · Tamil: வணக்கம் · Arabic (right to left): مرحبا بالعالم")
     d.add_paragraph("Chinese: 你好世界 · Japanese: こんにちは · Emoji: 🚀 📁 ✅ · Symbols: ₹ € £ © ™ ± ≤ ≥ → ✓")
@@ -166,6 +178,25 @@ def docx(path: Path) -> None:
     for i in range(12):
         d.add_paragraph(f"Paragraph {i + 1}. {LOREM}")
     d.save(path)
+    _footnotes(path, ["The first footnote's text.", "The second footnote, with a longer note that wraps onto a second line on a phone."])
+
+
+def _footnotes(path: Path, notes: list[str]) -> None:
+    """python-docx can't write footnotes: add word/footnotes.xml, its link and content type to the saved file."""
+    import zipfile
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    body = "".join(f'<w:footnote w:id="{i}"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> {t}</w:t></w:r></w:p></w:footnote>'
+                   for i, t in enumerate(notes, 1))
+    parts = {n: z for z in [zipfile.ZipFile(path)] for n in z.namelist()}
+    files = {n: z.read(n) for n, z in parts.items()}
+    files["word/footnotes.xml"] = f'<?xml version="1.0" encoding="UTF-8"?><w:footnotes {w}>{body}</w:footnotes>'.encode()
+    files["word/_rels/document.xml.rels"] = files["word/_rels/document.xml.rels"].replace(b"</Relationships>",
+        b'<Relationship Id="rIdNotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/></Relationships>')
+    files["[Content_Types].xml"] = files["[Content_Types].xml"].replace(b"</Types>",
+        b'<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>')
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, data in files.items():
+            z.writestr(n, data)
 
 
 # ------------------------------------------------------------------ Excel
@@ -205,7 +236,10 @@ def xlsx(path: Path) -> None:
     ws["E1"] = "Merged across three columns"
     ws.merge_cells("E3:E6")
     ws["E3"] = "Merged down"
-    ws.freeze_panes = "A2"
+    ws.merge_cells("F3:F6")
+    ws["F3"] = 1234.5
+    ws["F3"].number_format = "#,##0.00"
+    ws.freeze_panes = "B2"  # the header row and the first column stay put
 
     f = wb.create_sheet("Formulas")
     f.append(["Item", "Qty", "Price", "Total", "Note"])

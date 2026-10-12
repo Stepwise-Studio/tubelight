@@ -7,7 +7,7 @@ import { File } from 'expo-file-system'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Text as RNText, ScrollView, View, useWindowDimensions, type TextStyle, type ViewToken } from 'react-native'
+import { ActivityIndicator, Animated as RNAnimated, FlatList, Pressable, Text as RNText, ScrollView, View, useWindowDimensions, type TextStyle, type ViewToken } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Icon } from '@hugeicons/core-free-icons'
@@ -330,9 +330,12 @@ const ROW_H = 34 // one line a cell, as a spreadsheet shows them; the bar on top
 interface CellStyle { b?: 1; i?: 1; u?: 1; c?: string; f?: string; a?: 'left' | 'center' | 'right'; w?: 1 }
 interface SheetData { name: string; rows: string[][]; total: number; styles?: Record<string, CellStyle>; merges?: [number, number, number, number][]; widths?: number[]
   /** Per row, '1' for each number or date cell (Excel); CSV has none, so its text is guessed from how it looks. */
-  kinds?: string[] }
-/** Per row: its cells' styles, merged cells (span: columns a merged cell covers from here; skip: columns drawn by one). */
-interface RowExtra { st?: Record<number, CellStyle>; span?: Record<number, number>; skip?: Set<number>; blank?: Set<number>; tall?: boolean }
+  kinds?: string[]
+  /** Frozen panes: rows at the top and columns at the left that stay put. */
+  freeze?: [number, number] }
+/** Per row: its cells' styles, merged cells (span: columns a merged cell covers from here; skip: columns drawn by one;
+ * blank: drawn empty; moved: a merged-down cell's value (from its first row) and whether it's a number; open: no line below, the merge goes on). */
+interface RowExtra { st?: Record<number, CellStyle>; span?: Record<number, number>; skip?: Set<number>; blank?: Set<number>; moved?: Record<number, { t: string; num: boolean }>; open?: Set<number>; tall?: boolean }
 
 function rowExtras(sheet: SheetData): RowExtra[] {
   const out: RowExtra[] = sheet.rows.map((r) => (r.some((cell) => cell.includes('\n')) ? { tall: true } : {})) // line breaks in a cell
@@ -343,10 +346,20 @@ function rowExtras(sheet: SheetData): RowExtra[] {
     if (st.w) out[r].tall = true
   }
   for (const [r1, c1, r2, c2] of sheet.merges ?? []) {
+    // A merged-down cell shows its value once, in its middle row, with no lines across it (rows are drawn apart,
+    // so it can't span them); its fill covers every row.
+    const mid = r1 + Math.floor((r2 - r1) / 2)
+    const st = sheet.styles?.[`${r1}:${c1}`]
     for (let r = r1; r <= r2 && r < out.length; r++) {
       ;(out[r].span ??= {})[c1] = c2 - c1 + 1
       for (let c = c1 + 1; c <= c2; c++) (out[r].skip ??= new Set()).add(c)
-      if (r > r1) (out[r].blank ??= new Set()).add(c1) // the merged cell's text shows once, in its first row
+      if (r !== mid) (out[r].blank ??= new Set()).add(c1)
+      else if (r !== r1) {
+        const t = sheet.rows[r1]?.[c1] ?? ''
+        ;(out[r].moved ??= {})[c1] = { t, num: sheet.kinds ? sheet.kinds[r1]?.[c1] === '1' : NUMERIC.test(t) }
+      }
+      if (r < r2) (out[r].open ??= new Set()).add(c1)
+      if (st && r > r1) (out[r].st ??= {})[c1] = st
     }
   }
   return out
@@ -366,22 +379,35 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
   const extras = useMemo(() => rowExtras(sheet), [sheet])
   const edges = useMemo(() => cols.reduce<number[]>((out, w) => [...out, (out[out.length - 1] ?? 0) + w], []), [cols]) // right edge of each column
   const numW = 26 + 8 * String(sheet.rows.length).length
-  const tap = useCallback((r: number, x: number) => {
-    const col = edges.findIndex((e) => x - numW < e)
-    if (x < numW || col < 0) return
+  // Row numbers and the frozen columns stay at the left as the sheet scrolls sideways (moved by the scroll itself, on
+  // the native side); frozen rows sit above the list. Frozen columns take at most 60% of the screen (cut short there).
+  const { width: screen } = useWindowDimensions()
+  const [pin] = useState(() => new RNAnimated.Value(0))
+  const frozeRows = Math.min(6, sheet.freeze?.[0] ?? 0, sheet.rows.length)
+  const frozeCols = Math.min(sheet.freeze?.[1] ?? 0, cols.length)
+  const pinW = frozeCols ? Math.min(edges[frozeCols - 1], Math.round(screen * 0.6 - numW)) : 0
+  const tap = useCallback((r: number, x: number, at: number) => { // x in the sheet, at on the screen
+    if (at < numW) return
+    const col = edges.findIndex((e) => (at - numW < pinW ? at : x) - numW < e)
+    if (col < 0) return
     haptic.tap()
     setPick((p) => (p?.r === r && p.c === col ? null : { r, c: col }))
-  }, [edges, numW])
-  const value = pick ? sheet.rows[pick.r]?.[pick.c] ?? '' : ''
+  }, [edges, numW, pinW])
+  const home = pick && sheet.merges?.find(([r1, c1, r2, c2]) => pick.r >= r1 && pick.r <= r2 && pick.c >= c1 && pick.c <= c2) // a merged cell's value is in its first cell
+  const value = pick ? sheet.rows[home ? home[0] : pick.r]?.[home ? home[1] : pick.c] ?? '' : ''
   const look = useMemo<SheetLook>(() => ({
     line: c.line, panel2: c.panel2, tube: c.tube, tubeSoft: c.tubeSoft,
-    cell: { ...type.caption, color: c.ink, fontVariant: ['tabular-nums'] }, bold: { ...type.caption, color: c.ink, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    bg: c.canvas, cell: { ...type.caption, color: c.ink, fontVariant: ['tabular-nums'] }, bold: { ...type.caption, color: c.ink, fontWeight: '600', fontVariant: ['tabular-nums'] },
     num: { ...type.footnote, color: c.ink3, fontVariant: ['tabular-nums'] }, numOn: { ...type.footnote, color: c.tube, fontVariant: ['tabular-nums'] },
   }), [c])
   // Only the columns near the screen are drawn (the rest is empty space of the right width), in steps of a few
   // columns so a sideways scroll redraws rows rarely.
-  const { width: screen } = useWindowDimensions()
   const [x, setX] = useState(0)
+  const moved = useCallback((e: { nativeEvent: { contentOffset: { x: number } } }) => {
+    const nx = e.nativeEvent.contentOffset.x
+    setX((old) => (Math.abs(nx - old) > screen * 0.25 ? nx : old))
+  }, [screen])
+  const onScroll = useMemo(() => RNAnimated.event([{ nativeEvent: { contentOffset: { x: pin } } }], { useNativeDriver: true, listener: moved }), [pin, moved])
   const span = useMemo(() => {
     const from = Math.max(0, edges.findIndex((e) => e + numW > x - screen * 0.5))
     let to = edges.findIndex((e) => e + numW > x + screen * 1.5)
@@ -403,25 +429,28 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
           <Text variant="caption" color="ink3">This sheet is empty.</Text>
         </View>
       ) : (
-      <ScrollView key={at} horizontal bounces={false} style={{ flex: 1 }} scrollEventThrottle={64}
-        onScroll={(e) => { const nx = e.nativeEvent.contentOffset.x; if (Math.abs(nx - x) > screen * 0.25) setX(nx) }}
-        onMomentumScrollEnd={(e) => setX(e.nativeEvent.contentOffset.x)}>
+      <RNAnimated.ScrollView key={at} horizontal bounces={false} style={{ flex: 1 }} scrollEventThrottle={16}
+        onScroll={onScroll} onMomentumScrollEnd={(e) => setX(e.nativeEvent.contentOffset.x)}>
         <View style={{ width: numW + (edges[edges.length - 1] ?? 0), height: '100%' }}>
-          <HeadRow cols={cols} numW={numW} lit={pick?.c ?? -1} look={look} />
+          <HeadRow cols={cols} numW={numW} lit={pick?.c ?? -1} look={look} pin={pin} pinW={pinW} />
+          {sheet.rows.slice(0, frozeRows).map((row, index) => (
+            <SheetRow key={index} row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} kind={sheet.kinds?.[index]} pin={pin} pinW={pinW} edge={index === frozeRows - 1} />
+          ))}
           {/* Rows recycle as they scroll (FlashList): new ones reuse views instead of making them */}
           <FlashList
-            data={sheet.rows}
-            keyExtractor={(_, i) => String(i)}
-            extraData={`${pick?.r}:${pick?.c}:${span.from}:${span.to}`}
+            data={frozeRows ? sheet.rows.slice(frozeRows) : sheet.rows}
+            keyExtractor={(_, i) => String(i + frozeRows)}
+            extraData={`${pick?.r}:${pick?.c}:${span.from}:${span.to}:${frozeCols}`}
             contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
-            renderItem={({ item: row, index }) => (
-              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} kind={sheet.kinds?.[index]} />
-            )}
+            renderItem={({ item: row, index: i }) => {
+              const index = i + frozeRows
+              return <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} extra={extras[index]} kind={sheet.kinds?.[index]} pin={pin} pinW={pinW} />
+            }}
             ListFooterComponent={sheet.total > sheet.rows.length && sheet.rows.length >= 1000
               ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
           />
         </View>
-      </ScrollView>
+      </RNAnimated.ScrollView>
       )}
       {/* Sheets, as tabs along the bottom */}
       {sheets.length > 1 && (
@@ -429,7 +458,7 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, maxWidth: '100%' }} contentContainerStyle={{ paddingHorizontal: 16 }}>
             <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: 22, backgroundColor: 'rgba(24,24,27,0.92)' }}>
               {sheets.map((sh, i) => (
-                <Pressable key={sh.name} onPress={() => { haptic.tap(); setAt(i); setPick(null); setX(0) }} accessibilityRole="tab" accessibilityState={{ selected: i === at }}
+                <Pressable key={sh.name} onPress={() => { haptic.tap(); setAt(i); setPick(null); setX(0); pin.setValue(0) }} accessibilityRole="tab" accessibilityState={{ selected: i === at }}
                   style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: 'center', backgroundColor: i === at ? '#fff' : 'transparent' }}>
                   <Text variant="label" color={i === at ? '#18181b' : '#d4d4d8'} numberOfLines={1}>{sh.name}</Text>
                 </Pressable>
@@ -442,44 +471,54 @@ function Sheets({ sheets, chrome }: { sheets: SheetData[]; chrome: { top: number
   )
 }
 
-type SheetLook = { line: string; panel2: string; tube: string; tubeSoft: string; cell: TextStyle; bold: TextStyle; num: TextStyle; numOn: TextStyle }
+type SheetLook = { bg: string; line: string; panel2: string; tube: string; tubeSoft: string; cell: TextStyle; bold: TextStyle; num: TextStyle; numOn: TextStyle }
 
-const HeadRow = memo(function HeadRow({ cols, numW, lit, look }: { cols: number[]; numW: number; lit: number; look: SheetLook }) {
+const HeadRow = memo(function HeadRow({ cols, numW, lit, look, pin, pinW }: { cols: number[]; numW: number; lit: number; look: SheetLook; pin: RNAnimated.Value; pinW: number }) {
+  const letter = (w: number, j: number) => (
+    <View key={j} style={{ width: w, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: j === lit ? look.tubeSoft : undefined }}>
+      <Text variant="footnote" color={j === lit ? 'tube' : 'ink3'}>{colName(j)}</Text>
+    </View>
+  )
   return (
-    <View style={{ flexDirection: 'row', height: ROW_H, borderBottomWidth: 1, borderColor: look.line, backgroundColor: look.panel2 }}>
+    <View style={{ flexDirection: 'row', height: ROW_H, borderBottomWidth: 1, borderColor: look.line, backgroundColor: look.panel2, zIndex: 1 }}>
       <View style={{ width: numW, borderRightWidth: 1, borderColor: look.line }} />
-      {cols.map((w, j) => (
-        <View key={j} style={{ width: w, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: j === lit ? look.tubeSoft : undefined }}>
-          <Text variant="footnote" color={j === lit ? 'tube' : 'ink3'}>{colName(j)}</Text>
-        </View>
-      ))}
+      {cols.map(letter)}
+      <RNAnimated.View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, flexDirection: 'row', backgroundColor: look.panel2, transform: [{ translateX: pin }] }}>
+        <View style={{ width: numW, borderRightWidth: 1, borderColor: look.line }} />
+        {pinned(cols, pinW).map(([j, w]) => letter(w, j))}
+      </RNAnimated.View>
     </View>
   )
 })
 
 /** One row: drawn again only when its cells, its lit cell or the column sizes change. */
-const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap, extra, kind }: {
+/** The frozen columns that fit in the pinned width, each as [column, width drawn]. */
+function pinned(cols: number[], pinW: number) {
+  const out: [number, number][] = []
+  for (let j = 0, left = 0; left < pinW && j < cols.length; left += cols[j], j++) out.push([j, Math.min(cols[j], pinW - left)])
+  return out
+}
+
+const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap, extra, kind, pin, pinW, edge }: {
   row: string[]; index: number; cols: number[]; edges: number[]; numW: number; from: number; to: number; lit: number; look: SheetLook
-  onTap: (r: number, x: number) => void; extra?: RowExtra; kind?: string
+  onTap: (r: number, x: number, at: number) => void; extra?: RowExtra; kind?: string; pin: RNAnimated.Value; pinW: number; edge?: boolean
 }) {
   const before = from > 0 ? edges[from - 1] : 0
   const after = edges[edges.length - 1] - (edges[to] ?? 0)
   const height = extra?.tall ? ROW_H * 2 : ROW_H
-  const cells = []
-  for (let j = from; j <= to; j++) {
-    if (extra?.skip?.has(j)) {
-      if (j === from) cells.push(<View key={j} pointerEvents="none" style={{ width: cols[j] }} />) // part of a merged cell that starts off screen
-      continue
-    }
+  const below = edge ? 2 : 1 // a heavier line under the frozen rows
+  const cell = (j: number, room = Infinity) => {
     const span = extra?.span?.[j] ?? 1
-    const w = span > 1 ? edges[j + span - 1] - (j ? edges[j - 1] : 0) : cols[j]
-    const text = extra?.blank?.has(j) ? '' : row[j] ?? ''
+    const w = Math.min(room, span > 1 ? edges[j + span - 1] - (j ? edges[j - 1] : 0) : cols[j])
+    const moved = extra?.moved?.[j]
+    const text = extra?.blank?.has(j) ? '' : moved ? moved.t : row[j] ?? ''
     const st = extra?.st?.[j]
     const fill = st?.f ? `#${st.f}` : undefined
     const ink = st?.c ? `#${st.c}` : fill ? (lightHex(st!.f!) ? '#18181b' : '#fafafa') : undefined
-    const align = st?.a ?? (span > 1 ? 'center' : (kind !== undefined ? kind[j] === '1' : text && NUMERIC.test(text)) ? 'right' : 'left')
-    cells.push(
-      <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: fill,
+    const num = moved ? moved.num : kind !== undefined ? kind[j] === '1' : !!text && NUMERIC.test(text)
+    const align = st?.a ?? (span > 1 ? 'center' : num ? 'right' : 'left')
+    return (
+      <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderBottomWidth: extra?.open?.has(j) ? 0 : below, borderColor: look.line, backgroundColor: fill,
         alignItems: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' },
         j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
         {!!text && (
@@ -488,17 +527,34 @@ const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, t
             {text}
           </RNText>
         )}
-      </View>,
+      </View>
     )
   }
+  const cells = []
+  for (let j = from; j <= to; j++) {
+    if (extra?.skip?.has(j)) {
+      if (j === from) cells.push(<View key={j} pointerEvents="none" style={{ width: cols[j], borderBottomWidth: below, borderColor: look.line }} />) // part of a merged cell that starts off screen
+      continue
+    }
+    cells.push(cell(j))
+  }
+  const pins = pinned(cols, pinW).filter(([j]) => !extra?.skip?.has(j)).map(([j]) => cell(j, pinW - (j ? edges[j - 1] : 0)))
+  const num = (
+    <View pointerEvents="none" style={{ width: numW, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderBottomWidth: below, borderColor: look.line, backgroundColor: lit >= 0 ? look.tubeSoft : look.panel2 }}>
+      <RNText style={lit >= 0 ? look.numOn : look.num} allowFontScaling={false}>{index + 1}</RNText>
+    </View>
+  )
   return (
-    <Pressable onPress={(e) => onTap(index, e.nativeEvent.locationX)} style={{ flexDirection: 'row', height, borderBottomWidth: 1, borderColor: look.line }}>
-      <View pointerEvents="none" style={{ width: numW, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: lit >= 0 ? look.tubeSoft : look.panel2 }}>
-        <RNText style={lit >= 0 ? look.numOn : look.num} allowFontScaling={false}>{index + 1}</RNText>
-      </View>
-      {before > 0 && <View pointerEvents="none" style={{ width: before }} />}
+    <Pressable onPress={(e) => onTap(index, e.nativeEvent.locationX, e.nativeEvent.pageX)} style={{ flexDirection: 'row', height }}>
+      {num}
+      {before > 0 && <View pointerEvents="none" style={{ width: before, borderBottomWidth: below, borderColor: look.line }} />}
       {cells}
-      {after > 0 && <View pointerEvents="none" style={{ width: after }} />}
+      {after > 0 && <View pointerEvents="none" style={{ width: after, borderBottomWidth: below, borderColor: look.line }} />}
+      {/* Row number and frozen columns, kept at the left as the sheet scrolls sideways */}
+      <RNAnimated.View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, flexDirection: 'row', backgroundColor: look.bg, transform: [{ translateX: pin }] }}>
+        {num}
+        {pins}
+      </RNAnimated.View>
     </Pressable>
   )
 })
