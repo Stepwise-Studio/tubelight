@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '@/lib/api'
 import { syncNotifications } from '@/lib/phone'
 import { supabase } from '@/lib/supabase'
+import { liveChannel } from '@/lib/realtime'
 import type { Approval, Attachment, DeltaEvent, DoneEvent, LiveState, Message, StatusEvent } from '@/lib/types'
 
 const PAGE = 50
@@ -31,24 +32,25 @@ interface ThreadListener {
   approval: (e: PgEvent) => void
   joined: () => void
 }
-const hubs = new Map<string, { listeners: Set<ThreadListener>; channel: ReturnType<typeof supabase.channel> }>()
+const hubs = new Map<string, { listeners: Set<ThreadListener>; live: ReturnType<typeof liveChannel> }>()
 
 function joinThread(threadId: string, l: ThreadListener): () => void {
   let hub = hubs.get(threadId)
   if (!hub) {
     const listeners = new Set<ThreadListener>()
     const each = (f: (x: ThreadListener) => void) => listeners.forEach(f)
-    const channel = supabase
+    // Self-healing (lib/realtime): every join, the first or after the channel died, catches the screen up.
+    const live = liveChannel(() => supabase
       .channel(`thread:${threadId}`, { config: { private: true } })
       .on('broadcast', { event: 'status' }, ({ payload }) => each((x) => x.status(payload as StatusEvent)))
       .on('broadcast', { event: 'delta' }, ({ payload }) => each((x) => x.delta(payload as DeltaEvent)))
       .on('broadcast', { event: 'done' }, ({ payload }) => each((x) => x.done(payload as DoneEvent & { discarded?: boolean })))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `thread_id=eq.${threadId}` }, (e) => each((x) => x.message(e as PgEvent)))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'approvals', filter: `thread_id=eq.${threadId}` }, (e) => each((x) => x.approval(e as PgEvent)))
-      .subscribe((status) => { if (status === 'SUBSCRIBED') each((x) => x.joined()) })
-    hub = { listeners, channel }
+      , () => each((x) => x.joined()))
+    hub = { listeners, live }
     hubs.set(threadId, hub)
-  } else if (hub.channel.state === 'joined') {
+  } else if (hub.live.channel?.state === 'joined') {
     l.joined() // already live: catch up now
   }
   hub.listeners.add(l)
@@ -56,7 +58,7 @@ function joinThread(threadId: string, l: ThreadListener): () => void {
     const h = hubs.get(threadId)
     if (!h) return
     h.listeners.delete(l)
-    if (!h.listeners.size) { hubs.delete(threadId); supabase.removeChannel(h.channel) }
+    if (!h.listeners.size) { hubs.delete(threadId); h.live.stop() }
   }
 }
 

@@ -1,6 +1,7 @@
 import { createContext, use, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { onReturn } from './app-state'
+import { liveChannel } from './realtime'
 import { supabase } from '@/lib/supabase'
 import type { Approval, Message, Project, ProjectMember, Run, Teammate, Thread } from '@/lib/types'
 
@@ -128,13 +129,8 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
 
-    let channel: ReturnType<typeof supabase.channel> | null = null
-    let cancelled = false
-    ;(async () => {
-      const { data } = await supabase.auth.getSession()
-      if (cancelled) return
-      if (data.session) supabase.realtime.setAuth(data.session.access_token)
-      channel = supabase
+    // Self-healing (lib/realtime): a rejoin after the channel died catches up on what it missed.
+    const live = liveChannel(() => supabase
         .channel(`workspace:${userId}:${Math.random().toString(36).slice(2)}`) // unique: the assistant panel runs a second one
         .on('postgres_changes', { event: '*', schema: 'public', table: 'threads' }, (e) => {
           if (e.eventType === 'DELETE') setThreads((l) => l.filter((x) => x.id !== (e.old as Thread).id))
@@ -162,16 +158,13 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (e) => {
           const m = e.new as Message
           setPreviews((p) => ({ ...p, [m.thread_id]: m }))
-        })
-        .subscribe()
-    })()
+        }), (first) => { if (!first && loaded.current) refresh() })
 
     // Catch up on anything missed while away (not after a dialog's blip: see onReturn).
     const stop = onReturn(() => { if (loaded.current) refresh() })
     return () => {
-      cancelled = true
       stop()
-      if (channel) supabase.removeChannel(channel)
+      live.stop()
     }
   }, [userId, refresh])
 

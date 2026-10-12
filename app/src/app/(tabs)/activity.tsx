@@ -11,6 +11,7 @@ import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { FILTER_TYPES, matchesFilter, type ActivityFilter } from '@/lib/activity'
 import { dayLabel, sameDay } from '@/lib/format'
+import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
 import type { Activity, Approval, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
@@ -86,17 +87,17 @@ export default function ActivityTab() {
 
   // Realtime: new rows slide in at the top when they match the current filters.
   useEffect(() => {
-    const ch = supabase
+    // Self-healing (lib/realtime): after the channel died, a rejoin reloads the list.
+    const live = liveChannel(() => supabase
       .channel(`activity-feed:${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity' }, (e) => {
         const a = e.new as Activity
         if (who && a.teammate_id !== who) return
         if (!matchesFilter(a, filter)) return
         setLoaded((l) => (l && l.key === `${who}|${filter}` && !l.rows.some((x) => x.id === a.id) ? { ...l, rows: [a, ...l.rows] } : l))
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [who, filter])
+      }), (first) => { if (!first) load() })
+    return () => live.stop()
+  }, [who, filter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = async () => { setRefreshing(true); await Promise.all([load(), ws.refresh()]); setRefreshing(false) }
 
