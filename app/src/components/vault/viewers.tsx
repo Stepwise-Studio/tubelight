@@ -1,12 +1,13 @@
 // The Vault's file viewer, one native view per kind: photos (pinch, double-tap, swipe between them), video and audio
 // players, PDFs drawn page by page by Android itself, Markdown and text, Word as formatted text, spreadsheets as a
 // grid with their sheets, slide decks as slides. Anything else: what it is, and Share to open it elsewhere.
+import { FlashList } from '@shopify/flash-list'
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { File } from 'expo-file-system'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, ScrollView, View, useWindowDimensions, type ViewToken } from 'react-native'
+import { ActivityIndicator, FlatList, Pressable, Text as RNText, ScrollView, View, useWindowDimensions, type TextStyle, type ViewToken } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Icon } from '@hugeicons/core-free-icons'
@@ -200,11 +201,14 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   if (error) return <Other item={item} note={error} />
   if (text === null) return <Loading />
   if (!text.trim()) return <Other item={item} note="This file is empty." />
-  if (markdown) {
+  if (markdown) return <Doc text={text} chrome={chrome} />
+  if (text.length > LONG) {
+    // A big text file: blocks of lines that draw as they scroll in (long lines wrap)
+    const lines = text.split('\n')
+    const blocks = Array.from({ length: Math.ceil(lines.length / 80) }, (_, i) => lines.slice(i * 80, i * 80 + 80).join('\n'))
     return (
-      <ScrollView contentContainerStyle={{ paddingTop: chrome.top + 16, paddingBottom: chrome.bottom + 40, paddingHorizontal: 20 }}>
-        <Markdown value={text} />
-      </ScrollView>
+      <FlashList data={blocks} keyExtractor={(_, i) => String(i)} contentContainerStyle={{ paddingTop: chrome.top + 12, paddingBottom: chrome.bottom + 40, paddingHorizontal: 16 }}
+        renderItem={({ item }) => <Text selectable style={[type.mono, { color: c.ink }]}>{item}</Text>} />
     )
   }
   return (
@@ -216,6 +220,30 @@ function TextFile({ item, markdown, chrome }: { item: Viewable; markdown: boolea
   )
 }
 
+const LONG = 12_000 // characters past which a document draws in sections as it scrolls
+
+/** A Markdown document. Short ones draw at once; long ones split at their headings (and big sections between
+ * paragraphs) into sections a list draws as they scroll in, so opening and scrolling stay quick. */
+function Doc({ text, chrome }: { text: string; chrome: { top: number; bottom: number } }) {
+  const parts = useMemo(() => {
+    if (text.length <= LONG) return [text]
+    const out: string[] = []
+    for (const sec of text.split(/\n(?=#{1,3} )/)) {
+      if (sec.length <= 4000) { out.push(sec); continue }
+      let cur = ''
+      for (const para of sec.split(/\n\n(?![ \t]*[-*+|]|[ \t]*\d+\. )/)) {
+        if (cur && cur.length + para.length > 4000) { out.push(cur); cur = '' }
+        cur += (cur ? '\n\n' : '') + para
+      }
+      if (cur) out.push(cur)
+    }
+    return out
+  }, [text])
+  const pad = { paddingTop: chrome.top + 16, paddingBottom: chrome.bottom + 40, paddingHorizontal: 20 }
+  if (parts.length === 1) return <ScrollView contentContainerStyle={pad}><Markdown value={text} /></ScrollView>
+  return <FlashList data={parts} keyExtractor={(_, i) => String(i)} contentContainerStyle={pad} renderItem={({ item }) => <View style={{ paddingBottom: 12 }}><Markdown value={item} /></View>} />
+}
+
 // ------------------------------------------------------------------ Word, spreadsheets, slides
 type PreviewData =
   | { type: 'markdown'; text: string }
@@ -223,22 +251,24 @@ type PreviewData =
   | { type: 'slides'; slides: Slide[] }
   | { type: 'none' | 'error'; message?: string }
 
+/** Previews already fetched this session (a file reopened shows at once; a phone file isn't uploaded again). */
+const previews = new Map<string, PreviewData>()
+
 function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bottom: number } }) {
-  const [p, setP] = useState<PreviewData | null>(null)
+  const key = `${item.preview}|${item.size}`
+  const [p, setP] = useState<PreviewData | null>(previews.get(key) ?? null)
   useEffect(() => {
+    if (previews.has(key)) return
     const load = item.preview.startsWith('upload:')
       // Expo's fetch takes a file-system File as a form part (React Native's { uri } objects it refuses)
       ? (() => { const form = new FormData(); form.append('file', new File(item.src) as unknown as Blob, item.name); return api<PreviewData>('/preview', { method: 'POST', body: form }) })()
       : api<PreviewData>(item.preview)
-    load.then(setP, (e) => setP({ type: 'error', message: (e as Error).message }))
-  }, [item.preview, item.src, item.name, item.mime])
+    load.then((d) => { if (d.type !== 'error') previews.set(key, d); setP(d) }, (e) => setP({ type: 'error', message: (e as Error).message }))
+  }, [key, item.preview, item.src, item.name, item.mime])
   if (!p) return <Loading />
   if (p.type === 'markdown') {
-    return (
-      <ScrollView contentContainerStyle={{ paddingTop: chrome.top + 16, paddingBottom: chrome.bottom + 40, paddingHorizontal: 20 }}>
-        {p.text.trim() ? <Markdown value={p.text} /> : <Text color="ink3">This document is empty.</Text>}
-      </ScrollView>
-    )
+    if (!p.text.trim()) return <Other item={item} note="This document is empty." />
+    return <Doc text={p.text} chrome={chrome} />
   }
   if (p.type === 'sheets') return <Sheets sheets={p.sheets} chrome={chrome} />
   if (p.type === 'slides') return <Slides slides={p.slides} chrome={chrome} />
@@ -248,9 +278,12 @@ function Preview({ item, chrome }: { item: Viewable; chrome: { top: number; bott
 const colName = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : colName(Math.floor(i / 26) - 1) + colName(i % 26))
 
 const NUMERIC = /^[-+]?(?:[\d,]*\.?\d+)(?:%|e[-+]?\d+)?$/i
+const ROW_H = 34 // one line a cell, as a spreadsheet shows them; the bar on top shows a cell's whole value
 
 /** A spreadsheet, the light version of Excel: column letters and row numbers, numbers to the right, the first row
- * bold, a tapped cell outlined with its address and whole value in the bar on top, sheets as tabs along the bottom. */
+ * bold, a tapped cell outlined with its address and whole value in the bar on top, sheets as tabs along the bottom.
+ * Fast with big sheets: fixed row heights, rows memoised (a tap redraws only the rows it touches), one touch target
+ * a row (the column comes from where you tapped), cells as plain text. */
 function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; total: number }[]; chrome: { top: number; bottom: number } }) {
   const { c } = useTheme()
   const [at, setAt] = useState(0)
@@ -258,15 +291,32 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
   const sheet = sheets[at] ?? sheets[0]
   const cols = useMemo(() => {
     const n = Math.max(0, ...sheet.rows.map((r) => r.length))
-    return Array.from({ length: n }, (_, j) => Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length)))))
+    return Array.from({ length: n }, (_, j) => Math.round(Math.min(240, Math.max(64, 22 + 8.2 * Math.max(...sheet.rows.slice(0, 200).map((r) => (r[j] ?? '').length))))))
   }, [sheet])
+  const edges = useMemo(() => cols.reduce<number[]>((out, w) => [...out, (out[out.length - 1] ?? 0) + w], []), [cols]) // right edge of each column
   const numW = 26 + 8 * String(sheet.rows.length).length
-  const head = (text: string, w: number, key?: number | string, on?: boolean) => (
-    <View key={key} style={{ width: w, paddingHorizontal: 8, paddingVertical: 6, borderRightWidth: 1, borderColor: c.line, backgroundColor: on ? c.tubeSoft : c.panel2, alignItems: 'center' }}>
-      <Text variant="footnote" color={on ? 'tube' : 'ink3'} numberOfLines={1} tabular>{text}</Text>
-    </View>
-  )
+  const tap = useCallback((r: number, x: number) => {
+    const col = edges.findIndex((e) => x - numW < e)
+    if (x < numW || col < 0) return
+    haptic.tap()
+    setPick((p) => (p?.r === r && p.c === col ? null : { r, c: col }))
+  }, [edges, numW])
   const value = pick ? sheet.rows[pick.r]?.[pick.c] ?? '' : ''
+  const look = useMemo<SheetLook>(() => ({
+    line: c.line, panel2: c.panel2, tube: c.tube, tubeSoft: c.tubeSoft,
+    cell: { ...type.caption, color: c.ink, fontVariant: ['tabular-nums'] }, bold: { ...type.caption, color: c.ink, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    num: { ...type.footnote, color: c.ink3, fontVariant: ['tabular-nums'] }, numOn: { ...type.footnote, color: c.tube, fontVariant: ['tabular-nums'] },
+  }), [c])
+  // Only the columns near the screen are drawn (the rest is empty space of the right width), in steps of a few
+  // columns so a sideways scroll redraws rows rarely.
+  const { width: screen } = useWindowDimensions()
+  const [x, setX] = useState(0)
+  const span = useMemo(() => {
+    const from = Math.max(0, edges.findIndex((e) => e + numW > x - screen * 0.5))
+    let to = edges.findIndex((e) => e + numW > x + screen * 1.5)
+    if (to < 0) to = cols.length - 1
+    return { from: Math.floor(from / 4) * 4, to: Math.min(cols.length - 1, Math.ceil((to + 1) / 4) * 4) }
+  }, [edges, numW, x, screen, cols.length])
   return (
     <View style={{ flex: 1, paddingTop: chrome.top }}>
       {/* The cell bar: where you are and what's in it */}
@@ -276,40 +326,24 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
         </View>
         <Text variant="caption" color={pick ? 'ink' : 'ink4'} numberOfLines={1} selectable style={{ flex: 1 }}>{pick ? value || 'Empty' : 'Tap a cell to see it here'}</Text>
       </View>
-      <ScrollView horizontal bounces={false} style={{ flex: 1 }}>
-        <FlatList
-          data={sheet.rows}
-          keyExtractor={(_, i) => String(i)}
-          stickyHeaderIndices={[0]}
-          initialNumToRender={40}
-          extraData={pick}
-          contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
-          ListHeaderComponent={
-            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: c.line, backgroundColor: c.panel2 }}>
-              {head('', numW)}
-              {cols.map((w, j) => head(colName(j), w, j, pick?.c === j))}
-            </View>
-          }
-          renderItem={({ item: row, index }) => (
-            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: c.line }}>
-              {head(String(index + 1), numW, undefined, pick?.r === index)}
-              {cols.map((w, j) => {
-                const text = row[j] ?? ''
-                const on = pick?.r === index && pick?.c === j
-                const num = NUMERIC.test(text)
-                return (
-                  <Pressable key={j} onPress={() => { haptic.tap(); setPick(on ? null : { r: index, c: j }) }}
-                    style={{ width: w, paddingHorizontal: 8, paddingVertical: 7, borderRightWidth: 1, borderColor: c.line, alignItems: num ? 'flex-end' : 'flex-start',
-                      ...(on ? { borderWidth: 2, borderColor: c.tube, paddingHorizontal: 7, paddingVertical: 6 } : null) }}>
-                    <Text variant="caption" numberOfLines={2} tabular style={index === 0 ? { fontWeight: '600' } : undefined}>{text}</Text>
-                  </Pressable>
-                )
-              })}
-            </View>
-          )}
-          ListFooterComponent={sheet.total > sheet.rows.length
-            ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
-        />
+      <ScrollView horizontal bounces={false} style={{ flex: 1 }} scrollEventThrottle={64}
+        onScroll={(e) => { const nx = e.nativeEvent.contentOffset.x; if (Math.abs(nx - x) > screen * 0.25) setX(nx) }}
+        onMomentumScrollEnd={(e) => setX(e.nativeEvent.contentOffset.x)}>
+        <View style={{ width: numW + (edges[edges.length - 1] ?? 0), height: '100%' }}>
+          <HeadRow cols={cols} numW={numW} lit={pick?.c ?? -1} look={look} />
+          {/* Rows recycle as they scroll (FlashList): new ones reuse views instead of making them */}
+          <FlashList
+            data={sheet.rows}
+            keyExtractor={(_, i) => String(i)}
+            extraData={`${pick?.r}:${pick?.c}:${span.from}:${span.to}`}
+            contentContainerStyle={{ paddingBottom: chrome.bottom + 72 }}
+            renderItem={({ item: row, index }) => (
+              <SheetRow row={row} index={index} cols={cols} edges={edges} numW={numW} from={span.from} to={span.to} lit={pick?.r === index ? pick.c : -1} look={look} onTap={tap} />
+            )}
+            ListFooterComponent={sheet.total > sheet.rows.length
+              ? <Text variant="footnote" color="ink3" style={{ padding: 12 }}>First {sheet.rows.length} of {sheet.total.toLocaleString()} rows. Share it to see them all.</Text> : null}
+          />
+        </View>
       </ScrollView>
       {/* Sheets, as tabs along the bottom */}
       {sheets.length > 1 && (
@@ -329,6 +363,49 @@ function Sheets({ sheets, chrome }: { sheets: { name: string; rows: string[][]; 
     </View>
   )
 }
+
+type SheetLook = { line: string; panel2: string; tube: string; tubeSoft: string; cell: TextStyle; bold: TextStyle; num: TextStyle; numOn: TextStyle }
+
+const HeadRow = memo(function HeadRow({ cols, numW, lit, look }: { cols: number[]; numW: number; lit: number; look: SheetLook }) {
+  return (
+    <View style={{ flexDirection: 'row', height: ROW_H, borderBottomWidth: 1, borderColor: look.line, backgroundColor: look.panel2 }}>
+      <View style={{ width: numW, borderRightWidth: 1, borderColor: look.line }} />
+      {cols.map((w, j) => (
+        <View key={j} style={{ width: w, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: j === lit ? look.tubeSoft : undefined }}>
+          <Text variant="footnote" color={j === lit ? 'tube' : 'ink3'}>{colName(j)}</Text>
+        </View>
+      ))}
+    </View>
+  )
+})
+
+/** One row: drawn again only when its cells, its lit cell or the column sizes change. */
+const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, to, lit, look, onTap }: {
+  row: string[]; index: number; cols: number[]; edges: number[]; numW: number; from: number; to: number; lit: number; look: SheetLook
+  onTap: (r: number, x: number) => void
+}) {
+  const before = from > 0 ? edges[from - 1] : 0
+  const after = edges[edges.length - 1] - (edges[to] ?? 0)
+  return (
+    <Pressable onPress={(e) => onTap(index, e.nativeEvent.locationX)} style={{ flexDirection: 'row', height: ROW_H, borderBottomWidth: 1, borderColor: look.line }}>
+      <View pointerEvents="none" style={{ width: numW, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: look.line, backgroundColor: lit >= 0 ? look.tubeSoft : look.panel2 }}>
+        <RNText style={lit >= 0 ? look.numOn : look.num} allowFontScaling={false}>{index + 1}</RNText>
+      </View>
+      {before > 0 && <View pointerEvents="none" style={{ width: before }} />}
+      {cols.slice(from, to + 1).map((w, k) => {
+        const j = from + k
+        const text = row[j] ?? ''
+        return (
+          <View key={j} pointerEvents="none" style={[{ width: w, paddingHorizontal: 8, justifyContent: 'center', borderRightWidth: 1, borderColor: look.line, alignItems: text && NUMERIC.test(text) ? 'flex-end' : 'flex-start' },
+            j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
+            {!!text && <RNText numberOfLines={1} style={index === 0 ? look.bold : look.cell} maxFontSizeMultiplier={1.3}>{text}</RNText>}
+          </View>
+        )
+      })}
+      {after > 0 && <View pointerEvents="none" style={{ width: after }} />}
+    </Pressable>
+  )
+})
 
 interface Slide { title: string; subtitle?: string; items: { text: string; level: number }[]; table?: string[][]; notes?: string }
 
