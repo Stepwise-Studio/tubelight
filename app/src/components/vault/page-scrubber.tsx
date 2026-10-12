@@ -18,7 +18,7 @@ const REST = 10 // a bar away from the finger
 const PEAK = 44 // the bar under it
 const REACH = 30 // how far the swell spreads either side (px)
 const ZONE = 56 // near an edge, the bars keep moving
-const SPEED = 300 // px a second at the very edge (25 pages)
+const SPEED = 150 // px a second at the very edge (about 12 pages)
 
 export function PageScrubber({ pages, page, bottom, onScrub, onHold, children }: {
   pages: number
