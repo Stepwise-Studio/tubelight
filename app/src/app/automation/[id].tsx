@@ -243,7 +243,7 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
   const insets = useSafeAreaInsets()
   const ws = useWorkspace()
   const project = thread?.startsWith('proj:') ? thread.slice(5) : null
-  const first = teammate ?? (thread?.startsWith('dm:') ? thread.slice(3) : project ? ws.membersOf(project)[0]?.id : undefined) ?? ws.teammates[0]?.id
+  const first = teammate ?? (thread?.startsWith('dm:') ? thread.split(':')[1] : project ? ws.membersOf(project)[0]?.id : undefined) ?? ws.teammates[0]?.id
   const [d, setD] = useState<AutomationDraft>(() => emptyDraft(first ?? null, project))
   const [errors, setErrors] = useState<AutomationErrors>({})
   const [note, setNote] = useState('')

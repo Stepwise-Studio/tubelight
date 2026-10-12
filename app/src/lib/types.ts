@@ -45,7 +45,9 @@ export interface ProjectMember {
 }
 
 export interface Thread {
-  id: string // 'dm:<teammate_id>' | 'proj:<project_id>'
+  id: string // 'dm:<teammate_id>' (main chat) | 'dm:<teammate_id>:<id>' (extra chats) | 'proj:<project_id>'
+  /** Extra chats get one from the keeper after their first exchange; the user can rename any chat. */
+  title: string | null
   owner_id: string
   kind: 'dm' | 'project'
   teammate_id: string | null

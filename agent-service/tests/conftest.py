@@ -39,6 +39,8 @@ class FakeDB:
         s = str(v).lower() if isinstance(v, bool) else str(v)
         return {"eq": lambda: s == val, "in": lambda: s in val.strip("()").split(","), "gte": lambda: s >= val,
                 "gt": lambda: s > val, "ilike": lambda: val.strip("*").lower() in s.lower(), "neq": lambda: s != val,
+                "like": lambda: s.startswith(val.rstrip("*")),  # ponytail: trailing-* prefixes only
+                "not": lambda: not FakeDB._ok(row, key, val),
                 "is": lambda: v is None if val == "null" else s == val}[op]()
 
     def rows(self, table: str, **eq: Any) -> list[dict]:

@@ -245,7 +245,7 @@ async def delete(rule: dict[str, Any], by: str) -> None:
 
 async def in_thread(owner_id: str, thread_id: str) -> list[dict[str, Any]]:
     """The automations that post into one chat (schedules and app events, not raw webhook rules)."""
-    kind, _, ref = thread_id.partition(":")
+    kind, ref = thread_id.split(":")[:2]
     scope = {"project_id": f"eq.{ref}"} if kind == "proj" else {"teammate_id": f"eq.{ref}", "project_id": "is.null"}
     rows = await db.select("event_rules", {"owner_id": f"eq.{owner_id}", "event_type": "in.(schedule,app)",
                                            "order": "created_at", **scope})

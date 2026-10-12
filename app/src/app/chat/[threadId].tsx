@@ -7,6 +7,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 
 import { Composer } from '@/components/chat/composer'
+import { ChatsButton, ChatsSheet } from '@/components/chat/chats'
 import { ComputerInfo } from '@/components/chat/computer-info'
 import { FollowupsButton, FollowupsSheet, useFollowups } from '@/components/chat/followups'
 import { VoiceControls, VoiceGlow, useVoiceSession, voiceItems } from '@/components/voice/voice-mode'
@@ -17,7 +18,7 @@ import { api } from '@/lib/api'
 import { dayLabel, sameDay } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import { useThread, type ChatMessage, type LiveStatus, type SendOptions } from '@/lib/use-thread'
-import { computerId, isComputer, useWorkspace } from '@/lib/workspace'
+import { chatTitle, computerId, isComputer, useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Skeleton, TeammateAvatar, Text, TextSwap, TypingDots, elevation, haptic, toast } from '@/ui'
 
@@ -40,6 +41,10 @@ export default function Thread() {
   const computer = dmMate && isComputer(dmMate) ? computerId(dmMate) : null
   const [commands, setCommands] = useState<{ name: string; about: string; arg: boolean }[] | undefined>()
   const [info, setInfo] = useState(false)
+  const [showChats, setShowChats] = useState(false)
+  // Several chats with this teammate: the header names the open one.
+  const thisChat = ws.thread(threadId)
+  const severalChats = !!dmMate && ws.chatsWith(dmMate.id).length > 1
   useEffect(() => {
     if (computer) api<{ name: string; about: string; arg: boolean }[]>('/computers/commands').then(setCommands, () => {})
   }, [computer])
@@ -181,7 +186,7 @@ export default function Thread() {
   const workerName = working && ws.teammate(working.teammate_id)?.name
   const subtitle = working
     ? (isDm || !workerName ? 'Working' : `${workerName} is working`)
-    : isDm ? dmMate?.role ?? '' : people.length ? people.map((p) => p.name).join(', ') : 'No members yet'
+    : isDm ? (severalChats && thisChat ? chatTitle(thisChat) : dmMate?.role ?? '') : people.length ? people.map((p) => p.name).join(', ') : 'No members yet'
   const openDetails = () => {
     if (dmMate && isComputer(dmMate)) router.push({ pathname: '/computers', params: { open: computerId(dmMate)! } })
     else if (dmMate) router.push({ pathname: '/teammate/[id]', params: { id: dmMate.id } })
@@ -193,6 +198,7 @@ export default function Thread() {
       right={
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           {computer && <IconButton icon={InformationCircleIcon} round accessibilityLabel={`About ${title}`} onPress={() => setInfo(true)} />}
+          {dmMate && <ChatsButton teammateId={dmMate.id} threadId={threadId} onPress={() => setShowChats(true)} />}
           <FollowupsButton count={fu.list.length} onPress={() => { fu.load(); setShowFollowups(true) }} />
         </View>
       }
@@ -347,6 +353,7 @@ export default function Thread() {
       </KeyboardAvoidingView>
       </ChatActionsContext.Provider>
       {computer && <ComputerInfo open={info} onClose={() => setInfo(false)} id={computer} name={title} onCommand={(cmd) => send(cmd, [])} />}
+      {dmMate && <ChatsSheet open={showChats} onClose={() => setShowChats(false)} teammateId={dmMate.id} threadId={threadId} name={dmMate.name} />}
       <FollowupsSheet
         open={showFollowups}
         onClose={() => setShowFollowups(false)}

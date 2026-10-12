@@ -62,6 +62,31 @@ async def test_search_chat_finds_earlier_words(api, env):
     assert "keep the free tier at 3 teammates" in seen["result"] and "unrelated" not in seen["result"]
 
 
+async def test_a_teammates_chats_know_about_each_other(api, env):
+    """Several chats with one teammate: each run sees the others' briefs, search_chat spans them, extra ones get named."""
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    main, side = f"dm:{dev['id']}", f"dm:{dev['id']}:a1"
+    fdb.tables["threads"].append({"id": side, "owner_id": OWNER, "kind": "dm", "teammate_id": dev["id"], "title": None})
+    next(t for t in fdb.tables["threads"] if t["id"] == main)["last_message_at"] = "2026-09-28T04:00:00+00:00"
+    said(fdb, main, "2026-09-28T03:30:00+00:00", "pricing: keep the free tier at 3 teammates")
+    await memory.store.aput(("thread", main), "brief", {"text": "Decisions: free tier stays at 3 teammates."}, index=False)
+    seen = {}
+
+    def answer(messages):
+        seen["result"] = next(m.content for m in reversed(messages) if isinstance(m, ToolMessage))
+        return ai("In the main chat we kept the free tier at 3.")
+
+    fake.script = [ai(calls=[("search_chat", {"query": "free tier"})]), answer,
+                   ai('{"brief": "Asked about pricing.", "title": "Pricing check"}')]
+    await api.post(f"/threads/{side}/messages", json={"text": "what did we say about the free tier in the other chat?"})
+    await settle()
+    assert "## Your other chats" in fake.calls[0][0].content and "free tier stays at 3" in fake.calls[0][0].content
+    assert '(in the other chat "main chat")' in seen["result"]
+    await brief.refresh(OWNER, side, "Akhil", "UTC")
+    assert fdb.rows("threads", id=side)[0]["title"] == "Pricing check"
+
+
 def later(**kw) -> str:
     """A local (UTC in tests) time from now, as the tools take it."""
     return (datetime.now(UTC) + timedelta(**kw)).strftime("%Y-%m-%dT%H:%M")

@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, computers, config, connectors, db, floor, followups, genui, llm, mem, memory, push, reactions, repo, tools as T
+from . import automations, brief, computers, config, connectors, db, floor, followups, genui, llm, mem, memory, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -203,6 +203,22 @@ def local_now(ctx: RunCtx) -> datetime:
         return datetime.now(UTC)
 
 
+async def other_chats(ctx: RunCtx) -> str:
+    """A DM teammate's other chats with the user (`dm:<id>` and `dm:<id>:<n>`), newest first, each as its brief."""
+    if ctx.project or not ctx.thread_id.startswith("dm:"):
+        return ""
+    rows = await db.select("threads", {"owner_id": f"eq.{ctx.owner_id}", "kind": "eq.dm", "id": f"neq.{ctx.thread_id}",
+                                       "teammate_id": f"eq.{ctx.members[0]['id']}", "last_message_at": "not.is.null",
+                                       "order": "last_message_at.desc", "limit": "6", "select": "id,title,last_message_at"})
+    out = []
+    for r in rows:
+        text = await brief.get(r["id"])
+        if text:  # ponytail: 6 briefs cut to 600 chars; a search tool over briefs if users keep dozens of chats
+            out.append(f"### {r.get('title') or ('Main chat' if r['id'].count(':') == 1 else 'Untitled chat')} "
+                       f"(last active {r['last_message_at'][:10]})\n{text[:600]}")
+    return "\n".join(out)
+
+
 async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: list[str]) -> str:
     query = _last_human(msgs)[:500]
     shelf = memory.ns("user", ctx.owner_id)
@@ -351,6 +367,11 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "out of the messages you see. Pick up its open loops when they come due or come up. It records what "
                      "people said, not verified facts: anything you can check now with a tool (files, counts, versions, "
                      "statuses, results), check rather than repeat:\n" + ctx.brief)
+    others = await other_chats(ctx)
+    if others:
+        lines.append(f"## Your other chats with {ctx.user_name}\nThe same you, in separate chats {ctx.user_name} keeps "
+                     "with you. Use them when asked about another chat or when they bear on this one; search_chat "
+                     "searches them too:\n" + others)
     if ctx.apps:
         lines.append(f"{ctx.user_name} @mentioned {', '.join(connectors.name_of(a) for a in ctx.apps)} in this request: "
                      "use those apps for it.")

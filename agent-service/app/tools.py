@@ -290,14 +290,22 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         words = re.findall(r"[\w'-]{3,}", query.lower())[:5]
         if not words:
             return "Give a few keywords to look for."
+        # In a DM: every chat with this teammate (`dm:<id>` and its extra `dm:<id>:<n>` chats), labelled by chat.
+        dm = f"dm:{ctx.members[0]['id']}" if ctx.thread_id.startswith("dm:") and not ctx.project else None
         rows = await db.select("messages", {
-            "thread_id": f"eq.{ctx.thread_id}", "kind": "in.(text,handoff)", "order": "created_at.desc", "limit": "40",
-            "or": "(" + ",".join(f"text.ilike.*{w}*" for w in words) + ")", "select": "created_at,sender_type,teammate_id,text"})
+            "thread_id": f"like.{dm}*" if dm else f"eq.{ctx.thread_id}", "owner_id": f"eq.{ctx.owner_id}",
+            "kind": "in.(text,handoff)", "order": "created_at.desc", "limit": "40",
+            "or": "(" + ",".join(f"text.ilike.*{w}*" for w in words) + ")",
+            "select": "created_at,sender_type,teammate_id,text,thread_id"})
         if not rows:
             return "Nothing in this chat matches."
         names = {m["id"]: m["name"] for m in ctx.members}
         best = sorted(rows, key=lambda r: -sum(w in r["text"].lower() for w in words))[:8]  # most words matched first
+        others = {r["thread_id"] for r in best} - {ctx.thread_id}
+        titles = {t["id"]: t.get("title") or ("main chat" if t["id"] == dm else "untitled chat") for t in await db.select(
+            "threads", {"id": f"in.({','.join(others)})", "select": "id,title"})} if others else {}
         return "\n".join(f"[{datetime.fromisoformat(r['created_at']).astimezone(zone):%a %b %d, %I:%M %p}] "
+                         + (f"(in the other chat \"{titles.get(r['thread_id'], 'another chat')}\") " if r["thread_id"] != ctx.thread_id else "") +
                          f"{ctx.user_name if r['sender_type'] == 'user' else names.get(r['teammate_id'], 'Teammate')}: "
                          f"{r['text'][:700]}" for r in sorted(best, key=lambda r: r["created_at"]))
 
@@ -739,7 +747,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         "about their model or AI usage."),
         StructuredTool.from_function(
             coroutine=search_chat, name="search_chat",
-            description="Search this chat's full history for earlier messages (exact wording, what was said this "
+            description="Search this chat's full history (in a DM, your other chats with the user too) for earlier messages (exact wording, what was said this "
                         "morning or days ago), by keywords. The brief summarises; this finds the words."),
         StructuredTool.from_function(
             coroutine=follow_up, name="follow_up",

@@ -14,7 +14,7 @@ import { ThreadAvatar } from '@/components/thread-avatar'
 import { openSheet } from '@/components/sheet-screen'
 import { isUnread, plainText, relativeTime } from '@/lib/format'
 import type { Thread } from '@/lib/types'
-import { isComputer, useWorkspace, type Preview } from '@/lib/workspace'
+import { chatTitle, isComputer, useWorkspace, type Preview } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
 import {
   Button, EmptyState, Icon, Press, Skeleton, TeammateAvatar, Text, showMenu,
@@ -75,9 +75,12 @@ function Inbox({ query }: { query: string }) {
   const refresh = async () => { setRefreshing(true); await ws.refresh(); setRefreshing(false) }
 
   const q = query.trim().toLowerCase()
+  // One row per teammate: its most recently active chat stands for all of them (the chat screen switches between them).
   const threads = [...ws.threads]
     .sort((a, b) => Date.parse(b.last_message_at ?? b.created_at) - Date.parse(a.last_message_at ?? a.created_at))
-    .filter((t) => !q || `${ws.threadTitle(t.id)} ${ws.previews[t.id]?.text ?? ''}`.toLowerCase().includes(q))
+    .filter((t, i, all) => t.kind !== 'dm' || all.findIndex((x) => x.kind === 'dm' && x.teammate_id === t.teammate_id) === i)
+    .filter((t) => !q || [t, ...(t.kind === 'dm' ? ws.chatsWith(t.teammate_id!) : [])]
+      .some((x) => `${ws.threadTitle(x.id)} ${x.title ?? ''} ${ws.previews[x.id]?.text ?? ''}`.toLowerCase().includes(q)))
 
   if (ws.loading) {
     return (
@@ -157,9 +160,12 @@ function ChatRow({ thread }: { thread: Thread }) {
   const ws = useWorkspace()
   const title = ws.threadTitle(thread.id)
   const p = ws.previews[thread.id]
-  const unread = isUnread(thread)
-  const pending = ws.pendingApprovals.filter((a) => a.thread_id === thread.id).length
-  const working = ws.liveRuns.find((r) => r.thread_id === thread.id && r.status === 'running')
+  // A teammate's row speaks for all its chats: new or waiting in any of them shows here.
+  const chats = thread.kind === 'dm' ? ws.chatsWith(thread.teammate_id!) : [thread]
+  const ids = new Set(chats.map((x) => x.id))
+  const unread = chats.some(isUnread)
+  const pending = ws.pendingApprovals.filter((a) => ids.has(a.thread_id)).length
+  const working = ws.liveRuns.find((r) => ids.has(r.thread_id) && r.status === 'running')
   const workerName = working && ws.teammate(working.teammate_id)?.name
 
   // A DM's title is already the teammate's name; a group says who.
@@ -167,7 +173,7 @@ function ChatRow({ thread }: { thread: Thread }) {
     ? (thread.id.startsWith('dm:') || !workerName ? 'Working' : `${workerName} is working`)
     : pending
       ? `Waiting for your approval`
-      : previewText(p, thread, (id) => ws.teammate(id)?.name)
+      : (chats.length > 1 ? `${chatTitle(thread)} · ` : '') + previewText(p, thread, (id) => ws.teammate(id)?.name)
 
   const people = ws.threadTeammates(thread.id)
   const notify = useChatNotify(thread.id, title)
@@ -182,7 +188,7 @@ function ChatRow({ thread }: { thread: Thread }) {
       onLongPress={() => showMenu({
         title,
         items: [
-          ...(unread ? [{ label: 'Mark as read', icon: CheckListIcon, onPress: () => ws.markRead(thread.id) }] : []),
+          ...(unread ? [{ label: 'Mark as read', icon: CheckListIcon, onPress: () => chats.filter(isUnread).forEach((x) => ws.markRead(x.id)) }] : []),
           thread.kind === 'dm'
             ? { label: people[0] && isComputer(people[0]) ? 'Computer details' : 'View profile', icon: Settings01Icon, onPress: () => router.push({ pathname: '/teammate/[id]', params: { id: thread.teammate_id! } }) }
             : { label: 'Project settings', icon: Settings01Icon, onPress: () => router.push({ pathname: '/project/[id]/settings', params: { id: thread.project_id! } }) },

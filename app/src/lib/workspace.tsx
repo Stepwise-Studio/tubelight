@@ -34,10 +34,21 @@ export interface Workspace {
   threadTitle: (threadId: string) => string
   isWorking: (teammateId: string) => boolean
   isThreadLive: (threadId: string) => boolean
+  chatsWith: (teammateId: string) => Thread[]
+  newChat: (teammateId: string) => Promise<string>
+  renameChat: (threadId: string, title: string) => Promise<void>
+  deleteChat: (threadId: string) => Promise<void>
 }
 
 const Ctx = createContext<Workspace | null>(null)
 /** A linked computer's own chat stands in as a teammate whose avatar_shape is `device:<computer id>`. */
+/** `dm:<teammate>` or `dm:<teammate>:<id>` → the teammate's id. */
+export const dmTeammate = (threadId: string) => threadId.split(':')[1]
+/** A teammate's extra chat (not the main `dm:<teammate>` one). */
+export const isExtraChat = (threadId: string) => threadId.startsWith('dm:') && threadId.split(':').length === 3
+/** A chat's name in the chats list. */
+export const chatTitle = (t: Pick<Thread, 'id' | 'title'>) => t.title || (isExtraChat(t.id) ? 'New chat' : 'Main chat')
+
 export const isComputer = (t: { avatar_shape: string }) => t.avatar_shape.startsWith('device:')
 export const computerId = (t: { avatar_shape: string }) => (isComputer(t) ? t.avatar_shape.slice(7) : null)
 /** The phone's own chat (agent phone.py): the only one that does things on the phone; other teammates ask it. */
@@ -176,13 +187,37 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const membersOf = (projectId: string) =>
     members.filter((m) => m.project_id === projectId).map((m) => teammate(m.teammate_id)).filter((t): t is Teammate => !!t)
   const threadTeammates = (threadId: string) => {
-    if (threadId.startsWith('dm:')) { const t = teammate(threadId.slice(3)); return t ? [t] : [] }
+    if (threadId.startsWith('dm:')) { const t = teammate(dmTeammate(threadId)); return t ? [t] : [] }
     if (threadId.startsWith('proj:')) return membersOf(threadId.slice(5))
     return []
   }
   const threadTitle = (threadId: string) =>
-    threadId.startsWith('dm:') ? teammate(threadId.slice(3))?.name ?? 'Teammate'
+    threadId.startsWith('dm:') ? teammate(dmTeammate(threadId))?.name ?? 'Teammate'
       : project(threadId.slice(5))?.name ?? 'Project'
+  /** Every chat with one teammate, the most recently active first. */
+  const chatsWith = (teammateId: string) => threads.filter((t) => t.kind === 'dm' && t.teammate_id === teammateId)
+    .sort((a, b) => Date.parse(b.last_message_at ?? b.created_at) - Date.parse(a.last_message_at ?? a.created_at))
+  /** A new chat with a teammate, beside the main one. Resolves to its id (or throws). */
+  const newChat = async (teammateId: string) => {
+    const row: Thread = {
+      id: `dm:${teammateId}:${Math.random().toString(36).slice(2, 10)}`, title: null, owner_id: userId!, kind: 'dm',
+      teammate_id: teammateId, project_id: null, last_message_at: null, last_read_at: new Date().toISOString(), created_at: new Date().toISOString(),
+    }
+    const { error } = await supabase.from('threads').insert(row)
+    if (error) throw new Error(error.message)
+    setThreads((l) => (l.some((x) => x.id === row.id) ? l : [...l, row]))
+    return row.id
+  }
+  const renameChat = async (threadId: string, title: string) => {
+    setThreads((l) => l.map((x) => (x.id === threadId ? { ...x, title: title || null } : x)))
+    await supabase.from('threads').update({ title: title || null }).eq('id', threadId)
+  }
+  /** Extra chats only: the main chat is where calls, automations and the phone post. */
+  const deleteChat = async (threadId: string) => {
+    if (!isExtraChat(threadId)) return
+    setThreads((l) => l.filter((x) => x.id !== threadId))
+    await supabase.from('threads').delete().eq('id', threadId)
+  }
   const isWorking = (teammateId: string) => liveRuns.some((r) => r.teammate_id === teammateId && r.status === 'running')
   const isThreadLive = (threadId: string) => liveRuns.some((r) => r.thread_id === threadId)
 
@@ -191,6 +226,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     <Ctx value={{
       loading, error, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
       refresh, markRead, teammate, project, thread, membersOf, threadTeammates, threadTitle, isWorking, isThreadLive,
+      chatsWith, newChat, renameChat, deleteChat,
     }}>
       <TeammatesCtx value={teammate}>{children}</TeammatesCtx>
     </Ctx>

@@ -52,8 +52,8 @@ standing requests (every morning, every 3 hours, whenever X happens) are automat
 follow-ups: never add those. Alarms, timers and calendar events set on the phone ring by themselves: never add a
 follow-up for them. Casual chat changes nothing. Write about {user} by name, never as he or she.
 
-Reply with JSON only:
-{{"brief": "...",
+{titling}Reply with JSON only:
+{{"brief": "...",{title_key}
  "add": [{{"what": "<what to do then, self-contained>", "owner": "<handle or group>", "at": "YYYY-MM-DDTHH:MM or null",
           "until": "<condition or null>", "check_by": "YYYY-MM-DDTHH:MM or null", "poll_hours": null}}],
  "met": [{{"id": "<id>", "evidence": "<few words>"}}],
@@ -84,12 +84,20 @@ async def _members(thread: dict) -> list[dict]:
     return await db.select("teammates", {"id": f"in.({','.join(ids)})", "select": "id,name,handle"}) if ids else []
 
 
+def is_extra(thread_id: str) -> bool:
+    """A teammate's extra chat (`dm:<teammate>:<id>`), beside the main one (`dm:<teammate>`)."""
+    return thread_id.count(":") == 2
+
+
 async def _chat_names(owner_id: str, thread_ids: set[str]) -> dict[str, str]:
     names = {}
     for tid in thread_ids:
-        kind, _, ref = tid.partition(":")
+        kind, ref = tid.split(":")[:2]
         row = await db.one("teammates" if kind == "dm" else "projects", {"id": f"eq.{ref}", "select": "name"})
         names[tid] = (f"DM with {row['name']}" if kind == "dm" else f"group {row['name']}") if row else tid
+        if row and is_extra(tid):
+            t = await db.one("threads", {"id": f"eq.{tid}", "select": "title"})
+            names[tid] += f" ({(t or {}).get('title') or 'a newer chat'})"
     return names
 
 
@@ -115,10 +123,19 @@ def _local(s: Any, zone: ZoneInfo) -> datetime | None:
     return d.replace(tzinfo=zone) if d else None
 
 
-async def decide(user: str, roster: str, now: datetime, brief: str, pending: str, lines: list[str]) -> dict[str, Any]:
-    """The keeper's one model call: the new brief and follow-up changes (evals/keeper.py runs this on real models)."""
+TITLING = """3. title: this chat has no name yet. Give it one from what it's about, 2 to 5 words, like a chat list
+entry ("Pricing page copy", "Trip to Goa"), no quotes or ending punctuation.
+
+"""
+
+
+async def decide(user: str, roster: str, now: datetime, brief: str, pending: str, lines: list[str],
+                 title: bool = False) -> dict[str, Any]:
+    """The keeper's one model call: the new brief and follow-up changes (evals/keeper.py runs this on real models).
+    With `title`, it also names the chat (a teammate's extra chats get named from their first messages)."""
     res = await llm.chat_model(config.KEEPER_MODEL, json=True).ainvoke([
-        SystemMessage(PROMPT.format(user=user, now=f"{now:%A, %B %d, %Y, %I:%M %p}", roster=roster)),
+        SystemMessage(PROMPT.format(user=user, now=f"{now:%A, %B %d, %Y, %I:%M %p}", roster=roster,
+                                    titling=TITLING if title else "", title_key=' "title": "...",' if title else "")),
         HumanMessage(f"Current brief:\n{brief or '(empty: this is the start)'}\n\n"
                      f"Pending follow-ups:\n{pending}\n\nNew messages in this chat:\n" + "\n".join(lines)),
     ])
@@ -158,8 +175,10 @@ async def refresh(owner_id: str, thread_id: str, user: str, tz: str) -> dict[str
                        for f in pend) or "(none)"
     now = datetime.now(UTC).astimezone(zone)
     plan = await decide(user, ", ".join(f"@{m['handle']} ({m['name']})" for m in members), now,
-                        old.get("text") or "", listed, lines)
+                        old.get("text") or "", listed, lines, title=is_extra(thread_id) and not thread.get("title"))
     done = {"add": 0, "met": 0, "cancel": 0}
+    if is_extra(thread_id) and not thread.get("title") and str(plan.get("title") or "").strip():
+        await db.update("threads", {"id": f"eq.{thread_id}"}, {"title": str(plan["title"]).strip().strip('".')[:60]})
     if plan.get("brief"):
         await memory.store.aput(_ns(thread_id), "brief", {"text": str(plan["brief"])[:3000], "upto": rows[-1]["created_at"],
                                                           "owner_id": owner_id}, index=False)
