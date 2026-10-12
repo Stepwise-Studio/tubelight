@@ -48,36 +48,47 @@ function readable(hex: string | undefined, x: Ctx): string {
 }
 
 function runStyle(r: DocRun, x: Ctx, base: number): TextStyle {
-  const px = Math.min(36, Math.max(10, (r.size ?? base) * x.k * (r.va ? 0.7 : 1)))
+  // Superscript and subscript are drawn with the raised/lowered characters (Android can't shift text within a
+  // line); runs that have none (letters) are only made smaller.
+  const px = Math.min(36, Math.max(10, (r.size ?? base) * x.k * (r.va && !shifted(r) ? 0.7 : 1)))
   const serif = !!r.font && SERIF.test(r.font)
   const mono = !!r.font && MONO.test(r.font)
   return {
     fontSize: px,
     // Serif text in Instrument Serif (its own italic; bold is drawn heavier by Android), sans in Inter Display
-    fontFamily: mono ? 'monospace' : serif ? (r.i ? fonts.serifItalic : fonts.serif) : r.b ? fonts.semibold : fonts.regular,
-    fontWeight: (serif || mono) && r.b ? '700' : undefined,
-    fontStyle: r.i && !serif ? 'italic' : undefined,
+    // (Android has no italic or bold of an embedded font unless it's embedded too: asking falls back to Roboto)
+    fontFamily: mono ? 'monospace' : serif ? (r.i ? fonts.serifItalic : fonts.serif) : r.b ? (r.i ? fonts.semiboldItalic : fonts.semibold) : r.i ? fonts.italic : fonts.regular,
+    fontWeight: mono && r.b ? '700' : undefined,
+    // Instrument Serif has no bold (asking Android for one swaps in its sans): a hairline of the same colour thickens it
+    ...(serif && r.b ? { textShadowColor: r.hl ? '#18181b' : readable(r.color, x), textShadowRadius: 0.8, textShadowOffset: { width: 0.4, height: 0 } } : null),
+    fontStyle: r.i && mono ? 'italic' : undefined,
     ...(serif ? { fontSize: px * 1.12 } : null), // Instrument Serif runs small for its size
     textDecorationLine: r.u && r.s ? 'underline line-through' : r.u ? 'underline' : r.s ? 'line-through' : undefined,
     color: r.hl ? '#18181b' : readable(r.color, x),
     backgroundColor: r.hl ? `#${r.hl}` : undefined,
-    ...(r.va ? { lineHeight: px * 1.1, textAlignVertical: r.va === 'sup' ? 'top' : 'bottom' } : null),
+
   }
 }
+
+const SUP: Record<string, string> = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' }
+const SUB: Record<string, string> = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎' }
+const shifted = (r: DocRun) => !!r.va && [...(r.t ?? '')].every((ch) => (r.va === 'sup' ? SUP : SUB)[ch])
+const shift = (r: DocRun) => (shifted(r) ? [...(r.t ?? '')].map((ch) => (r.va === 'sup' ? SUP : SUB)[ch]).join('') : r.t ?? '')
 
 const Para = memo(function Para({ p, x, base, room }: { p: DocPara; x: Ctx; base: number; room: number }) {
   const texts = p.runs.filter((r) => r.img === undefined)
   const images = p.runs.filter((r) => r.img !== undefined)
   const size = Math.max(...texts.map((r) => r.size ?? base), base) * x.k
   const lineHeight = Math.round(size * 1.25 * Math.max(1, Math.min(p.line ?? 1.15, 2)))
-  const indent = Math.min(48, (p.indent ?? 0) * x.k * 0.6)
+  // Indents as a share of Word's (a phone is a third of a page wide); a list item's marker sits in its hanging indent.
+  const indent = Math.min(64, Math.max(0, (p.indent ?? 0) + (p.marker ? Math.min(0, p.first ?? 0) : 0)) * x.k * 0.7)
   const marker = p.marker
   const text = (
     <Text style={{ textAlign: p.align ?? 'left', lineHeight, color: x.ink, flexShrink: 1 }} selectable
       accessibilityRole={p.h !== undefined ? 'header' : undefined}>
       {texts.map((r, i) => (
         <Text key={i} style={runStyle(r, x, base)} onPress={r.link ? () => Linking.openURL(r.link!).catch(() => {}) : undefined}>
-          {(r.t ?? '').replace(/\t/g, '    ')}
+          {shift(r).replace(/\t/g, '    ')}
         </Text>
       ))}
       {!texts.length && !images.length ? ' ' : null}
@@ -87,9 +98,9 @@ const Para = memo(function Para({ p, x, base, room }: { p: DocPara; x: Ctx; base
     <View style={{ marginTop: Math.min(24, (p.before ?? 0) * x.k * 0.6), marginBottom: Math.min(18, (p.after ?? 0) * x.k * 0.6), paddingLeft: indent,
       backgroundColor: p.shade ? (x.dark ? mix(p.shade, 0, 0.75) : `#${p.shade}`) : undefined }}>
       {marker ? (
-        <View style={{ flexDirection: 'row', paddingLeft: (p.level ?? 0) * 14 }}>
-          <Text style={{ ...runStyle(texts[0] ?? {}, x, base), minWidth: 22, lineHeight, textDecorationLine: 'none', backgroundColor: undefined }}>{marker}</Text>
-          {text}
+        <View style={{ flexDirection: 'row' }}>
+          <Text style={{ ...runStyle({ ...(texts[0] ?? {}), u: false, s: false, hl: undefined }, x, base), width: Math.max(22, marker.length * size * 0.55 + 8), lineHeight }}>{marker}</Text>
+          <View style={{ flex: 1 }}>{text}</View>
         </View>
       ) : texts.length || !images.length ? text : null}
       {images.map((r, i) => {
@@ -117,8 +128,9 @@ const Table = memo(function Table({ t, x, base, room }: { t: DocTable; x: Ctx; b
     const out = Array(cols).fill(0)
     const chars = Array(cols).fill(0)
     const text = (b: DocBlock): number => (b.k === 'p' ? b.runs.reduce((n, r) => n + (r.t ?? '').length, 0) : 0)
-    const words = (b: DocBlock): number => (b.k === 'p' ? Math.max(0, ...b.runs.flatMap((r) => (r.t ?? '').split(/\s+/).map((w) => w.length * (r.size ?? base) * (r.b ? 0.62 : 0.56)))) : 0)
-    t.rows.forEach((r) => {
+    t.rows.forEach((r, ri) => {
+      const bold = ri === 0 || !!r.header // header rows are drawn semibold
+      const words = (b: DocBlock): number => (b.k === 'p' ? Math.max(0, ...b.runs.flatMap((run) => (run.t ?? '').split(/\s+/).map((w) => w.length * (run.size ?? base) * (run.b || bold ? 0.64 : 0.56)))) : 0)
       let at = 0
       r.cells.forEach((cell) => {
         const span = cell.span ?? 1
@@ -126,7 +138,7 @@ const Table = memo(function Table({ t, x, base, room }: { t: DocTable; x: Ctx; b
         at += span
       })
     })
-    return { longest: out.map((v) => Math.min(260, v * x.k + 18)), wordy: chars.map((n) => n / Math.max(1, t.rows.length) > 24) }
+    return { longest: out.map((v) => Math.min(260, v * x.k + 28)), wordy: chars.map((n) => n / Math.max(1, t.rows.length) > 24) }
   }, [t, cols, base, x.k])
   // Columns of sentences get room to read (~150 px); short ones (numbers, codes) only what they need.
   const widths = shares.map((s, j) => Math.max(wordy[j] ? 150 : 56, longest[j] ?? 0, s * natural))
@@ -168,7 +180,8 @@ function Block({ b, x, base, room, tight, head }: { b: DocBlock; x: Ctx; base: n
   // In a cell, paragraph spacing is tightened (Word's 10 pt after every paragraph reads loose in a narrow cell);
   // header cells are semibold.
   const p = tight ? { ...b, after: Math.min(b.after ?? 0, 4), before: Math.min(b.before ?? 0, 4) } : b
-  return <Para p={head ? { ...p, runs: p.runs.map((r) => ({ ...r, b: true })) } : p} x={x} base={base} room={room} />
+  // Header cells in Stepwise's table: Inter Display semibold, whatever font the document set
+  return <Para p={head ? { ...p, runs: p.runs.map((r) => ({ ...r, b: true, font: undefined })) } : p} x={x} base={base} room={room} />
 }
 
 export function DocView({ doc, chrome }: { doc: DocData; chrome: { top: number; bottom: number } }) {

@@ -29,7 +29,7 @@ MAX_BYTES = 100 * 1024 * 1024  # Cloudflare's tunnel takes up to 100 MB a reques
 QUOTA = int(float(os.environ.get("VAULT_QUOTA_GB", "30")) * 1e9)  # per user; the user's choice, raise it here
 WINDOW = 6 * 3600  # links stay the same for this long (cache hits), and work for one more window after
 MAX_ROWS, MAX_COLS = 5000, 60  # what a sheet preview carries
-PREVIEW_V = 4  # bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
+PREVIEW_V = 5  # 5: list indents; bump when previews change: older cached ones are made again (2: sheet formulas; 3: Word formatting; 4: sheet formats, styles, merges)
 TYPES = {
     ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv", ".tsv": "text/tab-separated-values",
     ".json": "application/json", ".pdf": "application/pdf", ".heic": "image/heic", ".heif": "image/heif", ".webp": "image/webp",

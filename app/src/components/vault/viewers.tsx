@@ -14,7 +14,7 @@ import { GoBackward15SecIcon, GoForward15SecIcon, PauseIcon, PlayIcon, Share08Ic
 
 import { api } from '@/lib/api'
 import { formatSize, kindOf, type Viewable } from '@/lib/vault'
-import { type, useTheme } from '@/theme'
+import { fonts, type, useTheme } from '@/theme'
 import { Button, Icon, Markdown, Squircle, Text, haptic } from '@/ui'
 
 import { shareItem } from './actions'
@@ -436,7 +436,7 @@ const SheetRow = memo(function SheetRow({ row, index, cols, edges, numW, from, t
         j === lit && { borderWidth: 2, borderColor: look.tube, paddingHorizontal: 7 }]}>
         {!!text && (
           <RNText numberOfLines={st?.w ? 3 : 1} maxFontSizeMultiplier={1.3}
-            style={[index === 0 || st?.b ? look.bold : look.cell, ink && { color: ink }, st?.i && { fontStyle: 'italic' }, st?.u && { textDecorationLine: 'underline' }]}>
+            style={[index === 0 || st?.b ? look.bold : look.cell, ink && { color: ink }, st?.i && { fontFamily: index === 0 || st?.b ? fonts.semiboldItalic : fonts.italic }, st?.u && { textDecorationLine: 'underline' }]}>
             {text}
           </RNText>
         )}

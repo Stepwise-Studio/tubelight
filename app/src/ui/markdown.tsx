@@ -155,7 +155,7 @@ function useStyles(c: Palette): MarkedStyles {
     text,
     paragraph: { paddingVertical: 0, marginBottom: 8 },
     strong: { fontFamily: fonts.semibold, fontWeight: 'normal' },
-    em: { fontStyle: 'italic' },
+    em: { fontFamily: fonts.italic }, // the embedded italic (fontStyle on Inter falls back to Roboto)
     link: { color: c.tube, textDecorationLine: 'none', fontStyle: 'normal' },
     h1: { ...typeScale.heading, fontFamily: fonts.semibold, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },
     h2: { ...typeScale.headline, fontWeight: 'normal', color: c.ink, marginTop: 4, marginBottom: 6, borderBottomWidth: 0, paddingBottom: 0 },

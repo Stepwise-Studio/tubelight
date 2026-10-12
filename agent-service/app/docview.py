@@ -112,8 +112,12 @@ class Doc:
                     continue
                 lv = {}
                 for l in a.iterfind("w:lvl", NS):
+                    ind = l.find("w:pPr/w:ind", NS)
+                    left = (ind.get(q("w:left")) or ind.get(q("w:start"))) if ind is not None else None
+                    hang = ind.get(q("w:hanging")) if ind is not None else None
                     lv[int(l.get(q("w:ilvl")))] = {"fmt": val(l.find("w:numFmt", NS)) or "decimal", "text": val(l.find("w:lvlText", NS)) or "",
-                                                   "start": int(val(l.find("w:start", NS)) or 1)}
+                                                   "start": int(val(l.find("w:start", NS)) or 1),
+                                                   "indent": int(left) / 20 if left else None, "hang": int(hang) / 20 if hang else None}
                 self.num[n.get(q("w:numId"))] = lv
 
     # ---------------------------------------------------------------- styles
@@ -329,6 +333,11 @@ class Doc:
         if pf.get("numId") and pf["numId"] != "0":
             block["marker"] = self.marker(pf["numId"], pf.get("ilvl", 0))
             block["level"] = pf.get("ilvl", 0)
+            lvl = self.num.get(pf["numId"], {}).get(pf.get("ilvl", 0), {})
+            if "indent" not in pf and lvl.get("indent"):  # a list's indents live in its numbering definition
+                block["indent"] = lvl["indent"]
+                if lvl.get("hang"):
+                    block["first"] = -lvl["hang"]
         return block
 
     def table(self, t) -> dict[str, Any]:
