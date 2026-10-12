@@ -25,7 +25,7 @@ import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Skeleton, Teamma
 const GROUP_GAP_MS = 5 * 60_000
 
 export default function Thread() {
-  const { threadId: raw } = useLocalSearchParams<{ threadId: string }>()
+  const { threadId: raw, chats: showChatsParam } = useLocalSearchParams<{ threadId: string; chats?: string }>()
   const threadId = decodeURIComponent(raw ?? '')
   const { c, scheme } = useTheme()
   const ws = useWorkspace()
@@ -41,7 +41,7 @@ export default function Thread() {
   const computer = dmMate && isComputer(dmMate) ? computerId(dmMate) : null
   const [commands, setCommands] = useState<{ name: string; about: string; arg: boolean }[] | undefined>()
   const [info, setInfo] = useState(false)
-  const [showChats, setShowChats] = useState(false)
+  const [showChats, setShowChats] = useState(showChatsParam === '1')  // the profile's "N chats" opens on the list
   // Several chats with this teammate: the header names the open one.
   const thisChat = ws.thread(threadId)
   const severalChats = !!dmMate && ws.chatsWith(dmMate.id).length > 1

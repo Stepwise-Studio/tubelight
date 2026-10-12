@@ -8,8 +8,10 @@ import { useTheme } from '@/theme'
 import { IconButton, Text } from '@/ui'
 
 /** Stack screen header: back, title (or custom middle), trailing actions. Hairline bottom edge. */
-export function ScreenHeader({ title, subtitle, middle, right, onBack }: {
+export function ScreenHeader({ title, subtitle, middle, right, onBack, transparent }: {
   title?: string
+  /** Over a screen's own backdrop (a profile's colour wash): no fill, no hairline. */
+  transparent?: boolean
   subtitle?: string
   middle?: ReactNode
   right?: ReactNode
@@ -18,7 +20,7 @@ export function ScreenHeader({ title, subtitle, middle, right, onBack }: {
   const { c } = useTheme()
   const insets = useSafeAreaInsets()
   return (
-    <View style={{ paddingTop: insets.top, backgroundColor: c.canvas, borderBottomWidth: 1, borderBottomColor: c.line }}>
+    <View style={{ paddingTop: insets.top, backgroundColor: transparent ? 'transparent' : c.canvas, borderBottomWidth: transparent ? 0 : 1, borderBottomColor: c.line }}>
       <View style={{ height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 4 }}>
         <IconButton
           icon={ArrowLeft01Icon}
