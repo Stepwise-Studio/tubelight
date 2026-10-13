@@ -22,7 +22,7 @@ export function ClockWheel({ hour, minute, onChange }: { hour: number; minute: n
     <View style={{ height: ROW * SHOWN, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
       <Squircle style={{ position: 'absolute', left: 0, right: 0, top: ROW, height: ROW, borderRadius: 22, backgroundColor: c.panel2 }} />
       <Wheel items={HOURS.map(String)} index={h12 - 1} width={92} onPick={(i) => onChange(to24(HOURS[i], pm), minute)} label="Hour" />
-      <Text style={{ fontFamily: fonts.regular, fontSize: 44, lineHeight: ROW, color: c.ink3, marginTop: -6 }}>:</Text>
+      <Text maxFontSizeMultiplier={1} style={{ fontFamily: fonts.regular, fontSize: 44, lineHeight: 56, color: c.ink3, marginTop: -6 }}>:</Text>
       <Wheel items={MINUTES.map(pad)} index={minute} width={92} onPick={(i) => onChange(hour, i)} label="Minute" />
       <Wheel items={['AM', 'PM']} index={pm ? 1 : 0} width={72} small onPick={(i) => onChange(to24(h12, i === 1), minute)} label="AM or PM" />
       <LinearGradient pointerEvents="none" colors={[c.canvas, `${c.canvas}00`]} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: ROW }} />
@@ -62,7 +62,7 @@ function Wheel({ items, index, width, small, onPick, label }: {
     >
       {items.map((s) => (
         <View key={s} style={{ height: ROW, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ fontFamily: small ? fonts.medium : fonts.regular, fontSize: small ? 20 : 48, letterSpacing: small ? 0 : -1.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{s}</Text>
+          <Text maxFontSizeMultiplier={1} style={{ fontFamily: small ? fonts.medium : fonts.regular, fontSize: small ? 20 : 48, lineHeight: small ? 26 : 60, letterSpacing: small ? 0 : -1.5, color: c.ink, fontVariant: ['tabular-nums'], includeFontPadding: false }}>{s}</Text>
         </View>
       ))}
     </ScrollView>
