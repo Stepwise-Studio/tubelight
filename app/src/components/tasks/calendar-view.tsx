@@ -1,5 +1,5 @@
 // The Tasks tab's calendar, Samsung Calendar-like: a month grid (swipe for the next or last month) with each day's
-// events as small coloured bars, and under it the picked day: all-day events, then events and reminders by time, then
+// events as coloured lines, and under it the picked day: all-day events, then events and reminders by time, then
 // the to-dos due. Tap an event to edit it, + (or hold a day) to add one. Events are the phone's own calendars
 // (lib/calendar.ts), so Samsung and Google Calendar show the same.
 import { router } from 'expo-router'
@@ -20,7 +20,7 @@ import { StatusGlyph } from './glyphs'
 
 const WEEK = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const CELL_H = 62
-const BARS = 2
+const LINES = 4
 const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
@@ -123,7 +123,6 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
   onPick: (d: number) => void; onHold: (d: number) => void
 }) {
   const { c } = useTheme()
-  const more = (events?.length ?? 0) - BARS
   return (
     <Pressable onPress={() => onPick(day)} onLongPress={() => onHold(day)} delayLongPress={320}
       accessibilityRole="button" accessibilityState={{ selected: picked }}
@@ -132,12 +131,10 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
       <View style={{ alignSelf: 'center', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : undefined }}>
         <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
       </View>
-      {events?.slice(0, BARS).map((e) => (
-        <View key={`${e.id}:${e.start}`} style={{ height: 13, borderRadius: 4, paddingHorizontal: 3, justifyContent: 'center', backgroundColor: `${e.color}2e` }}>
-          <Text numberOfLines={1} style={{ fontSize: 9, lineHeight: 11, color: c.ink2 }}>{e.title || '(No title)'}</Text>
-        </View>
-      ))}
-      {more > 0 && <Text style={{ fontSize: 9, lineHeight: 10, color: c.ink3, textAlign: 'center' }}>+{more}</Text>}
+      {/* One coloured line per event (the day's list below has the words). */}
+      <View style={{ gap: 3, paddingHorizontal: 6, paddingTop: 3 }}>
+        {events?.slice(0, LINES).map((e) => <View key={`${e.id}:${e.start}`} style={{ height: 3, borderRadius: 1.5, backgroundColor: e.color }} />)}
+      </View>
     </Pressable>
   )
 })

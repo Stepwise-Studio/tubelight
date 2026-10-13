@@ -1,10 +1,11 @@
 // The to-do board as a list: grouped by status (Backlog, Todo, In progress, Done, Canceled folded) or by label (each
-// label's to-dos in status order, then "No label"). Tap a to-do to move it on (to do → in progress → done; a finished
-// one opens again); hold it for its menu in place: edit, backlog, cancel, delete.
+// label's to-dos in status order, then "No label"). Tap a to-do to open it; double tap to move it on (to do → in
+// progress → done; a finished one opens again); hold it for every status and Delete, in place.
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
-import Animated, { FadeIn, FadeOut, LinearTransition, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { Add01Icon, ArrowDown01Icon, Calendar03Icon, Delete02Icon, Edit02Icon } from '@hugeicons/core-free-icons'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import Animated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import { Add01Icon, ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
 import type { Project, Teammate } from '@/lib/types'
@@ -120,16 +121,25 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
     haptic.warning()
     deleteTodo(t.id).then(() => toast({ title: 'To-do deleted', body: t.title }), fail)
   }
-  const hold = () => {
-    const to = (s: TodoStatus, label: string): MenuItem[] => (t.status === s ? [] : [{ label, onPress: () => move(s) }])
-    showContextMenu(ref.current, body(true), [
-      { label: 'Edit', icon: Edit02Icon, onPress: () => onOpen(t) },
-      ...to('backlog', 'Move to Backlog'),
-      ...(t.status === 'todo' || t.status === 'backlog' ? [] : to('todo', 'Back to Todo')),
-      ...to('canceled', 'Cancel'),
-      { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: remove },
-    ])
-  }
+  // Hold: every status (the current one ticked) and Delete; tapping it opens it, so there's no Edit here.
+  const hold = () => showContextMenu(ref.current, body(true), [
+    ...STATUSES.map((s): MenuItem => ({ label: s.label, checked: t.status === s.value, onPress: () => { if (t.status !== s.value) move(s.value) } })),
+    { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: remove },
+  ])
+  // Tap opens it; double tap moves it on; hold for the statuses. The single tap waits out a double tap (250 ms).
+  const wash = useSharedValue(0)
+  const washStyle = useAnimatedStyle(() => ({ backgroundColor: c.wash, opacity: wash.get() }))
+  const gesture = (() => {
+    const press = { onBegin: () => { 'worklet'; wash.set(withTiming(1, { duration: motion.duration.micro })) },
+      onFinalize: () => { 'worklet'; wash.set(withTiming(0, { duration: motion.duration.quick })) } }
+    return Gesture.Exclusive(
+      // `hold` reads the row's ref only when the press happens, not while rendering.
+      // eslint-disable-next-line react-hooks/refs
+      Gesture.LongPress().minDuration(320).onBegin(press.onBegin).onFinalize(press.onFinalize).onStart(() => runOnJS(hold)()),
+      Gesture.Tap().numberOfTaps(2).maxDelay(250).onEnd(() => runOnJS(move)(nextStatus(t.status))),
+      Gesture.Tap().onBegin(press.onBegin).onFinalize(press.onFinalize).onEnd(() => runOnJS(onOpen)(t)),
+    )
+  })()
 
   const body = (lifted?: boolean) => (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 16, paddingVertical: 11,
@@ -168,14 +178,15 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
 
   return (
     <Animated.View layout={layout} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
-      <View ref={ref} collapsable={false}>
-        <Pressable onPress={() => move(nextStatus(t.status))} onLongPress={hold} delayLongPress={320}
-          android_ripple={{ color: c.wash }} accessibilityRole="button"
-          accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`}
-          accessibilityHint={`Moves it to ${statusLabel(nextStatus(t.status))}. Hold for more.`}>
+      <GestureDetector gesture={gesture}>
+        <View ref={ref} collapsable={false} accessible accessibilityRole="button"
+          accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`} accessibilityHint="Opens it. Use the actions to change its status."
+          accessibilityActions={[{ name: 'activate' }, { name: 'longpress', label: 'Change status' }, { name: 'next', label: `Move to ${statusLabel(nextStatus(t.status))}` }]}
+          onAccessibilityAction={(e) => e.nativeEvent.actionName === 'activate' ? onOpen(t) : e.nativeEvent.actionName === 'next' ? move(nextStatus(t.status)) : hold()}>
+          <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }, washStyle]} />
           {body()}
-        </Pressable>
-      </View>
+        </View>
+      </GestureDetector>
     </Animated.View>
   )
 })
