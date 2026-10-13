@@ -57,6 +57,16 @@ interface PhoneModule {
   openUsageAccess(): void
   /** Storage, battery, memory, network (and storage by kind and by app, with usage access). */
   status(): Promise<Record<string, unknown>>
+  /** Hands over every alarm and reminder (JSON of ClockItem[]); the phone arms them. */
+  setClock?(json: string): void
+  /** Reminders marked Done from their notification since the last call. */
+  takeClockDone?(): string[]
+  canExactAlarm?(): boolean
+  openExactAlarm?(): void
+  calendars?(): Promise<PhoneCalendar[]>
+  calendarEvents?(from: number, to: number): Promise<PhoneEvent[]>
+  saveEvent?(e: EventInput): Promise<string>
+  deleteEvent?(id: string): Promise<void>
   /** The screen's corner radius in dp (0 if the phone doesn't say). */
   screenRadius(): number
   /** A local PDF (file:// URI): page count and each page's size in points. */
@@ -89,6 +99,20 @@ interface PhoneModule {
   moveFiles?(paths: string[], dir: string): Promise<number>
   /** A new folder ("" = the top of the phone's storage). */
   makeFolder?(parent: string, name: string): Promise<PhoneFile>
+}
+
+/** One of Tubelight's alarms or reminders as the phone arms it (Clock.kt). */
+export interface ClockItem {
+  id: string; kind: 'alarm' | 'reminder'; title: string; body?: string
+  hour: number; minute: number; /** 0 = Monday; an alarm with none rings once, at `at` */ days: number[]
+  /** ms; 0 for none */ at: number; repeat: string; enabled: boolean
+}
+export interface PhoneCalendar { id: string; name: string; color: string; account: string; writable: boolean; visible: boolean; primary: boolean; local: boolean }
+export interface PhoneEvent {
+  id: string; start: number; end: number; title: string; allDay: boolean; place: string; notes: string; color: string; calendar: string; rrule: string
+}
+export interface EventInput {
+  id?: string; calendar: string; title: string; start: number; end: number; allDay: boolean; place: string; notes: string; rrule: string; alert?: number
 }
 
 export interface PhoneFile { name: string; path: string; dir: boolean; size: number; modified: number; mime: string }

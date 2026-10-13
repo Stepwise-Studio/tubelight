@@ -7,28 +7,30 @@ import { Keyboard, ScrollView, TextInput, View } from 'react-native'
 import { KeyboardStickyView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, CheckListIcon, Delete02Icon, Tick02Icon, UserCircleIcon,
+  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, CheckListIcon, Delete02Icon, Tag01Icon, Tick02Icon, UserCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 import { DayPicker } from '@/components/tasks/day-picker'
 import { PriorityGlyph, StatusGlyph } from '@/components/tasks/glyphs'
+import { LabelSheet } from '@/components/tasks/label-sheet'
 import { PickerSheet } from '@/components/tasks/picker-sheet'
+import { LabelDot } from '@/components/tasks/todo-list'
 import {
-  PRIORITIES, STATUSES, addTodo, deleteTodo, dueLabel, statusLabel, updateTodo, useTodos, type Todo, type TodoStatus,
+  PRIORITIES, STATUSES, addTodo, deleteTodo, dueLabel, statusLabel, updateTodo, useLabels, useTodos, type Todo, type TodoStatus,
 } from '@/lib/tasks'
 import { useWorkspace } from '@/lib/workspace'
 import { type, useTheme } from '@/theme'
 import { Button, Icon, IconButton, Press, Sheet, Text, TeammateAvatar, confirm, haptic, toast } from '@/ui'
 
-type Draft = Pick<Todo, 'title' | 'notes' | 'status' | 'priority' | 'due' | 'project_id' | 'assignee'>
-type Picker = 'status' | 'priority' | 'assignee' | 'due' | 'project' | null
+type Draft = Pick<Todo, 'title' | 'notes' | 'status' | 'priority' | 'due' | 'project_id' | 'assignee' | 'labels'>
+type Picker = 'status' | 'priority' | 'assignee' | 'due' | 'project' | 'labels' | null
 
 export default function TodoScreen() {
-  const { id, status } = useLocalSearchParams<{ id: string; status?: TodoStatus }>()
+  const { id, status, label } = useLocalSearchParams<{ id: string; status?: TodoStatus; label?: string }>()
   const { todos } = useTodos()
   const todo = id === 'new' ? null : todos?.find((t) => t.id === id) ?? null
   if (id !== 'new' && !todo) return <Shell />
-  return <Editor key={todo?.id ?? 'new'} todo={todo} start={status} />
+  return <Editor key={todo?.id ?? 'new'} todo={todo} start={status} label={label} />
 }
 
 function Shell() {
@@ -36,13 +38,13 @@ function Shell() {
   return <View style={{ flex: 1, backgroundColor: c.canvas }} />
 }
 
-function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
+function Editor({ todo, start, label }: { todo: Todo | null; start?: TodoStatus; label?: string }) {
   const { c } = useTheme()
   const ws = useWorkspace()
   const insets = useSafeAreaInsets()
   const [d, setD] = useState<Draft>(() => todo
-    ? { title: todo.title, notes: todo.notes, status: todo.status, priority: todo.priority, due: todo.due, project_id: todo.project_id, assignee: todo.assignee }
-    : { title: '', notes: '', status: start ?? 'todo', priority: 0, due: null, project_id: null, assignee: null })
+    ? { title: todo.title, notes: todo.notes, status: todo.status, priority: todo.priority, due: todo.due, project_id: todo.project_id, assignee: todo.assignee, labels: todo.labels ?? [] }
+    : { title: '', notes: '', status: start ?? 'todo', priority: 0, due: null, project_id: null, assignee: null, labels: label ? [label] : [] })
   const [picker, setPickerState] = useState<Picker>(null)
   // A picker gets the whole bottom of the screen: the keyboard goes first.
   const setPicker = (p: Picker) => { if (p) Keyboard.dismiss(); setPickerState(p) }
@@ -94,6 +96,8 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
   const due = d.due ? dueLabel(d.due) : null
   const adder = todo?.added_by ? ws.teammate(todo.added_by) : null
   const ready = !!d.title.trim()
+  const labels = useLabels()
+  const mine = labels.filter((l) => d.labels.includes(l.id))
 
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
@@ -141,6 +145,8 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
               label={mate?.name ?? 'Assignee'} quiet={!mate} onPress={() => setPicker('assignee')} a11y="Assignee" />
             <Pill glyph={<Icon icon={Calendar03Icon} size={17} color={due?.overdue ? 'danger' : due?.today ? 'warning' : due ? 'ink2' : 'ink3'} />}
               label={due?.label ?? 'Due date'} quiet={!due} tone={due?.overdue ? 'danger' : undefined} onPress={() => setPicker('due')} a11y="Due date" />
+            <Pill glyph={mine.length ? <View style={{ flexDirection: 'row', gap: 3 }}>{mine.slice(0, 3).map((l) => <LabelDot key={l.id} color={l.color} size={9} />)}</View> : <Icon icon={Tag01Icon} size={17} color="ink3" />}
+              label={mine.length ? mine.map((l) => l.name).join(', ') : 'Labels'} quiet={!mine.length} onPress={() => setPicker('labels')} a11y="Labels" />
           </View>
           {editing && (
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 14, height: 52, alignItems: 'center' }}>
@@ -170,6 +176,7 @@ function Editor({ todo, start }: { todo: Todo | null; start?: TodoStatus }) {
           { value: null, label: 'Personal', glyph: <Icon icon={CheckListIcon} size={18} color="tube" /> },
           ...ws.projects.map((p) => ({ value: p.id as string | null, label: p.name, glyph: <View style={{ width: 14, height: 14, borderRadius: 4.5, backgroundColor: p.color }} /> })),
         ]} />
+      <LabelSheet open={picker === 'labels'} value={d.labels} onChange={(labels) => set({ labels })} onClose={() => setPicker(null)} />
       <Sheet open={picker === 'due'} onClose={() => setPicker(null)} title="Due date">
         <View style={{ paddingHorizontal: 20, paddingBottom: 16, gap: 10 }}>
           <DayPicker value={d.due} onChange={(due) => { set({ due }); setPicker(null) }} />

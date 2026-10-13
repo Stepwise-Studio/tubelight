@@ -1,14 +1,10 @@
 // The Tasks tab's data: your to-dos (agent-service todos.py) and every chat's follow-ups (followups.py).
 // A small shared store per kind, so the tab, the sheets and the badge read the same list and edits show at once.
 // To-dos work offline (see below); follow-ups need the server.
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as Crypto from 'expo-crypto'
 import { useEffect, useSyncExternalStore } from 'react'
-import { AppState } from 'react-native'
 
-import { ApiError, api } from '@/lib/api'
-import { onReturn } from '@/lib/app-state'
-import { toast } from '@/ui'
+import { api } from '@/lib/api'
+import { offlineList } from '@/lib/offline-list'
 
 export type TodoStatus = 'backlog' | 'todo' | 'doing' | 'done' | 'canceled'
 export interface Todo {
@@ -26,6 +22,8 @@ export interface Todo {
   added_by: string | null
   /** The teammate it's assigned to (they work on it); null: yours. */
   assignee: string | null
+  /** Label ids. */
+  labels: string[]
   sort: number
   created_at: string
   updated_at: string
@@ -49,9 +47,9 @@ export interface Followup {
 }
 
 export const STATUSES: { value: TodoStatus; label: string }[] = [
-  { value: 'doing', label: 'In progress' },
-  { value: 'todo', label: 'Todo' },
   { value: 'backlog', label: 'Backlog' },
+  { value: 'todo', label: 'Todo' },
+  { value: 'doing', label: 'In progress' },
   { value: 'done', label: 'Done' },
   { value: 'canceled', label: 'Canceled' },
 ]
@@ -92,134 +90,55 @@ export function useFollowups() {
 
 const sortTodos = (l: Todo[]) => [...l].sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at))
 
-// ------------------------------------------------------------------ to-dos, offline first
-// The list lives on the phone: the last list the server sent (cached) with every change you made since replayed on
-// top (the outbox, also kept), so it opens instantly and works with the server down. Changes go out in order whenever
-// the server answers: after each change, when the app comes back, on pull to refresh, and every 20 s while any wait.
-// A new to-do gets its id here, so sending it twice keeps one. A change the server refuses (not "unreachable") is
-// dropped with a note; one for a to-do that's gone is dropped quietly. Teammates' edits arrive with the next list.
-type Op =
-  | { kind: 'add'; todo: Todo }
-  | { kind: 'edit'; id: string; changes: Partial<Todo>; at: string }
-  | { kind: 'del'; id: string }
-const CACHE = 'tl.todos.cache'
-const OUTBOX = 'tl.todos.outbox'
-const RETRY_MS = 20_000
-
-let server: Todo[] | null = null
-let outbox: Op[] = []
-let offline = false
-let failed: string | null = null
-let todoSnap = { todos: null as Todo[] | null, error: null as string | null, offline: false, unsynced: 0 }
-const todoSubs = new Set<() => void>()
-
-function edited(t: Todo, changes: Partial<Todo>, at: string): Todo {
-  return { ...t, ...changes, updated_at: at,
-    completed_at: changes.status ? (changes.status === 'done' ? (t.completed_at ?? at) : null) : t.completed_at }
-}
-function replay(list: Todo[], ops: Op[]) {
-  let l = list
-  for (const op of ops) {
-    if (op.kind === 'add') l = l.some((t) => t.id === op.todo.id) ? l : [op.todo, ...l]
-    else if (op.kind === 'edit') l = l.map((t) => (t.id === op.id ? edited(t, op.changes, op.at) : t))
-    else l = l.filter((t) => t.id !== op.id)
-  }
-  return sortTodos(l)
-}
-function publish() {
-  todoSnap = { todos: server || outbox.length ? replay(server ?? [], outbox) : null, error: server || outbox.length ? null : failed,
-    offline, unsynced: outbox.length }
-  todoSubs.forEach((f) => f())
-}
-const persist = () => AsyncStorage.multiSet([[CACHE, JSON.stringify(server)], [OUTBOX, JSON.stringify(outbox)]]).catch(() => {})
-
-let boot: Promise<void> | null = null
-function load() {
-  if (boot) return boot
-  onReturn(() => { syncTodos() })
-  AppState.addEventListener('change', (st) => { if (st === 'active' && outbox.length) syncTodos() }) // unsent changes: at once
-  boot = AsyncStorage.multiGet([CACHE, OUTBOX]).then(([[, c], [, o]]) => {
-    if (server === null && c) server = JSON.parse(c)
-    outbox = [...(o ? (JSON.parse(o) as Op[]) : []), ...outbox] // anything queued before the load came back goes after
-    publish()
-  }, () => {})
-  return boot
-}
-
-const unreachable = (e: unknown) => !(e instanceof ApiError) || e.status === 0 || e.status >= 500
-function send(op: Op) {
-  if (op.kind === 'add') {
-    const { id, title, notes, status, priority, due, project_id, assignee } = op.todo
-    return api('/todos', { method: 'POST', json: { id, title, notes, status, priority, due, project_id, assignee } })
-  }
-  if (op.kind === 'edit') return api(`/todos/${op.id}`, { method: 'PATCH', json: op.changes })
-  return api(`/todos/${op.id}`, { method: 'DELETE' })
-}
-
-let syncing: Promise<void> | null = null
-let retry: ReturnType<typeof setTimeout> | null = null
-/** Sends what's waiting, in order, then takes the server's list. Safe to call any time. */
-export function syncTodos() {
-  syncing ??= (async () => {
-    await load()
-    if (retry) { clearTimeout(retry); retry = null }
-    while (outbox.length) {
-      try {
-        await send(outbox[0])
-      } catch (e) {
-        if (unreachable(e)) { offline = true; publish(); retry = setTimeout(syncTodos, RETRY_MS); return }
-        if (!(e instanceof ApiError && e.status === 404)) toast({ title: 'A to-do change didn’t save', body: (e as Error).message, tone: 'error' })
-      }
-      outbox.shift()
-      persist()
-      publish()
-    }
-    try {
-      server = (await api<{ todos: Todo[] }>('/todos')).todos
-      offline = false
-      failed = null
-      persist()
-    } catch (e) {
-      if (unreachable(e)) offline = true
-      failed = (e as Error).message
-    }
-    publish()
-  })().finally(() => { syncing = null })
-  return syncing
-}
-
-function queue(op: Op) {
-  outbox.push(op)
-  persist()
-  publish()
-  syncTodos()
-}
+// ------------------------------------------------------------------ to-dos and their labels, offline first (offline-list.ts)
+const todoList = offlineList<Todo>({
+  path: '/todos', field: 'todos', key: 'tl.todos', noun: 'to-do', sort: sortTodos,
+  apply: (t, changes, at) => ({ ...t, ...changes, updated_at: at,
+    completed_at: changes.status ? (changes.status === 'done' ? (t.completed_at ?? at) : null) : t.completed_at }),
+  addBody: ({ id, title, notes, status, priority, due, project_id, assignee, labels }) => ({ id, title, notes, status, priority, due, project_id, assignee, labels }),
+})
+export const syncTodos = todoList.sync
 
 /** The to-do list: on the phone at once, synced with the server whenever it's reachable. */
 export function useTodos() {
-  const snap = useSyncExternalStore((f) => { todoSubs.add(f); return () => { todoSubs.delete(f) } }, () => todoSnap)
-  useEffect(() => { syncTodos() }, [])
-  return { ...snap, refresh: syncTodos }
+  const s = todoList.use()
+  return { todos: s.rows, error: s.error, offline: s.offline, unsynced: s.unsynced, refresh: syncTodos }
 }
 
 export async function addTodo(fields: Partial<Todo> & { title: string }) {
   const now = new Date().toISOString()
-  const todo: Todo = {
-    notes: '', status: 'todo', priority: 0, due: null, project_id: null, thread_id: null, added_by: null, assignee: null,
+  return todoList.add({
+    notes: '', status: 'todo', priority: 0, due: null, project_id: null, thread_id: null, added_by: null, assignee: null, labels: [],
     sort: -Date.now() / 1000, created_at: now, updated_at: now, completed_at: fields.status === 'done' ? now : null,
-    ...fields, id: Crypto.randomUUID(),
-  }
-  queue({ kind: 'add', todo })
-  return todo
+    ...fields,
+  })
 }
 
-export async function updateTodo(id: string, changes: Partial<Todo>) {
-  queue({ kind: 'edit', id, changes, at: new Date().toISOString() })
+export async function updateTodo(id: string, changes: Partial<Todo>) { todoList.update(id, changes) }
+export async function deleteTodo(id: string) { todoList.remove(id) }
+
+export interface Label { id: string; name: string; color: string; created_at: string; updated_at: string }
+/** New labels take these in turn (the server's todos.COLORS). */
+export const LABEL_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#ef4444', '#64748b']
+const labelList = offlineList<Label>({
+  path: '/todo-labels', field: 'items', key: 'tl.labels', noun: 'label',
+  sort: (l) => [...l].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+})
+export function useLabels() { return labelList.use().rows ?? [] }
+export function addLabel(name: string) {
+  const now = new Date().toISOString()
+  const n = labelList.get().rows?.length ?? 0
+  return labelList.add({ name, color: LABEL_COLORS[n % LABEL_COLORS.length], created_at: now, updated_at: now })
+}
+export const updateLabel = (id: string, changes: Partial<Label>) => labelList.update(id, changes)
+/** Takes it off every to-do too. */
+export function deleteLabel(id: string) {
+  for (const t of todoList.get().rows ?? []) if (t.labels?.includes(id)) todoList.update(t.id, { labels: t.labels.filter((x) => x !== id) })
+  labelList.remove(id)
 }
 
-export async function deleteTodo(id: string) {
-  queue({ kind: 'del', id })
-}
+/** Tapping a to-do moves it on: to do → in progress → done; a finished one opens again. */
+export const nextStatus = (s: TodoStatus): TodoStatus => (s === 'doing' ? 'done' : s === 'done' || s === 'canceled' ? 'todo' : 'doing')
 
 export async function editFollowup(id: string, changes: { what?: string; at?: string; until?: string; check_by?: string | null }) {
   await api(`/followups/${id}`, { method: 'PATCH', json: changes })
@@ -236,7 +155,7 @@ export async function followupNow(id: string) {
   await followStore.refresh()
 }
 
-export const refreshTasks = () => Promise.all([syncTodos(), followStore.refresh()])
+export const refreshTasks = () => Promise.all([syncTodos(), labelList.sync(), followStore.refresh()])
 
 /** "Today", "Tomorrow", "Fri", "Oct 21" for a YYYY-MM-DD due date, and whether it's overdue or due today. */
 export function dueLabel(due: string, now = new Date()) {

@@ -83,6 +83,14 @@ class PhoneModule : Module() {
     Function("callHangUp") { Calls.hangUp(context) }
     Function("callSpeaker") { on: Boolean -> Calls.speaker(context, on) }
     Function("standInAccess") { on: Boolean -> Calls.access(context, on) }
+    Function("setClock") { json: String -> Clock.set(context, json) }
+    Function("takeClockDone") { Clock.takeDone(context) }
+    Function("canExactAlarm") { Clock.canExact(context) }
+    Function("openExactAlarm") { start(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))) }
+    AsyncFunction("calendars") { Cal.calendars(context) }
+    AsyncFunction("calendarEvents") { from: Double, to: Double -> Cal.events(context, from.toLong(), to.toLong()) }
+    AsyncFunction("saveEvent") { e: Map<String, Any?> -> Cal.save(context, e) }
+    AsyncFunction("deleteEvent") { id: String -> Cal.delete(context, id) }
     Function("canDnd") { Controls.canDnd(context) }
     Function("openDndAccess") { start(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
     Function("canBrightness") { Settings.System.canWrite(context) }
@@ -315,6 +323,17 @@ class PhoneModule : Module() {
       }
       "search" -> { start(Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, str(a, "text"))); return "Searched" }
       "calendar" -> {
+        // With calendar access it goes straight into their main calendar (it shows in Tasks → Calendar); else the
+        // calendar app opens with it filled in.
+        if (context.checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+          val cals = Cal.calendars(context).filter { it["writable"] == true && it["visible"] == true }
+          val pick = cals.firstOrNull { it["primary"] == true && it["local"] != true } ?: cals.firstOrNull()
+          if (pick != null) {
+            Cal.save(context, mapOf("calendar" to pick["id"], "title" to str(a, "title"), "start" to num(a, "start"), "end" to num(a, "end"),
+              "allDay" to false, "place" to str(a, "place"), "notes" to str(a, "text"), "alert" to 10))
+            return "Added to your calendar"
+          }
+        }
         start(Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
           .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, num(a, "start")).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, num(a, "end"))
           .putExtra(CalendarContract.Events.TITLE, str(a, "title")).putExtra(CalendarContract.Events.EVENT_LOCATION, str(a, "place"))

@@ -21,7 +21,7 @@ import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
-const OWN_EDGE = new Set(['vault/file/[id]', 'file', 'open', 'todo/[id]', '(tabs)', 'chat/[threadId]', 'sign-in'])
+const OWN_EDGE = new Set(['vault/file/[id]', 'file', 'open', 'todo/[id]', 'alarm/[id]', 'reminder/[id]', 'event/[id]', '(tabs)', 'chat/[threadId]', 'sign-in'])
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -85,6 +85,9 @@ function Root() {
               <Stack.Screen name="link" />
               <Stack.Screen name="vault/[id]" />
               <Stack.Screen name="todo/[id]" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="alarm/[id]" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="reminder/[id]" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="event/[id]" options={{ animation: 'slide_from_bottom' }} />
               <Stack.Screen name="vault/file/[id]" options={{ animation: 'fade_from_bottom' }} />
               <Stack.Screen name="file" options={{ animation: 'fade_from_bottom' }} />
               <Stack.Screen name="open" options={{ animation: 'fade' }} />

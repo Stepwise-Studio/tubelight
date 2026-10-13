@@ -26,11 +26,13 @@ export const timeText = (h: number, m: number) =>
 /** Stepwise UI's TimePicker (ui.stepwise.studio/r/time-picker) for touch: a field like Input showing the time; tap it
  * and it opens in place into two snap drums (hour, minute) that bend like a cylinder, with a sliding AM/PM switch.
  * Value is 24 h `{ hour, minute }`. Minutes come in `step`s, but an odd minute already set (8:10) stays pickable. */
-export function TimePicker({ hour, minute, onChange, step = 5, label }: {
+export function TimePicker({ hour, minute, onChange, step = 5, label, startOpen }: {
   hour: number; minute: number; onChange: (hour: number, minute: number) => void; step?: number; label?: string
+  /** The drums are out from the start (where the time is the whole point, like an alarm). */
+  startOpen?: boolean
 }) {
   const { c, scheme } = useTheme()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(!!startOpen)
   const pm = hour >= 12
   const h12 = hour % 12 === 0 ? 12 : hour % 12
   const hours = [12, ...Array.from({ length: 11 }, (_, i) => i + 1)] // clock order: 12 (midnight/noon) first

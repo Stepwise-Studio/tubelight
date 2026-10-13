@@ -1,20 +1,20 @@
-// Linear's status and priority glyphs in Linear's own colours, drawn with SVG: backlog a dashed grey ring, todo a
-// grey ring, in progress a yellow ring with its pie half filled, done an indigo disc with a check, canceled a grey
-// disc with a cross; priority as signal bars, urgent as an orange square with "!". A teammate (assignee) is a face.
+// Status and priority glyphs, Linear's shapes, drawn with SVG: backlog a dashed grey ring, todo a grey ring, in
+// progress a yellow ring with its pie half filled, done a green disc with a check, canceled a rose disc with a cross;
+// priority as signal bars, urgent as an orange square with "!". A teammate (assignee) is a face.
 import { memo } from 'react'
 import Svg, { Circle, Path, Rect } from 'react-native-svg'
 
 import type { TodoStatus } from '@/lib/tasks'
 import { useTheme } from '@/theme'
 
-/** Linear's palette (the same in both themes, as in Linear). */
+/** The same in both themes. */
 export const LINEAR = {
-  backlog: '#95a2b3', todo: '#a3a3a3', doing: '#f2c94c', done: '#5e6ad2', canceled: '#95a2b3', urgent: '#f2994a',
+  backlog: '#95a2b3', todo: '#a3a3a3', doing: '#f2c94c', done: '#22a55b', canceled: '#f43f5e', urgent: '#f2994a',
 } as const
 
 export const StatusGlyph = memo(function StatusGlyph({ status, size = 18 }: { status: TodoStatus; size?: number }) {
   const { scheme } = useTheme()
-  const ink = scheme === 'dark' ? '#0b0b0c' : '#ffffff'
+  const ink = '#ffffff'
   if (status === 'done' || status === 'canceled') {
     return (
       <Svg width={size} height={size} viewBox="0 0 14 14">

@@ -7,6 +7,7 @@ import * as TaskManager from 'expo-task-manager'
 import { Platform } from 'react-native'
 
 import { api } from '@/lib/api'
+import { syncClock } from '@/lib/clock'
 import { Phone } from '@/lib/phone'
 
 export const SOUNDS = [
@@ -110,6 +111,8 @@ TaskManager.defineTask<Notifications.NotificationTaskPayload>(TASK, async ({ dat
     const n = (data as { notification?: { request?: { content?: { title?: string; body?: string; data?: unknown; dataString?: string } } } })
       .notification?.request?.content
     const d = pushData(n)
+    // A teammate set or changed an alarm or reminder: take the lists and arm them, app closed or not.
+    if (d.kind === 'clock') { await syncClock().catch(() => {}); return }
     if ((d.kind === 'approval' || d.kind === 'question') && Phone?.isLocked()) {
       Phone.ring({ title: n?.title ?? 'Tubelight needs you', body: n?.body ?? '', thread: d.thread_id, reason: d.kind, approval: d.approval_id ?? '' })
     }

@@ -1,102 +1,154 @@
-import { router, useFocusEffect } from 'expo-router'
-import { useCallback, useState } from 'react'
-import { RefreshControl, ScrollView, View } from 'react-native'
-import { Add01Icon, CheckListIcon, Clock01Icon } from '@hugeicons/core-free-icons'
+// Tasks: your to-dos by default; the header's two icons open the calendar and the clock (alarms, reminders and what
+// teammates will come back to), and the icon of the open one turns into the to-dos icon to come back. Each view
+// mounts the first time it's opened and stays mounted, so switching back is instant.
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import { AlarmClockIcon, ArrowDown01Icon, Calendar03Icon, CheckListIcon } from '@hugeicons/core-free-icons'
 
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
-import { FollowupList, FollowupSheet } from '@/components/tasks/followups'
-import { TodoList } from '@/components/tasks/todo-list'
-import { dueLabel, refreshTasks, useFollowups, useTodos, type Followup, type Todo, type TodoStatus } from '@/lib/tasks'
+import { CalendarView } from '@/components/tasks/calendar-view'
+import { ClockView } from '@/components/tasks/clock-view'
+import { TodoList, type GroupBy } from '@/components/tasks/todo-list'
+import { dueLabel, refreshTasks, useLabels, useTodos, type Todo, type TodoStatus } from '@/lib/tasks'
 import { useWorkspace } from '@/lib/workspace'
-import { useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Reveal, Segment, Skeleton, TeammateAvatar, Text, haptic } from '@/ui'
+import { motion, useTheme } from '@/theme'
+import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Reveal, Skeleton, Text, haptic, showContextMenu } from '@/ui'
 
-type View_ = 'todos' | 'followups'
+type Mode = 'todos' | 'calendar' | 'clock'
+const TITLES: Record<Mode, string> = { todos: 'Tasks', calendar: 'Calendar', clock: 'Clock' }
+const GROUP_KEY = 'tl.tasks.groupBy'
 
 export default function Tasks() {
-  const { c } = useTheme()
-  const ws = useWorkspace()
-  const inset = useTabBarInset()
-  const { todos, error, offline, unsynced } = useTodos()
-  const follow = useFollowups()
-  const [view, setView] = useState<View_>('todos')
-  const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
-  const [refreshing, setRefreshing] = useState(false)
+  const [mode, setMode] = useState<Mode>('todos')
+  const [seen, setSeen] = useState<Record<Mode, boolean>>({ todos: true, calendar: false, clock: false })
+  const fade = useSharedValue(1)
+  const shown = useAnimatedStyle(() => ({ opacity: fade.get() }))
+  // An alarm's or reminder's notification opens the clock (tubelight://tasks?view=clock).
+  const { view } = useLocalSearchParams<{ view?: string }>()
+  const [linked, setLinked] = useState<string | undefined>(undefined)
+  if (view !== linked) {
+    setLinked(view)
+    if (view === 'clock' || view === 'calendar') { setSeen((s) => ({ ...s, [view]: true })); setMode(view) }
+  }
+  const open = (m: Mode) => {
+    haptic.tap()
+    fade.set(0)
+    fade.set(withTiming(1, { duration: motion.duration.fast, easing: motion.ease.smoothOut }))
+    setSeen((s) => (s[m] ? s : { ...s, [m]: true }))
+    setMode(m)
+  }
 
-  // Teammates add to-dos and follow-ups from chats: catch up whenever the tab comes into view.
+  // Teammates add to-dos, alarms and follow-ups from chats: catch up whenever the tab comes into view.
   useFocusEffect(useCallback(() => { refreshTasks() }, []))
 
-  const open = (todos ?? []).filter((t) => t.status !== 'done' && t.status !== 'canceled')
-  const dueToday = open.filter((t) => t.due && dueLabel(t.due).today).length
-  const overdue = open.filter((t) => t.due && dueLabel(t.due).overdue).length
-  // Offline, changes wait on the phone and go out when the server's back.
-  const sync = offline ? (unsynced ? `Offline, ${unsynced} ${unsynced === 1 ? 'change' : 'changes'} to sync` : 'Offline') : unsynced ? 'Syncing…' : null
-  const summary = [`${open.length} open`, dueToday && `${dueToday} due today`, overdue && `${overdue} overdue`, sync].filter(Boolean).join(' · ')
-  const add = (status?: TodoStatus) => { haptic.tap(); router.push({ pathname: '/todo/[id]', params: { id: 'new', ...(status ? { status } : {}) } }) }
-  const sleeper = ws.teammates[0]
+  // The calendar's and the clock's places: the open one shows the to-dos icon instead.
+  const slot = (m: Mode, icon: typeof Calendar03Icon, label: string) => {
+    const back = mode === m
+    return (
+      <IconButton variant="soft" round accessibilityLabel={back ? 'To-dos' : label} onPress={() => open(back ? 'todos' : m)}
+        icon={back ? CheckListIcon : icon} />
+    )
+  }
 
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: inset + 24, flexGrow: 1 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshTasks(); setRefreshing(false) }}
-          tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
-      >
-        <TabHeader title="Tasks" right={view === 'todos' && (
-          <IconButton icon={Add01Icon} variant="soft" round accessibilityLabel="New to-do" onPress={() => add()} />
-        )} />
-        <View style={{ paddingHorizontal: 16, gap: 10 }}>
-          <Segment<View_> value={view} onChange={setView} accessibilityLabel="Tasks"
-            options={[{ value: 'todos', label: 'To-dos', count: open.length || undefined }, { value: 'followups', label: 'Follow-ups', count: follow.pending?.length || undefined }]} />
-          {view === 'todos' && (!!todos?.length || !!sync) && <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 4 }}>{summary}</Text>}
-          {view === 'followups' && !!follow.pending?.length && (
-            <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 4 }}>What your teammates will come back to. Tap one to change it.</Text>
-          )}
-        </View>
-
-        {view === 'todos' ? (
-          <Reveal ready={todos !== null || !!error} style={{ flexGrow: 1 }} skeleton={<Rows />}>
-            {todos?.length ? (
-              <TodoList todos={todos} onOpen={(todo: Todo) => router.push({ pathname: '/todo/[id]', params: { id: todo.id } })} onAdd={add} />
-            ) : (
-              <EmptyState
-                art={<View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={CheckListIcon} size={26} color="tube" /></View>}
-                title={error ? 'Unable to load your to-dos' : 'A clear list'}
-                body={error ?? 'Add what’s on your plate, or tell a teammate “add renewing my passport to my to-dos”.'}
-                action={<Button label={error ? 'Try again' : 'Add a to-do'} onPress={() => (error ? refreshTasks() : add())} />}
-              />
-            )}
-          </Reveal>
-        ) : (
-          <Reveal ready={follow.pending !== null || !!follow.error} style={{ flexGrow: 1 }} skeleton={<Rows avatar />}>
-            {follow.pending?.length || follow.done.length ? (
-              <FollowupList pending={follow.pending ?? []} done={follow.done} onOpen={(f) => setFsheet((s) => ({ open: true, f, n: s.n + 1 }))} />
-            ) : (
-              <EmptyState
-                art={sleeper ? <TeammateAvatar teammate={sleeper} size={56} state="sleeping" /> : <Icon icon={Clock01Icon} size={26} color="ink3" />}
-                title={follow.error ? 'Unable to load follow-ups' : 'Nothing to come back to'}
-                body={follow.error ?? 'Ask a teammate “remind me at 6 to call Mom”, or “check back when the design is done”, and it shows here.'}
-              />
-            )}
-          </Reveal>
-        )}
-      </ScrollView>
-      <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={() => setFsheet((s) => ({ ...s, open: false }))} />
+      <TabHeader title={TITLES[mode]} right={<>{slot('calendar', Calendar03Icon, 'Calendar')}{slot('clock', AlarmClockIcon, 'Alarms and reminders')}</>} />
+      <View style={{ flex: 1 }}>
+        {(['todos', 'calendar', 'clock'] as const).map((m) => seen[m] && (
+          <Animated.View key={m} style={[StyleSheet.absoluteFill, mode === m ? shown : { display: 'none' }]}>
+            {m === 'todos' ? <Todos /> : m === 'calendar' ? <CalendarView /> : <ClockView />}
+          </Animated.View>
+        ))}
+      </View>
     </View>
   )
 }
 
-function Rows({ avatar }: { avatar?: boolean }) {
+function Todos() {
+  const { c } = useTheme()
+  const ws = useWorkspace()
+  const inset = useTabBarInset()
+  const { todos, error, offline, unsynced } = useTodos()
+  const labels = useLabels()
+  const [groupBy, setGroupBy] = useState<GroupBy>('status')
+  const [refreshing, setRefreshing] = useState(false)
+  useEffect(() => { AsyncStorage.getItem(GROUP_KEY).then((g) => { if (g === 'label' || g === 'status') setGroupBy(g) }, () => {}) }, [])
+  const group = (g: GroupBy) => { setGroupBy(g); AsyncStorage.setItem(GROUP_KEY, g).catch(() => {}) }
+
+  const live = (todos ?? []).filter((t) => t.status !== 'done' && t.status !== 'canceled')
+  const dueToday = live.filter((t) => t.due && dueLabel(t.due).today).length
+  const overdue = live.filter((t) => t.due && dueLabel(t.due).overdue).length
+  // Offline, changes wait on the phone and go out when the server's back.
+  const sync = offline ? (unsynced ? `Offline, ${unsynced} ${unsynced === 1 ? 'change' : 'changes'} to sync` : 'Offline') : unsynced ? 'Syncing…' : null
+  const summary = [`${live.length} open`, dueToday && `${dueToday} due today`, overdue && `${overdue} overdue`, sync].filter(Boolean).join(' · ')
+  const add = useCallback((o: { status?: TodoStatus; label?: string } = {}) => {
+    haptic.tap()
+    router.push({ pathname: '/todo/[id]', params: { id: 'new', ...o } })
+  }, [])
+  const onOpen = useCallback((t: Todo) => router.push({ pathname: '/todo/[id]', params: { id: t.id } }), [])
+
+  return (
+    <ScrollView
+      contentContainerStyle={{ paddingBottom: inset + 24, flexGrow: 1 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshTasks(); setRefreshing(false) }}
+        tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
+    >
+      {!!todos?.length && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 10 }}>
+          <Text variant="footnote" color="ink3" style={{ flex: 1 }} numberOfLines={1}>{summary}</Text>
+          <GroupButton value={groupBy} onChange={group} />
+        </View>
+      )}
+      <Reveal ready={todos !== null || !!error} style={{ flexGrow: 1 }} skeleton={<Rows />}>
+        {todos?.length ? (
+          <TodoList todos={todos} labels={labels} groupBy={groupBy} teammate={ws.teammate} projects={ws.projects} onOpen={onOpen} onAdd={add} />
+        ) : (
+          <EmptyState
+            art={<View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={CheckListIcon} size={26} color="tube" /></View>}
+            title={error ? 'Unable to load your to-dos' : 'A clear list'}
+            body={error ?? (sync || 'Add what’s on your plate, or tell a teammate “add renewing my passport to my to-dos”.')}
+            action={<Button label={error ? 'Try again' : 'Add a to-do'} onPress={() => (error ? refreshTasks() : add())} />}
+          />
+        )}
+      </Reveal>
+    </ScrollView>
+  )
+}
+
+/** Group by status or by label, in a menu grown out of the button. */
+function GroupButton({ value, onChange }: { value: GroupBy; onChange: (g: GroupBy) => void }) {
+  const ref = useRef<View>(null)
+  const label = value === 'status' ? 'By status' : 'By label'
+  const face = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, minHeight: 32 }}>
+      <IconSwap swapKey={value}><Text variant="footnote" color="ink2">{label}</Text></IconSwap>
+      <Icon icon={ArrowDown01Icon} size={13} color="ink3" strokeWidth={2} />
+    </View>
+  )
+  return (
+    <View ref={ref} collapsable={false}>
+      <Press radius={10} static accessibilityLabel={`Grouped ${label.toLowerCase()}. Change`}
+        onPress={() => showContextMenu(ref.current, face, [
+          { label: 'By status', checked: value === 'status', onPress: () => onChange('status') },
+          { label: 'By label', checked: value === 'label', onPress: () => onChange('label') },
+        ])}>
+        {face}
+      </Press>
+    </View>
+  )
+}
+
+function Rows() {
   return (
     <View style={{ paddingHorizontal: 16, paddingTop: 22, gap: 22 }} accessible accessibilityLabel="Loading">
       {[0, 1, 2, 3, 4].map((i) => (
         <View key={i} style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-          <Skeleton width={avatar ? 32 : 20} height={avatar ? 32 : 20} radius={16} />
-          <View style={{ flex: 1, gap: 7 }}>
-            <Skeleton width={`${50 + ((i * 17) % 40)}%`} height={12} />
-            {avatar && <Skeleton width="35%" height={10} />}
-          </View>
+          <Skeleton width={20} height={20} radius={16} />
+          <Skeleton width={`${50 + ((i * 17) % 40)}%`} height={12} />
         </View>
       ))}
     </View>
