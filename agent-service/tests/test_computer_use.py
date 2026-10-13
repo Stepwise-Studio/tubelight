@@ -62,7 +62,6 @@ def test_phone_status_reports_the_next_alarm():
     asyncio.run(phone.save_status(owner, {"model": "S21", "android": "16", "next_alarm": at, "next_alarm_app": "Clock"}))
     text = asyncio.run(phone.status_text(owner, zone))
     assert "Next alarm: Sun 11 Oct, 06:00 (Clock)" in text
-    assert phone.action("alarms", None, None, "") == {"action": "alarms"}
 
 
 async def test_done_must_be_on_screen(env, monkeypatch):

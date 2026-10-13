@@ -10,12 +10,14 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from . import db, memory
+from . import db, items, memory
 
 STATUSES = ("backlog", "todo", "doing", "done", "canceled")
 STATUS_NAMES = {"backlog": "Backlog", "todo": "Todo", "doing": "In progress", "done": "Done", "canceled": "Canceled"}
 PRIORITY_NAMES = {0: "", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
-EDITABLE = ("title", "notes", "status", "priority", "due", "project_id", "assignee", "sort")
+EDITABLE = ("title", "notes", "status", "priority", "due", "project_id", "assignee", "sort", "labels")
+# Label colours, picked in turn for new labels (the app shows the same set).
+COLORS = ("#3b82f6", "#22c55e", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6", "#ef4444", "#64748b")
 
 
 def _ns(owner_id: str) -> tuple[str, ...]:
@@ -53,8 +55,34 @@ def clean(changes: dict[str, Any]) -> dict[str, Any]:
             v = v or None
         elif k == "sort":
             v = float(v)
+        elif k == "labels":
+            v = list(dict.fromkeys(str(x) for x in (v or []) if x))[:10]
         out[k] = v
     return out
+
+
+def _clean_label(r: dict[str, Any]) -> dict[str, Any]:
+    name = " ".join(str(r.get("name") or "").split())[:40]
+    if not name:
+        raise ValueError("A label needs a name.")
+    color = str(r.get("color") or "")
+    return {"name": name, "color": color if color.startswith("#") and len(color) in (4, 7) else COLORS[0]}
+
+
+LABELS = items.Items("todo_labels", _clean_label, {"name": "", "color": ""}, "created_at")
+
+
+async def label_ids(owner_id: str, names: str) -> list[str]:
+    """Comma-separated label names to ids, making the ones that don't exist yet."""
+    have = await LABELS.listing(owner_id)
+    by_name = {lb["name"].lower(): lb["id"] for lb in have}
+    out = []
+    for name in (n.strip() for n in names.split(",")):
+        if name and name.lower() not in by_name:
+            by_name[name.lower()] = (await LABELS.add(owner_id, {"name": name, "color": COLORS[len(by_name) % len(COLORS)]}))["id"]
+        if name:
+            out.append(by_name[name.lower()])
+    return list(dict.fromkeys(out))
 
 
 async def listing(owner_id: str) -> list[dict[str, Any]]:
@@ -76,7 +104,7 @@ async def add(owner_id: str, title: str, *, added_by: str | None = None, thread_
         if existing := await get(owner_id, key):
             return existing
     now = _now()
-    t: dict[str, Any] = {"title": "", "notes": "", "status": "todo", "priority": 0, "due": None, "project_id": None, "assignee": None,
+    t: dict[str, Any] = {"title": "", "notes": "", "status": "todo", "priority": 0, "due": None, "project_id": None, "assignee": None, "labels": [],
                          "sort": -time.time(), **clean({**fields, "title": title}),
                          "added_by": added_by, "thread_id": thread_id, "created_at": now, "updated_at": now}
     t["completed_at"] = now if t["status"] == "done" else None
@@ -114,8 +142,10 @@ async def find(owner_id: str, ref: str) -> dict[str, Any] | None:
 
 
 def describe(t: dict[str, Any], names: dict[str, str] | None = None) -> str:
-    """One line for a teammate: id, title, status, priority, due, who added it."""
+    """One line for a teammate: id, title, status, priority, due, labels, who added it. `names`: teammate and label ids."""
     bits = [STATUS_NAMES.get(t["status"], t["status"])]
+    if t.get("labels"):
+        bits.append("labels " + ", ".join((names or {}).get(x, "?") for x in t["labels"]))
     if PRIORITY_NAMES.get(t.get("priority") or 0):
         bits.append(PRIORITY_NAMES[t["priority"]])
     if t.get("due"):

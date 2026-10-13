@@ -114,3 +114,28 @@ async def test_todo_add_with_the_phones_id_is_idempotent(env):
     assert a["id"] == b["id"] == key and len([t for t in await todos.listing(U) if t["id"] == key]) == 1
     with pytest.raises(ValueError):
         await todos.add(U, "x", id="not-a-uuid")
+
+
+async def test_labels_alarms_and_reminders(env):
+    from zoneinfo import ZoneInfo
+
+    from app import clock
+
+    ids = await todos.label_ids(U, "Study, dev,study")
+    assert len(ids) == 2 and await todos.label_ids(U, "DEV") == [ids[1]]  # names match case-blind, made once
+    t = await todos.add(U, "Revise chapter 4", labels=ids)
+    assert "labels Study, dev" in todos.describe(t, {lb["id"]: lb["name"] for lb in await todos.LABELS.listing(U)})
+    zone = ZoneInfo("Asia/Kolkata")
+    now = datetime(2026, 10, 13, 8, 0, tzinfo=zone)
+    assert clock.next_at("07:00", zone, now).startswith("2026-10-14T07:00")  # passed today: tomorrow
+    assert clock.parse_days("weekdays") == [0, 1, 2, 3, 4] and clock.parse_days("mon, fri") == [0, 4]
+    once = await clock.ALARMS.add(U, {"time": "07:00", "at": clock.next_at("07:00", zone, now)}, id="00000000-0000-0000-0000-0000000000a1")
+    assert (await clock.ALARMS.add(U, {"time": "09:00"}, id=once["id"]))["time"] == "07:00"  # resent add keeps one
+    assert clock.is_on(once, now) and not clock.is_on(once, now + timedelta(days=2))  # a one-off is off once it rang
+    with pytest.raises(ValueError):
+        await clock.ALARMS.add(U, {"time": "25:00"})
+    r = await clock.REMINDERS.add(U, {"title": "Call Mom", "at": clock.local("2026-10-13T18:00", zone), "repeat": "weekly"})
+    assert "Tue Oct 13 18:00 · repeats weekly" in clock.describe_reminder(r, zone)
+    assert (await clock.REMINDERS.update(U, r["id"], {"done": True}))["done_at"]
+    with pytest.raises(ValueError):
+        await clock.REMINDERS.add(U, {"title": "x", "at": "2026-10-13T18:00"})  # no offset

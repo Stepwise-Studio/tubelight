@@ -214,6 +214,13 @@ def _message(p: dict[str, Any], title: str, body: str, data: dict[str, Any], kin
     }
 
 
+async def clock(owner_id: str, title: str, body: str) -> None:
+    """A teammate set or changed an alarm or reminder: a quiet note, and the phone's background task picks up the list
+    and schedules it (the app's lib/clock.ts), so it rings even if Tubelight isn't opened before then."""
+    await _send(owner_id, {"title": title[:80], "body": body[:240], "data": {"kind": "clock"}, "priority": "high",
+                           "channelId": "tl-silent", "tag": "clock"})
+
+
 async def notify(owner_id: str, title: str, body: str, thread_id: str, *, kind: str = "reply",
                  teammate: dict[str, Any] | None = None, approval_id: str | None = None) -> None:
     """Approvals, questions and alerts go out now; replies are bundled per chat (see the module docstring)."""

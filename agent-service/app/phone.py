@@ -13,7 +13,7 @@ from typing import Any
 from . import config, memory
 
 DAY = 24 * 3600
-KINDS = ("alarm", "alarms", "alarm_off", "snooze", "timer", "timers", "timer_off", "call", "text", "whatsapp", "email",
+KINDS = ("timer", "timers", "timer_off", "call", "text", "whatsapp", "email",
          "navigate", "calendar", "open_app", "open_url", "search", "settings", "panel", "flashlight", "volume", "dnd",
          "brightness", "media", "play", "photo")
 SENDS = ("reply", "sms")  # these send something as the user: only through phone_send, after their OK
@@ -42,15 +42,7 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
     if kind not in KINDS:
         return f"Unknown action {kind!r}: use one of {', '.join(KINDS)}."
     a: dict[str, Any] = {"action": kind, **{k: v for k, v in f.items() if v or (k == "level" and v == 0)}}
-    if kind == "alarm":
-        hm = _clock(raw_when)
-        if not hm:
-            return "Give the alarm time in `when`, like 06:30."
-        a |= {"hour": hm[0], "minute": hm[1]}
-    elif kind == "alarm_off":
-        if hm := _clock(raw_when):
-            a |= {"hour": hm[0], "minute": hm[1]}
-    elif kind in ("volume", "brightness") and not 0 <= int(f.get("level") if f.get("level") is not None else -1) <= 100:
+    if kind in ("volume", "brightness") and not 0 <= int(f.get("level") if f.get("level") is not None else -1) <= 100:
         return "Give `level` from 0 to 100."
     elif kind == "play" and not f.get("text"):
         return "Say what to play in `text` (and the app in `app`, like Spotify)."
@@ -76,17 +68,16 @@ def action(kind: str, when: datetime | None, end: datetime | None, raw_when: str
 # ------------------------------------------------------------------ the phone's own teammate
 PROMPT = """You are {name}, {owner}'s phone, talking with them in Tubelight (and when they hold the side key: your
 panel opens over whatever they're doing, and you see what was on screen). You are the only one who can do things on
-this phone: alarms (set, turn off, snooze) and timers, the flashlight, volume, Do Not Disturb, brightness, music
+this phone: timers, the flashlight, volume, Do Not Disturb, brightness, music
 (play something, pause, skip), calls (by name, from their contacts), texts, WhatsApp and emails ready to send, directions,
 calendar events, opening apps, the camera, and settings panels (Wi-Fi, Bluetooth, mobile data, airplane mode and battery
 saver can't be switched by an app: open their panel). With their OK (phone_send) you can reply to a message from its
 notification or send an SMS, and (phone_use_app) do a task inside any app on the phone for them.
 phone_status has their next alarm, the calendar till tomorrow night, recent calls and what's playing, as of when they
-last opened Tubelight; phone_notifications has what arrived (if they shared it). For a reminder at a
-later time, set a follow-up. Other teammates ask you for things on the phone: say what they asked and why, and
+last opened Tubelight; phone_notifications has what arrived (if they shared it). Alarms and reminders are
+Tubelight's own: set, change and list them with the alarms and reminders tools (they ring on this phone). Other teammates ask you for things on the phone: say what they asked and why, and
 remember that anything you do for them waits for {owner}'s OK. Check storage, battery, the next alarm and the like
-with phone_status. Android shows apps only the next alarm, never the whole list: for "what alarms do I have", say the
-next one (from phone_status) and open the alarm list (phone_action alarms) for the rest.
+with phone_status.
 Something only happens on the phone through a phone_action call in this reply: never say you set, opened or sent
 anything you didn't call it for. Earlier messages say what was done then, not now.
 Keep replies to a line or two: they're usually glancing at the phone."""

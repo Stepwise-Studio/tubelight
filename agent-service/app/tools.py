@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, phone, repo, sandbox, todos, usage, vault
+from . import automations, brief, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -76,7 +76,7 @@ INTERNAL = {
     "ask_user": "read", "connect_app": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
     "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
-    "todos": "read", "vault": "read", "knowledge": "read",
+    "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
@@ -84,7 +84,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -506,9 +506,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools.append(StructuredTool.from_function(
             coroutine=phone_action, name="phone_action",
             description=(
-                "Do something on their phone right now: alarm (when: HH:MM, title: its name if they gave one), alarms "
-                "(open their alarm list), alarm_off (when: HH:MM, or title, or neither for the ringing/next one; on a "
-                "Samsung this only opens the alarm list for them to switch it off: say that), snooze, timer (seconds), "
+                "Do something on their phone right now (alarms and reminders: use the alarms / reminders tools): timer (seconds), "
                 "timers, timer_off (no app can cancel a running timer: this opens their timers to stop it, say so), "
                 "call / text / whatsapp (name from their contacts, or number; text), email (to, title, text), "
                 "navigate (place), calendar (title, when + end as date-times, place), open_app (app), open_url (url), "
@@ -516,8 +514,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 "dnd (text: on/off), brightness (level 0-100), media (text: play/pause/next/previous/stop), play (text: what, "
                 "app: Spotify/YouTube Music/Apple Music/JioSaavn), photo (opens the camera), panel (text: wifi/internet/bluetooth/"
                 "airplane/battery saver/location/volume: apps can't switch these, so their panel opens), settings (text: "
-                "storage, battery, wifi, bluetooth, display, apps, sound, location). For a reminder at a later time use a "
-                "follow-up instead (it pings them then); for their Google Calendar use the calendar app if connected.")))
+                "storage, battery, wifi, bluetooth, display, apps, sound, location). For a reminder use the reminders tool.")))
         async def phone_status() -> str:
             return await phone.status_text(ctx.owner_id, zone)
 
@@ -581,7 +578,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools.append(StructuredTool.from_function(
             coroutine=ask_phone, name="ask_phone",
             description=f"Ask {pm['name']} (their phone, the only one who can use it) to do something on the phone: an "
-                        "alarm, a timer, open an app, get a call/text/WhatsApp/email ready, directions, a calendar "
+                        "timer, open an app, get a call/text/WhatsApp/email ready, directions, a calendar "
                         "entry, look through its notifications. Say exactly what and why; they OK it before it happens."))
 
     if not helper:
@@ -612,15 +609,18 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
     if not helper:
         async def todo_list(action: str, todo: str = "", title: str = "", notes: str | None = None, status: str = "",
-                            priority: int | None = None, due: str | None = None) -> str:
+                            priority: int | None = None, due: str | None = None, labels: str | None = None) -> str:
             mates = await db.select("teammates", {"owner_id": f"eq.{ctx.owner_id}", "select": "id,name"})
-            names = {m["id"]: m["name"] for m in mates}
+            names = {m["id"]: m["name"] for m in mates} | {lb["id"]: lb["name"] for lb in await todos.LABELS.listing(ctx.owner_id)}
             if action == "list":
                 rows = todos.open_and_recent(await todos.listing(ctx.owner_id))
                 return "\n".join(todos.describe(t, names) for t in rows) or "Their to-do list is empty."
             fields = {k: v for k, v in {"notes": notes, "status": status or None, "priority": priority, "due": due}.items()
                       if v is not None}
             try:
+                if labels is not None:
+                    fields["labels"] = await todos.label_ids(ctx.owner_id, labels)
+                    names |= {lb["id"]: lb["name"] for lb in await todos.LABELS.listing(ctx.owner_id)}
                 if action == "add":
                     t = await todos.add(ctx.owner_id, title, added_by=tm["id"], thread_id=ctx.thread_id, **fields)
                     await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} added a to-do: {t['title']}", "added")
@@ -637,6 +637,81 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                     if new["status"] == "done" and t["status"] != "done":
                         await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} completed a to-do: {new['title']}", "done")
                     return f"Updated: {todos.describe(new, names)}"
+            except ValueError as e:
+                return str(e)
+            return "action is list, add, update or delete."
+
+        async def alarm_list(action: str, alarm: str = "", time: str = "", days: str | None = None, label: str | None = None,
+                             enabled: bool | None = None) -> str:
+            if action == "list":
+                rows = await clock.ALARMS.listing(ctx.owner_id)
+                return "\n".join(clock.describe_alarm(a) for a in rows) or "No alarms set."
+            try:
+                fields: dict[str, Any] = {k: v for k, v in {"label": label, "enabled": enabled}.items() if v is not None}
+                if time:
+                    hm = phone._clock(time)
+                    if not hm:
+                        return "Give the time as HH:MM."
+                    fields["time"] = f"{hm[0]:02d}:{hm[1]:02d}"
+                if days is not None:
+                    fields["days"] = clock.parse_days(days)
+                if action == "add":
+                    if "time" not in fields:
+                        return "Give the alarm's time."
+                    a = {"enabled": True, **fields}
+                    if not a.get("days"):
+                        a["at"] = clock.next_at(a["time"], zone)
+                    a = await clock.ALARMS.add(ctx.owner_id, a)
+                    await push.clock(ctx.owner_id, f"Alarm set · {a['time']}", f"{a['label'] or tm['name']} · {clock.days_text(a['days'])}")
+                    return f"Set (it rings on their phone; it's in Tasks → Clock): {clock.describe_alarm(a)}"
+                a = None
+                if action in ("update", "delete"):
+                    a = await clock.find(clock.ALARMS, ctx.owner_id, alarm, "label") or await clock.find(clock.ALARMS, ctx.owner_id, alarm, "time")
+                    if not a:
+                        return "No single alarm matches that: list them and pass its [id]."
+                if action == "delete":
+                    await clock.ALARMS.remove(ctx.owner_id, a["id"])
+                    await push.clock(ctx.owner_id, f"Alarm removed · {a['time']}", a["label"] or tm["name"])
+                    return f"Removed: {clock.describe_alarm(a)}"
+                if action == "update":
+                    merged = {**a, **fields}
+                    if merged["enabled"] and not merged.get("days"):
+                        fields["at"] = clock.next_at(merged["time"], zone)
+                    a = await clock.ALARMS.update(ctx.owner_id, a["id"], fields)
+                    await push.clock(ctx.owner_id, f"Alarm {'on' if clock.is_on(a) else 'off'} · {a['time']}", a["label"] or tm["name"])
+                    return f"Updated: {clock.describe_alarm(a)}"
+            except ValueError as e:
+                return str(e)
+            return "action is list, add, update or delete."
+
+        async def reminder_list(action: str, reminder: str = "", title: str = "", when: str = "", repeat: str | None = None,
+                                notes: str | None = None, done: bool | None = None) -> str:
+            if action == "list":
+                rows = [r for r in await clock.REMINDERS.listing(ctx.owner_id) if not r.get("done")]
+                return "\n".join(clock.describe_reminder(r, zone) for r in rows) or "No reminders waiting."
+            try:
+                fields: dict[str, Any] = {k: v for k, v in {"title": title or None, "repeat": repeat, "notes": notes, "done": done}.items()
+                                          if v is not None}
+                if when:
+                    fields["at"] = clock.local(when, zone)
+                if action == "add":
+                    r = await clock.REMINDERS.add(ctx.owner_id, fields)
+                    at = datetime.fromisoformat(r["at"]).astimezone(zone)
+                    await push.clock(ctx.owner_id, f"Reminder set · {at:%a %H:%M}", r["title"])
+                    return f"Set (their phone reminds them then; it's in Tasks → Clock): {clock.describe_reminder(r, zone)}"
+                r = None
+                if action in ("update", "delete"):
+                    r = await clock.find(clock.REMINDERS, ctx.owner_id, reminder, "title")
+                    if not r:
+                        return "No single reminder matches that: list them and pass its [id]."
+                if action == "delete":
+                    await clock.REMINDERS.remove(ctx.owner_id, r["id"])
+                    await push.clock(ctx.owner_id, "Reminder removed", r["title"])
+                    return f"Removed: {r['title']}"
+                if action == "update":
+                    r = await clock.REMINDERS.update(ctx.owner_id, r["id"], fields)
+                    await push.clock(ctx.owner_id, "Reminder updated", r["title"])
+                    return f"Updated: {clock.describe_reminder(r, zone)}"
             except ValueError as e:
                 return str(e)
             return "action is list, add, update or delete."
@@ -711,7 +786,21 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "last week's done) | add (title; optional notes, priority 1 urgent..4 low, due YYYY-MM-DD, "
                             "status backlog|todo|doing|done) | update (todo: its [id]; any of title, notes, status, "
                             "priority, due; due '' clears it) | delete. Add one when they ask you to note a task for "
-                            "them; a follow-up is for when YOU will come back."),
+                            "them; a follow-up is for when YOU will come back. labels: comma-separated names (new "
+                            "ones are made), replacing its labels; '' clears them."),
+            StructuredTool.from_function(
+                coroutine=alarm_list, name="alarms",
+                description="Their alarms, Tubelight's own (they ring full screen on their phone; Tasks → Clock). "
+                            "action: list | add (time HH:MM; days: weekdays, weekends, daily, mon,wed,fri or '' for once; "
+                            "label) | update (alarm: its [id], label or time; any of time, days, label, enabled) | "
+                            "delete. Use it whenever they ask for an alarm or to wake them."),
+            StructuredTool.from_function(
+                coroutine=reminder_list, name="reminders",
+                description="Their reminders, Tubelight's own (a notification on their phone at the time, with Done "
+                            "and Snooze; Tasks → Clock). action: list | add (title, when: their local "
+                            "YYYY-MM-DDTHH:MM; repeat: daily, weekdays, weekly, monthly, yearly; notes) | update (reminder: "
+                            "its [id] or title; any of title, when, repeat, notes, done) | delete. Use it when they ask to "
+                            "be reminded of something; follow_up is for when YOU come back to this chat."),
             *([StructuredTool.from_function(
                 coroutine=knowledge_search, name="knowledge",
                 description=f"Search your knowledge base: the files {ctx.user_name} gave you to know (notes, books, "

@@ -346,7 +346,8 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         "approval card and may edit or reject it. Do not ask for permission in chat first. If an action is rejected, "
         "acknowledge it briefly and adjust.")
     lines.append("Use remember for durable facts (preferences, decisions, names, deadlines) and recall to look them up.")
-    lines.append(f"When {ctx.user_name} asks you to circle back, remind them or check on something later, or you promise "
+    lines.append(f"When {ctx.user_name} asks to be reminded of something at a time, set it with reminders (it rings on "
+                 "their phone; alarms for an alarm). When they ask you to circle back or check on something later, or you promise "
                  "to get back to them, call follow_up: with a time, or with a condition to wait for (\"once the design "
                  "tweak is done\"); it fires in this chat on its own. That's different from a calendar event, which "
                  "books time in people's schedules: use follow_up to come back to something here, and a calendar event "

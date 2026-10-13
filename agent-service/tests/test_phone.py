@@ -8,8 +8,8 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def test_actions_need_what_the_phone_needs():
-    assert phone.action("alarm", None, None, "6.30 pm", title="Gym") == {"action": "alarm", "title": "Gym", "hour": 18, "minute": 30}
-    assert "alarm time" in phone.action("alarm", None, None, "tomorrow")
+    assert "Unknown" in phone.action("alarm", None, None, "6.30 pm")  # alarms are Tubelight's own now (tool alarms)
+    assert phone._clock("6.30 pm") == (18, 30)
     assert "`name`" in phone.action("call", None, None, "")
     start = datetime(2026, 10, 5, 15, 0, tzinfo=IST)
     cal = phone.action("calendar", start, None, "2026-10-05T15:00", title="Review")
@@ -39,7 +39,6 @@ def test_only_the_phone_uses_the_phone(env):
     assert {"phone_action", "phone_notifications"} <= names(phone_tm, phone_tm) and "ask_phone" not in names(phone_tm, phone_tm)
     assert "ask_phone" in names(ivy, phone_tm) and not {"phone_action", "phone_notifications"} & names(ivy, phone_tm)
     assert not {"phone_action", "ask_phone"} & names(ivy, None)  # no phone registered: nobody touches it
-    assert tools.title("phone_action", {"action": "alarm", "when": "06:30"}) == "On your phone: Set an alarm for 06:30"
 
 
 async def test_phone_status_reads_like_android(env):
@@ -58,8 +57,6 @@ def test_new_phone_actions():
     assert phone.action("call", None, None, "", name="Mom") == {"action": "call", "name": "Mom"}
     assert phone.action("volume", None, None, "", level=0, text="media") == {"action": "volume", "level": 0, "text": "media"}
     assert "level" in phone.action("brightness", None, None, "")
-    assert phone.action("alarm_off", None, None, "06:30") == {"action": "alarm_off", "hour": 6, "minute": 30}
-    assert phone.action("alarm_off", None, None, "") == {"action": "alarm_off"}
     assert "text" in phone.action("play", None, None, "")
     assert "Unknown" in phone.action("reply", None, None, "")  # sending goes through phone_send (approval), not here
 

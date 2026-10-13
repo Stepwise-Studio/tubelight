@@ -22,7 +22,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1416,6 +1416,7 @@ class TodoIn(BaseModel):
     due: str | None = None
     project_id: str | None = None
     assignee: str | None = None
+    labels: list[str] = []
 
 
 @app.get("/todos")
@@ -1454,6 +1455,41 @@ async def delete_todo(todo_id: str, user: User = Depends(current_user)):
     if not await todos.remove(user["id"], todo_id):
         raise HTTPException(404, "That to-do is gone.")
     return {"ok": True}
+
+
+# Small lists the phone keeps offline too: an add carries the phone's own id, so resending it is safe.
+def _items_routes(path: str, coll: Any, what: str) -> None:
+    @app.get(path, name=f"list_{what}")
+    async def listing(user: User = Depends(current_user)):
+        return {"items": await coll.listing(user["id"])}
+
+    @app.post(path, name=f"add_{what}")
+    async def add(body: dict[str, Any], user: User = Depends(current_user)):
+        try:
+            return await coll.add(user["id"], body, id=body.get("id"))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e))
+
+    @app.patch(path + "/{key}", name=f"edit_{what}")
+    async def edit(key: str, body: dict[str, Any], user: User = Depends(current_user)):
+        try:
+            row = await coll.update(user["id"], key, body)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e))
+        if not row:
+            raise HTTPException(404, f"That {what} is gone.")
+        return row
+
+    @app.delete(path + "/{key}", name=f"delete_{what}")
+    async def delete(key: str, user: User = Depends(current_user)):
+        if not await coll.remove(user["id"], key):
+            raise HTTPException(404, f"That {what} is gone.")
+        return {"ok": True}
+
+
+_items_routes("/todo-labels", todos.LABELS, "label")
+_items_routes("/alarms", clock.ALARMS, "alarm")
+_items_routes("/reminders", clock.REMINDERS, "reminder")
 
 
 _FOLLOWUP_KEEP = ("id", "thread_id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at",
