@@ -20,6 +20,21 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- The Tasks tab's calendar adds and edits events in the phone's calendars. -->
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <!--
+       Tubelight's own alarms and reminders (Clock.kt): exact alarm-clock alarms, ringing in the foreground, re-armed
+       after a reboot.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- Do Not Disturb on/off (the user grants policy access in settings). -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -54,7 +69,35 @@
     </queries>
 
     <application>
+        <receiver
+            android:name="studio.stepwise.phone.ClockReceiver"
+            android:exported="false" />
+        <receiver
+            android:name="studio.stepwise.phone.ClockBoot"
+            android:exported="true" >
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
+        <service
+            android:name="studio.stepwise.phone.AlarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <activity
+            android:name="studio.stepwise.phone.AlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity="studio.stepwise.tubelight.alarm"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+            android:turnScreenOn="true" />
         <!-- Opt-in: the user turns on notification access for Tubelight in settings. -->
         <service
             android:name="studio.stepwise.phone.NotificationsService"
