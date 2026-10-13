@@ -146,8 +146,12 @@ export function useReminders() { return reminderList.use() }
 export function useMinute() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000)
-    return () => clearInterval(t)
+    // On each minute's turn (a plain 60 s interval from mount runs up to a minute behind the clock).
+    let t: ReturnType<typeof setTimeout>
+    const tick = () => { setNow(new Date()); t = setTimeout(tick, 60_050 - (Date.now() % 60_000)) }
+    t = setTimeout(tick, 60_050 - (Date.now() % 60_000))
+    const sub = onReturn(() => setNow(new Date()), 0)
+    return () => { clearTimeout(t); sub() }
   }, [])
   return now
 }

@@ -105,9 +105,12 @@ export function offlineList<T extends Row>(o: {
         publish()
       }
       try {
-        server = (await api<Record<string, T[]>>(o.path))[o.field]
+        const fresh = (await api<Record<string, T[]>>(o.path))[o.field]
+        const same = !offline && !failed && JSON.stringify(fresh) === JSON.stringify(server)
         offline = false
         failed = null
+        if (same) return // nothing new: no redraw (coming back to a tab refreshes every list)
+        server = fresh
         persist()
       } catch (e) {
         if (unreachable(e)) offline = true

@@ -1,6 +1,7 @@
 // The Tasks tab's data: your to-dos (agent-service todos.py) and every chat's follow-ups (followups.py).
 // A small shared store per kind, so the tab, the sheets and the badge read the same list and edits show at once.
 // To-dos work offline (see below); follow-ups need the server.
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useEffect, useSyncExternalStore } from 'react'
 
 import { api } from '@/lib/api'
@@ -59,7 +60,8 @@ export const PRIORITIES = [
   { value: 3, label: 'Medium' }, { value: 4, label: 'Low' },
 ]
 
-function store<T>(load: () => Promise<T>) {
+/** A server list kept on the phone too (`key` in AsyncStorage), so it shows offline; refreshes redraw only on change. */
+function store<T>(load: () => Promise<T>, key: string) {
   let value: T | null = null
   let error: string | null = null
   let loading: Promise<void> | null = null
@@ -67,12 +69,19 @@ function store<T>(load: () => Promise<T>) {
   const emit = () => subs.forEach((f) => f())
   const snapshot = () => ({ value, error })
   let snap = snapshot()
+  AsyncStorage.getItem(key).then((c) => { if (c && value === null) { value = JSON.parse(c); snap = snapshot(); emit() } }, () => {})
   const s = {
     subscribe: (f: () => void) => { subs.add(f); return () => { subs.delete(f) } },
     get: () => snap,
-    set: (v: T) => { value = v; error = null; snap = snapshot(); emit() },
+    set: (v: T) => {
+      const json = JSON.stringify(v)
+      if (json === JSON.stringify(value) && !error) return
+      value = v; error = null; snap = snapshot(); emit()
+      AsyncStorage.setItem(key, json).catch(() => {})
+    },
     refresh: () => {
-      loading ??= load().then((v) => s.set(v), (e) => { error = e instanceof Error ? e.message : String(e); snap = snapshot(); emit() })
+      // Offline, the kept list stays up: an error shows only when there's nothing to show.
+      loading ??= load().then((v) => s.set(v), (e) => { if (value === null) { error = e instanceof Error ? e.message : String(e); snap = snapshot(); emit() } })
         .finally(() => { loading = null })
       return loading
     },
@@ -80,7 +89,7 @@ function store<T>(load: () => Promise<T>) {
   return s
 }
 
-const followStore = store(() => api<{ pending: Followup[]; done: Followup[] }>('/followups'))
+const followStore = store(() => api<{ pending: Followup[]; done: Followup[] }>('/followups'), 'tl.followups')
 
 export function useFollowups() {
   const snap = useSyncExternalStore(followStore.subscribe, followStore.get)

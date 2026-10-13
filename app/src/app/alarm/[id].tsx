@@ -1,12 +1,13 @@
-// An alarm: the time on drums, the days it repeats (none: once), its name. `new` makes one.
+// An alarm: its name, the time on big wheels, the days it repeats (none: once). `new` makes one.
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, TextInput, View } from 'react-native'
 
+import { ClockWheel } from '@/components/tasks/clock-wheel'
 import { EditorShell, Field } from '@/components/tasks/editor-shell'
 import { addAlarm, alarmNext, daysText, deleteAlarm, nextAt, untilText, updateAlarm, useAlarms, type Alarm } from '@/lib/clock'
 import { type, useTheme } from '@/theme'
-import { Text, TimePicker, haptic, toast } from '@/ui'
+import { Text, haptic, toast } from '@/ui'
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -39,9 +40,12 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
   return (
     <EditorShell title={alarm ? 'Edit alarm' : 'New alarm'} editing={!!alarm} ready onSave={save}
       onDelete={alarm ? () => deleteAlarm(alarm.id) : undefined} deleteWhat="alarm">
-      <View style={{ gap: 6 }}>
-        <TimePicker hour={h} minute={m} step={1} startOpen onChange={(hh, mm) => setTime(`${pad(hh)}:${pad(mm)}`)} />
-        {at && <Text variant="footnote" color="ink3" style={{ paddingLeft: 2 }}>Rings {untilText(at)}</Text>}
+      <TextInput value={label} onChangeText={setLabel} placeholder="Alarm name" placeholderTextColor={c.ink4} maxLength={60}
+        cursorColor={c.tube} selectionColor={c.tube} returnKeyType="done"
+        style={[type.title, { color: c.ink, padding: 0 }]} accessibilityLabel="Alarm name" />
+      <View style={{ gap: 8 }}>
+        <ClockWheel hour={h} minute={m} onChange={(hh, mm) => setTime(`${pad(hh)}:${pad(mm)}`)} />
+        {at && <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>Rings {untilText(at)}</Text>}
       </View>
       <Field label={`Repeat · ${daysText(days)}`}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -57,11 +61,6 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
             )
           })}
         </View>
-      </Field>
-      <Field label="Name">
-        <TextInput value={label} onChangeText={setLabel} placeholder="Alarm" placeholderTextColor={c.ink4} maxLength={60}
-          cursorColor={c.tube} selectionColor={c.tube} returnKeyType="done"
-          style={[type.body, { color: c.ink, height: 48, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.panel2 }]} accessibilityLabel="Alarm name" />
       </Field>
     </EditorShell>
   )

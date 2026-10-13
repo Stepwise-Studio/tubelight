@@ -86,7 +86,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
           {items.map((it) => (
             <Press key={it.label} radius={14} onPress={() => pick(it)} accessibilityLabel={it.label}
               style={{ height: ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12 }}>
-              {it.icon && <Icon icon={it.icon} size={19} color={it.destructive ? 'danger' : 'ink2'} />}
+              {it.glyph ?? (it.icon && <Icon icon={it.icon} size={19} color={it.destructive ? 'danger' : 'ink2'} />)}
               <Text variant="bodyMedium" color={it.destructive ? 'danger' : 'ink'} numberOfLines={1} style={{ flex: 1 }}>{it.label}</Text>
               {it.checked !== undefined && <Radio checked={it.checked} />}
             </Press>

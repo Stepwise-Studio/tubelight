@@ -101,49 +101,54 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
   )
 }
 
-/** The next alarm, big, over the next 24 hours. */
+/** The next alarm, big (or the time now), over today as a line: the part gone filled, what's left said. */
 function Hero({ next, now, marks }: { next?: { a: Alarm; at: Date }; now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
   const { c } = useTheme()
   const t = clockParts(next?.at ?? now)
   return (
-    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 20, paddingBottom: 18, gap: 4, marginTop: 4 }}>
-      <Text variant="overline" color={next ? 'tube' : 'ink3'}>{next ? `Next alarm${next.a.label ? ` · ${next.a.label}` : ''}` : 'Now'}</Text>
+    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 20, paddingBottom: 16, marginTop: 4 }}>
+      <Text variant="overline" color={next ? 'tube' : 'ink3'}>
+        {next ? ['Next alarm', dayWord(next.at, now), next.a.label].filter(Boolean).join(' · ') : 'Now'}
+      </Text>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-        <Text style={{ fontFamily: fonts.regular, fontSize: 64, lineHeight: 72, letterSpacing: -2.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
+        <Text style={{ fontFamily: fonts.regular, fontSize: 64, lineHeight: 74, letterSpacing: -2.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
         {!!t.suffix && <Text variant="headline" color="ink2">{t.suffix}</Text>}
       </View>
-      <Text variant="body" color="ink2">{next ? `${dayWord(next.at, now)} · ${untilText(next.at, now)}` : 'No alarms on. Add one, or ask a teammate “wake me at 6:30”.'}</Text>
-      <DayTrack now={now} marks={marks} />
+      <DayLine now={now} marks={marks} />
     </Squircle>
   )
 }
 
-/** Now → 24 hours on: a hairline with the hours every six, now as a lit dot, alarms as bars, reminders as dots. */
-function DayTrack({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
+/** Today, midnight to midnight: filled up to now (the lit dot), today's alarms as bars and reminders as dots, the hours
+ *  every six under it, and how much of the day is left. */
+function DayLine({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
   const { c } = useTheme()
   const [w, setW] = useState(0)
-  const x = (d: Date) => ((d.getTime() - now.getTime()) / DAY_MS) * w
-  const first = new Date(now)
-  first.setHours(Math.floor(now.getHours() / 6) * 6 + 6, 0, 0, 0)
-  const ticks = [0, 1, 2, 3].map((i) => new Date(first.getTime() + i * 6 * 3_600_000))
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const x = (ms: number) => ((ms - start) / DAY_MS) * w
+  const left = Math.max(0, Math.round((start + DAY_MS - now.getTime()) / 60_000))
+  const today = marks.filter((m) => m.at.getTime() < start + DAY_MS)
   return (
-    <View style={{ marginTop: 18, height: 34 }} onLayout={(e) => setW(e.nativeEvent.layout.width)} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      {w > 0 && (
-        <>
-          <View style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 2, borderRadius: 1, backgroundColor: c.line }} />
-          {ticks.map((d) => (
-            <View key={d.getTime()} style={{ position: 'absolute', left: x(d) - 20, width: 40, top: 4, alignItems: 'center' }}>
-              <View style={{ width: 1, height: 10, backgroundColor: c.edge }} />
-              <Text style={{ fontSize: 10, lineHeight: 14, color: c.ink4, marginTop: 4 }}>{d.toLocaleTimeString(undefined, { hour: 'numeric' }).replace(':00', '')}</Text>
-            </View>
-          ))}
-          {marks.map((m) => m.kind === 'alarm'
-            ? <View key={m.key} style={{ position: 'absolute', left: x(m.at) - 2, top: 1, width: 4, height: 16, borderRadius: 2, backgroundColor: c.ink }} />
-            : <View key={m.key} style={{ position: 'absolute', left: x(m.at) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.warning, borderWidth: 2, borderColor: c.panel }} />)}
-          <View style={{ position: 'absolute', left: -6, top: 3, width: 12, height: 12, borderRadius: 6, backgroundColor: c.tubeSoft }} />
-          <View style={{ position: 'absolute', left: -3, top: 6, width: 6, height: 6, borderRadius: 3, backgroundColor: c.tube }} />
-        </>
-      )}
+    <View style={{ marginTop: 14, gap: 8 }}>
+      <View style={{ height: 18 }} onLayout={(e) => setW(e.nativeEvent.layout.width)} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        {w > 0 && (
+          <>
+            <View style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 2, borderRadius: 1, backgroundColor: c.line }} />
+            <View style={{ position: 'absolute', left: 0, width: x(now.getTime()), top: 8, height: 2, borderRadius: 1, backgroundColor: c.tube, opacity: 0.55 }} />
+            {[6, 12, 18].map((h) => <View key={h} style={{ position: 'absolute', left: x(start + h * 3_600_000), top: 5, width: 1, height: 8, backgroundColor: c.edge }} />)}
+            {today.map((m) => m.kind === 'alarm'
+              ? <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 2, top: 1, width: 4, height: 16, borderRadius: 2, backgroundColor: c.ink }} />
+              : <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.warning, borderWidth: 2, borderColor: c.panel }} />)}
+            <View style={{ position: 'absolute', left: x(now.getTime()) - 7, top: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: c.tubeSoft }} />
+            <View style={{ position: 'absolute', left: x(now.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.tube }} />
+          </>
+        )}
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={{ flex: 1, fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
+        <Text variant="caption" color="ink2" tabular>{`${Math.floor(left / 60)} h ${left % 60} min left today`}</Text>
+        <Text style={{ flex: 1, fontSize: 11, lineHeight: 14, color: c.ink4, textAlign: 'right' }}>12 am</Text>
+      </View>
     </View>
   )
 }
@@ -156,7 +161,7 @@ function AlarmGrid({ alarms, now, onAdd }: { alarms: Alarm[]; now: Date; onAdd: 
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
       {alarms.map((a) => <AlarmCard key={a.id} a={a} now={now} width={cell} />)}
       <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel="New alarm"
-        style={{ width: cell, minHeight: alarms.length ? 128 : 88, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.edge, alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        style={{ width: alarms.length ? cell : width - 32, minHeight: alarms.length ? 128 : 88, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.edge, alignItems: 'center', justifyContent: 'center', gap: 6 }}>
         <Icon icon={Add01Icon} size={20} color="ink3" />
         <Text variant="footnote" color="ink3">{alarms.length ? 'Add alarm' : 'Your first alarm'}</Text>
       </Pressable>

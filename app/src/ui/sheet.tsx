@@ -121,6 +121,8 @@ export interface MenuItem {
   /** One of several choices: a radio on the right, filled for the current one. */
   checked?: boolean
   icon?: IconSvgElement
+  /** Drawn in the icon's place when an icon font glyph won't do (a status's own mark). */
+  glyph?: ReactNode
   destructive?: boolean
   onPress: () => void
 }
@@ -191,7 +193,7 @@ export function MenuHost() {
             destructive={it.destructive}
             accessory={it.checked !== undefined ? <Radio checked={it.checked} /> : it.value ? <Text variant="caption" color="ink3">{it.value}</Text> : undefined}
             chevron={!!it.value && it.checked === undefined}
-            leading={it.icon && <Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} />}
+            leading={it.glyph ?? (it.icon && <Icon icon={it.icon} size={20} color={it.destructive ? 'danger' : 'ink2'} />)}
             onPress={() => { close(); it.onPress() }}
             style={{ minHeight: 52 }}
           />

@@ -123,7 +123,7 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
   }
   // Hold: every status (the current one ticked) and Delete; tapping it opens it, so there's no Edit here.
   const hold = () => showContextMenu(ref.current, body(true), [
-    ...STATUSES.map((s): MenuItem => ({ label: s.label, checked: t.status === s.value, onPress: () => { if (t.status !== s.value) move(s.value) } })),
+    ...STATUSES.map((s): MenuItem => ({ label: s.label, glyph: <StatusGlyph status={s.value} size={18} />, checked: t.status === s.value, onPress: () => { if (t.status !== s.value) move(s.value) } })),
     { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: remove },
   ])
   // Tap opens it; double tap moves it on; hold for the statuses. The single tap waits out a double tap (250 ms).
@@ -189,4 +189,7 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
       </GestureDetector>
     </Animated.View>
   )
-})
+}, (a, b) =>
+  // A fresh list from the server is all new objects: redraw a row only when its to-do or what it shows changed.
+  a.todo.id === b.todo.id && a.todo.updated_at === b.todo.updated_at && a.todo.status === b.todo.status && a.labels === b.labels
+  && a.group === b.group && a.who?.id === b.who?.id && a.project?.id === b.project?.id && a.project?.color === b.project?.color && a.onOpen === b.onOpen)
