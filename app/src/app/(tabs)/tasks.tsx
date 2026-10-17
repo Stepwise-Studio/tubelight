@@ -1,4 +1,4 @@
-// Tasks: your to-dos by default; the header's two icons open the calendar and the clock (alarms, reminders and what
+// Orbit (the route is still `tasks`): your to-dos by default; the header's two icons open the calendar and the clock (alarms, reminders and what
 // teammates will come back to), and the icon of the open one turns into the to-dos icon to come back. Each view
 // mounts the first time it's opened and stays mounted, so switching back is instant.
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -20,7 +20,7 @@ import { motion, useTheme } from '@/theme'
 import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Reveal, Skeleton, Text, elevation, haptic, showContextMenu } from '@/ui'
 
 type Mode = 'todos' | 'calendar' | 'clock'
-const TITLES: Record<Mode, string> = { todos: 'Tasks', calendar: 'Calendar', clock: 'Clock' }
+const TITLES: Record<Mode, string> = { todos: 'Orbit', calendar: 'Calendar', clock: 'Clock' }
 const GROUP_KEY = 'tl.tasks.groupBy'
 
 export default function Tasks() {

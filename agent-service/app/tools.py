@@ -624,7 +624,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 if action == "add":
                     t = await todos.add(ctx.owner_id, title, added_by=tm["id"], thread_id=ctx.thread_id, **fields)
                     await todos.note(ctx.owner_id, ctx.thread_id, f"{tm['name']} added a to-do: {t['title']}", "added")
-                    return f"Added to their to-dos (the Tasks tab): {todos.describe(t, names)}"
+                    return f"Added to their to-dos (the Orbit tab): {todos.describe(t, names)}"
                 t = await todos.find(ctx.owner_id, todo) if action in ("update", "delete") else None
                 if action in ("update", "delete") and not t:
                     return "No single to-do matches that: list them and pass its [id]."
@@ -663,7 +663,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         a["at"] = clock.next_at(a["time"], zone)
                     a = await clock.ALARMS.add(ctx.owner_id, a)
                     await push.clock(ctx.owner_id, f"Alarm set · {a['time']}", f"{a['label'] or tm['name']} · {clock.days_text(a['days'])}")
-                    return f"Set (it rings on their phone; it's in Tasks → Clock): {clock.describe_alarm(a)}"
+                    return f"Set (it rings on their phone; it's in Orbit → Clock): {clock.describe_alarm(a)}"
                 a = None
                 if action in ("update", "delete"):
                     a = await clock.find(clock.ALARMS, ctx.owner_id, alarm, "label") or await clock.find(clock.ALARMS, ctx.owner_id, alarm, "time")
@@ -698,7 +698,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                     r = await clock.REMINDERS.add(ctx.owner_id, fields)
                     at = datetime.fromisoformat(r["at"]).astimezone(zone)
                     await push.clock(ctx.owner_id, f"Reminder set · {at:%a %H:%M}", r["title"])
-                    return f"Set (their phone reminds them then; it's in Tasks → Clock): {clock.describe_reminder(r, zone)}"
+                    return f"Set (their phone reminds them then; it's in Orbit → Clock): {clock.describe_reminder(r, zone)}"
                 r = None
                 if action in ("update", "delete"):
                     r = await clock.find(clock.REMINDERS, ctx.owner_id, reminder, "title")
@@ -782,7 +782,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         tools += [
             StructuredTool.from_function(
                 coroutine=todo_list, name="todos",
-                description="Their own to-do list (the app's Tasks tab, Linear-style). action: list (open ones and the "
+                description="Their own to-do list (the app's Orbit tab, Linear-style). action: list (open ones and the "
                             "last week's done) | add (title; optional notes, priority 1 urgent..4 low, due YYYY-MM-DD, "
                             "status backlog|todo|doing|done) | update (todo: its [id]; any of title, notes, status, "
                             "priority, due; due '' clears it) | delete. Add one when they ask you to note a task for "
@@ -790,14 +790,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "ones are made), replacing its labels; '' clears them."),
             StructuredTool.from_function(
                 coroutine=alarm_list, name="alarms",
-                description="Their alarms, Tubelight's own (they ring full screen on their phone; Tasks → Clock). "
+                description="Their alarms, Tubelight's own (they ring full screen on their phone; Orbit → Clock). "
                             "action: list | add (time HH:MM; days: weekdays, weekends, daily, mon,wed,fri or '' for once; "
                             "label) | update (alarm: its [id], label or time; any of time, days, label, enabled) | "
                             "delete. Use it whenever they ask for an alarm or to wake them."),
             StructuredTool.from_function(
                 coroutine=reminder_list, name="reminders",
                 description="Their reminders, Tubelight's own (a notification on their phone at the time, with Done "
-                            "and Snooze; Tasks → Clock). action: list | add (title, when: their local "
+                            "and Snooze; Orbit → Clock). action: list | add (title, when: their local "
                             "YYYY-MM-DDTHH:MM; repeat: daily, weekdays, weekly, monthly, yearly; notes) | update (reminder: "
                             "its [id] or title; any of title, when, repeat, notes, done) | delete. Use it when they ask to "
                             "be reminded of something; follow_up is for when YOU come back to this chat."),

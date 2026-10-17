@@ -1,4 +1,4 @@
-"""To-dos: the user's own list (the app's Tasks tab), Linear-style. Teammates add, read and update it too (tool
+"""To-dos: the user's own list (the app's Orbit tab), Linear-style. Teammates add, read and update it too (tool
 `todos`), and say so in the chat with a capsule.
 
 Kept in the store per user (("todos", owner)), not embedded. Status: backlog, todo, doing, done, canceled.
