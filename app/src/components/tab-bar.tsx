@@ -43,8 +43,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const badge = (name: string) => (name === 'activity' ? waiting : 0)
   const dot = (name: string) => name === 'index' && unread
 
-  // Page or workspace changed behind the glass (a new message, a tab switch): let it blur once more.
-  useEffect(() => { wakeGlass() }, [current, ws.previews, ws.threads])
+  // A tab switch moves the page behind the glass: blur once more. (Workspace updates are left out: a live run keeps them coming and would hold the blur on.)
+  useEffect(() => { wakeGlass() }, [current])
 
   const slot = (screen - 32 - 12) / PLACES.length
   const at = Math.max(0, PLACES.findIndex((p) => p.name === current))
