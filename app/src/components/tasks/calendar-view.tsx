@@ -84,13 +84,8 @@ export function CalendarView() {
   useLayoutEffect(() => { tx.set(-W) }, [month, tx, W])
   const shift = useCallback((n: number) => {
     haptic.tap()
-    setMonth((m) => {
-      const next = new Date(m.getFullYear(), m.getMonth() + n, 1)
-      // The picked day follows: today in this month, else the 1st.
-      const t = new Date()
-      setPicked(next.getFullYear() === t.getFullYear() && next.getMonth() === t.getMonth() ? midnight(t) : next.getTime())
-      return next
-    })
+    // Only the month changes; the picked day stays what you picked.
+    setMonth((m) => new Date(m.getFullYear(), m.getMonth() + n, 1))
   }, [])
   const settle = { duration: 280, easing: Easing.out(Easing.cubic) }
   const go = (n: number) => tx.set(withTiming(-W - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
@@ -149,7 +144,7 @@ export function CalendarView() {
         <View style={{ overflow: 'hidden' }}>
           <Animated.View style={[{ flexDirection: 'row', width: W * 3 }, strip]}>
             {months.map((m, i) => (
-              <MonthGrid key={i} month={m} width={W} today={today} picked={i === 1 ? picked : -1} lines={lines} byDay={byDay} onPick={onPick} onHold={add} />
+              <MonthGrid key={i} month={m} width={W} today={today} picked={picked} lines={lines} byDay={byDay} onPick={onPick} onHold={add} />
             ))}
           </Animated.View>
         </View>
