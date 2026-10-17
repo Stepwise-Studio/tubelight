@@ -79,6 +79,8 @@ export function CalendarView() {
   const { width: W } = useWindowDimensions()
   const tx = useSharedValue(-W)
   const strip = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }] }))
+  const [box, setBox] = useState(0)
+  const names = useAnimatedStyle(() => ({ transform: [{ translateX: ((tx.get() + W) / W) * box - box }] }))
   useLayoutEffect(() => { tx.set(-W) }, [month, tx, W])
   const shift = useCallback((n: number) => {
     haptic.tap()
@@ -119,10 +121,18 @@ export function CalendarView() {
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: inset + 24 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 8, height: 44 }}>
-        <Text variant="headline" style={{ flex: 1 }} accessibilityRole="header">
-          {month.toLocaleDateString(undefined, { month: 'long' })}
-          <Text variant="headline" color="ink3">{month.getFullYear() === now.getFullYear() ? '' : ` ${month.getFullYear()}`}</Text>
-        </Text>
+        {/* The month names ride the pager: a strip of last / this / next, moved in step with the grid. */}
+        <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setBox(e.nativeEvent.layout.width)} accessible accessibilityRole="header"
+          accessibilityLabel={month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}>
+          <Animated.View style={[{ flexDirection: 'row', width: box * 3 }, names]}>
+            {months.map((m, i) => (
+              <Text key={i} variant="headline" numberOfLines={1} style={{ width: box }}>
+                {m.toLocaleDateString(undefined, { month: 'long' })}
+                <Text variant="headline" color="ink3">{m.getFullYear() === now.getFullYear() ? '' : ` ${m.getFullYear()}`}</Text>
+              </Text>
+            ))}
+          </Animated.View>
+        </View>
         {(!thisMonth || picked !== today) && (
           <Pressable onPress={goToday} hitSlop={8} accessibilityRole="button" style={{ height: 30, paddingHorizontal: 12, borderRadius: 15, justifyContent: 'center', backgroundColor: c.panel2, marginRight: 4 }}>
             <Text variant="label" color="ink2">Today</Text>
@@ -233,11 +243,13 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
       accessibilityRole="button" accessibilityState={{ selected: picked }}
       accessibilityLabel={`${new Date(day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${count ? `, ${count} events` : ''}`}
       style={{ flex: 1, height: CELL_H, paddingTop: 4, gap: 2, opacity: inMonth ? 1 : 0.35 }}>
-      {/* One round view for the day (filled when it's today); the picked ring is its own layer around it (a filled view
-          nested inside a bordered one drew square on Android). */}
+      {/* The day's number; today's circle and the picked ring are their own layers (a fill inside a bordered view, or one
+          switched on later, drew square on Android). */}
       <View style={{ alignSelf: 'center', width: 28, height: 28, margin: 2 }}>
         {picked && <View pointerEvents="none" style={{ position: 'absolute', top: -3, left: -3, right: -3, bottom: -3, borderRadius: 17, borderWidth: 1.5, borderColor: today ? c.tube : c.ink2 }} />}
-        <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : 'transparent' }}>
+        {/* Mounted only for today: a fill switched on later on an existing view lost its roundness on Android. */}
+        {today && <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: c.tube }} />}
+        <View style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
           <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
         </View>
       </View>
