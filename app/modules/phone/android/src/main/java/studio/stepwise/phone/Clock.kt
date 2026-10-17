@@ -309,7 +309,7 @@ class AlarmActivity : Activity() {
     window.navigationBarColor = Color.TRANSPARENT
     val id = intent.getStringExtra("id") ?: ""
     val preview = intent.getBooleanExtra("preview", false)
-    val title = intent.getStringExtra("title")?.ifBlank { null } ?: "Alarm"
+    val title = intent.getStringExtra("title")?.ifBlank { null } // unnamed: just "ALARM" above the time
     val d = resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
     fun font(name: String, fallback: String) = runCatching { Typeface.createFromAsset(assets, "fonts/$name.ttf") }.getOrElse { Typeface.create(fallback, Typeface.NORMAL) }
@@ -351,7 +351,7 @@ class AlarmActivity : Activity() {
       orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
       setPadding(dp(24), dp(108), dp(24), dp(40))
       addView(text("ALARM", 12f, 150, medium, 0.18f))
-      addView(text(title, 22f, 235, medium).apply { maxLines = 2 }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
+      if (title != null) addView(text(title, 22f, 235, medium).apply { maxLines = 2 }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
       addView(LinearLayout(this@AlarmActivity).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
         addView(text(java.text.SimpleDateFormat(if (h24) "HH:mm" else "h:mm", java.util.Locale.getDefault()).format(now), 104f, 255, regular, -0.04f)

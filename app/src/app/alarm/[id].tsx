@@ -75,7 +75,7 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
           onChange={(v) => { setSound(v); Phone?.previewTone?.(v) }}
           options={[{ value: '', title: 'Phone’s alarm sound', group: 'Alarm sounds' }, ...tones.map((t) => ({ value: t.uri, title: t.title.replace(/_/g, ' '), group: t.kind === 'alarm' ? 'Alarm sounds' : 'Ringtones' }))]} />
       )}
-      <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() || 'Alarm' })) }}
+      <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() })) }}
         accessibilityRole="button" style={{ height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
         <Text variant="label" color="ink2">Preview the ringing screen</Text>
       </Pressable>
