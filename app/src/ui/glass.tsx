@@ -1,7 +1,7 @@
 import { BlurTargetView, BlurView } from 'expo-blur'
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type RefObject } from 'react'
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native'
-import Animated, { FadeIn, FadeOut, interpolateColor, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { interpolateColor, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 
 import { useTheme } from '@/theme'
 
@@ -58,7 +58,7 @@ export function Glass({ over, radius, veil, always, style, children }: { over: s
   return (
     <Squircle style={[{ borderRadius: radius, borderWidth: 1, borderColor: c.line, overflow: 'hidden', backgroundColor: c.panel }, style]}>
       {target && blurred && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(350)} pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Animated.View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <BlurView key={over} blurTarget={target} blurMethod="dimezisBlurViewSdk31Plus" intensity={100} blurReductionFactor={5}
             tint={dark ? 'systemUltraThinMaterialDark' : 'light'} style={StyleSheet.absoluteFill} />
         </Animated.View>
