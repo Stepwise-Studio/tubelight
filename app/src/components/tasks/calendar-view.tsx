@@ -40,6 +40,10 @@ export function CalendarView() {
   // Three months are drawn side by side (last, this, next) so a swipe shows the next one already there; events are
   // read for all three at once.
   const months = useMemo(() => [-1, 0, 1].map((n) => new Date(month.getFullYear(), month.getMonth() + n, 1)), [month])
+  // Every month has a fixed place on an endless strip (its number counted from the month shown first), so a month's
+  // grid is never handed a different month: swiping just slides the strip and mounts the next neighbour off screen.
+  const [anchor] = useState(() => monthNo(month))
+  const at = monthNo(month) - anchor
   const from = gridStart(months[0]).getTime()
   const to = new Date(gridStart(months[2]).getTime() + 42 * DAY).getTime()
   const events = useEvents(from, to, access === 'ok')
@@ -74,28 +78,31 @@ export function CalendarView() {
     return m
   }, [byDay, reminders, todos, from, to, c])
 
-  // The pager: the strip rests on the middle month (-W); a swipe drags it, settles on a neighbour, and the months move
-  // along by one under it (the strip goes back to the middle in the same frame, so nothing jumps).
+  // The pager: the strip sits at -at·W (this month in view). A swipe drags it from there and settles on a neighbour;
+  // only then does the month change, and since each grid keeps its own place nothing on screen moves or swaps (before,
+  // the slots were handed new months while the strip jumped back, and the two landed in different frames: a blink).
   const { width: W } = useWindowDimensions()
-  const tx = useSharedValue(-W)
+  const base = -at * W
+  const tx = useSharedValue(base)
   const strip = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }] }))
   const [box, setBox] = useState(0)
-  const names = useAnimatedStyle(() => ({ transform: [{ translateX: ((tx.get() + W) / W) * box - box }] }))
-  useLayoutEffect(() => { tx.set(-W) }, [month, tx, W])
+  const names = useAnimatedStyle(() => ({ transform: [{ translateX: (tx.get() / W) * box }] }))
+  // A jump the strip didn't travel itself (Today, a rotation): put it there directly.
+  useLayoutEffect(() => { if (Math.abs(tx.get() - base) > 1) tx.set(base) }, [base, tx])
   const shift = useCallback((n: number) => {
     haptic.tap()
     // Only the month changes; the picked day stays what you picked.
     setMonth((m) => new Date(m.getFullYear(), m.getMonth() + n, 1))
   }, [])
   const settle = { duration: 280, easing: Easing.out(Easing.cubic) }
-  const go = (n: number) => tx.set(withTiming(-W - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
+  const go = (n: number) => tx.set(withTiming(base - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
   const swipe = Gesture.Pan().activeOffsetX([-20, 20]).failOffsetY([-14, 14])
-    .onUpdate((e) => { tx.set(-W + e.translationX) })
+    .onUpdate((e) => { tx.set(base + e.translationX) })
     .onEnd((e) => {
       if (Math.abs(e.translationX) > W * 0.2 || Math.abs(e.velocityX) > 500) {
         const n = e.translationX < 0 ? 1 : -1
-        tx.set(withTiming(-W - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
-      } else tx.set(withTiming(-W, settle))
+        tx.set(withTiming(base - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
+      } else tx.set(withTiming(base, settle))
     })
   const goToday = () => { haptic.tap(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setPicked(today) }
   const add = useCallback((day: number) => { haptic.tap(); router.push({ pathname: '/event/[id]', params: { id: 'new', day: isoDay(new Date(day)) } }) }, [])
@@ -119,9 +126,9 @@ export function CalendarView() {
         {/* The month names ride the pager: a strip of last / this / next, moved in step with the grid. */}
         <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setBox(e.nativeEvent.layout.width)} accessible accessibilityRole="header"
           accessibilityLabel={month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}>
-          <Animated.View style={[{ flexDirection: 'row', width: box * 3 }, names]}>
+          <Animated.View style={[{ height: 28 }, names]}>
             {months.map((m, i) => (
-              <Text key={i} variant="headline" numberOfLines={1} style={{ width: box }}>
+              <Text key={monthNo(m)} variant="headline" numberOfLines={1} style={{ position: 'absolute', left: (at - 1 + i) * box, width: box }}>
                 {m.toLocaleDateString(undefined, { month: 'long' })}
                 <Text variant="headline" color="ink3">{m.getFullYear() === now.getFullYear() ? '' : ` ${m.getFullYear()}`}</Text>
               </Text>
@@ -141,10 +148,10 @@ export function CalendarView() {
         {WEEK.map((d, i) => <Text key={i} variant="caption" color={i > 4 ? 'danger' : 'ink3'} style={{ flex: 1, textAlign: 'center', paddingVertical: 6 }}>{d}</Text>)}
       </View>
       <GestureDetector gesture={swipe}>
-        <View style={{ overflow: 'hidden' }}>
-          <Animated.View style={[{ flexDirection: 'row', width: W * 3 }, strip]}>
+        <View style={{ overflow: 'hidden', height: GRID_H }}>
+          <Animated.View style={strip}>
             {months.map((m, i) => (
-              <MonthGrid key={i} month={m} width={W} today={today} picked={picked} lines={lines} byDay={byDay} onPick={onPick} onHold={add} />
+              <MonthGrid key={monthNo(m)} left={(at - 1 + i) * W} month={m} width={W} today={today} picked={picked} lines={lines} byDay={byDay} onPick={onPick} onHold={add} />
             ))}
           </Animated.View>
         </View>
@@ -156,6 +163,9 @@ export function CalendarView() {
 }
 
 const DAY = 86_400_000
+/** A month's number (counted in months), for its place on the pager. */
+const monthNo = (d: Date) => d.getFullYear() * 12 + d.getMonth()
+const GRID_H = 6 * (CELL_H + 0.5)
 /** The Monday on or before the 1st (six weeks are shown from there). */
 function gridStart(month: Date) {
   const d = new Date(month)
@@ -163,14 +173,14 @@ function gridStart(month: Date) {
   return d
 }
 
-const MonthGrid = memo(function MonthGrid({ month, width, today, picked, lines, byDay, onPick, onHold }: {
-  month: Date; width: number; today: number; picked: number; lines: Map<number, string[]>; byDay: Map<number, PhoneEvent[]>
+const MonthGrid = memo(function MonthGrid({ month, left, width, today, picked, lines, byDay, onPick, onHold }: {
+  month: Date; left: number; width: number; today: number; picked: number; lines: Map<number, string[]>; byDay: Map<number, PhoneEvent[]>
   onPick: (d: number) => void; onHold: (d: number) => void
 }) {
   const { c } = useTheme()
   const first = gridStart(month)
   return (
-    <View style={{ width, paddingHorizontal: 8 }}>
+    <View style={{ position: 'absolute', left, width, paddingHorizontal: 8 }}>
       {[0, 1, 2, 3, 4, 5].map((w) => (
         <View key={w} style={{ flexDirection: 'row', borderTopWidth: 0.5, borderColor: c.line }}>
           {[0, 1, 2, 3, 4, 5, 6].map((i) => {
@@ -254,7 +264,8 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
       </View>
     </Pressable>
   )
-})
+}, (a, b) => a.day === b.day && a.today === b.today && a.picked === b.picked && a.inMonth === b.inMonth && a.count === b.count
+  && a.onPick === b.onPick && a.onHold === b.onHold && (a.lines ?? []).join() === (b.lines ?? []).join())
 
 /** Every local day (midnight ms) in [from, to) a reminder rings on, repeats included. */
 function reminderDays(r: Reminder, from: number, to: number): number[] {
