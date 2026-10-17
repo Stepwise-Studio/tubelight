@@ -35,7 +35,7 @@ export function LabelSheet({ open, value = NONE, onChange, onClose }: { open: bo
   const close = () => { setEditing(null); onClose() }
 
   return (
-    <Sheet open={open} onClose={close} title={editing ? 'Edit label' : 'Labels'}>
+    <Sheet open={open} onClose={close} title={editing ? undefined : 'Labels'} accessibilityLabel={editing ? 'Edit label' : 'Labels'}>
       {editing ? (
         <LabelEditor key={editing.id} label={editing} uses={counts.get(editing.id) ?? 0} onDone={() => setEditing(null)} />
       ) : (
@@ -87,8 +87,12 @@ function LabelEditor({ label, uses, onDone }: { label: Label; uses: number; onDo
   }
   return (
     <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ paddingHorizontal: 20, paddingBottom: 18, gap: 18 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: -10 }}>
+      {/* The sheet's title row, with the way back beside it. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: -12, marginTop: -4, marginBottom: -8 }}>
         <IconButton icon={ArrowLeft01Icon} size={36} iconSize={18} color={c.ink2} accessibilityLabel="Back to labels" onPress={onDone} />
+        <Text variant="headline" accessibilityRole="header">Edit label</Text>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 12, borderRadius: 15, backgroundColor: `${color}22` }}>
           <LabelDot color={color} size={8} />
           <Text variant="label" numberOfLines={1}>{clean || 'Label'}</Text>
