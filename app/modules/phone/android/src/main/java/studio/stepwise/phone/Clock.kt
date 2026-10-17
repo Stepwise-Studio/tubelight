@@ -344,9 +344,10 @@ class AlarmActivity : Activity() {
       }
     }
     val w = resources.displayMetrics.widthPixels
-    val lights = listOf(blob(59, 130, 246, 150, dp(520)) to floatArrayOf(-0.25f, 0.05f, 0.18f, 0.10f, 1f),
-      blob(99, 102, 241, 130, dp(460)) to floatArrayOf(0.35f, 0.30f, 0.22f, 0.12f, 1.6f),
-      blob(34, 211, 238, 90, dp(400)) to floatArrayOf(0.05f, 0.55f, 0.20f, 0.08f, 0.7f))
+    // Each light fades out within its own square (radius = half its side), so no edge ever shows.
+    val lights = listOf(blob(59, 130, 246, 150, dp(500)) to floatArrayOf(-0.25f, 0.05f, 0.18f, 0.10f, 1f),
+      blob(99, 102, 241, 130, dp(500)) to floatArrayOf(0.35f, 0.30f, 0.22f, 0.12f, 1.6f),
+      blob(34, 211, 238, 90, dp(500)) to floatArrayOf(0.05f, 0.55f, 0.20f, 0.08f, 0.7f))
     for ((v, _) in lights) root.addView(v, FrameLayout.LayoutParams(dp(500), dp(500)))
     animators += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
       duration = 22_000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
@@ -453,6 +454,7 @@ class AlarmActivity : Activity() {
     fun follow(x: Float) {
       val full = (track.width - pad * 2).toFloat()
       if (full > 0) fill.scaleX = ((x + size) / full).coerceIn(size / full, 1f)
+      fill.alpha = (x / (size * 0.6f)).coerceIn(0f, 1f) // nothing behind the thumb at rest; the light grows as it moves
     }
     track.post { follow(0f) }
     var downX = 0f

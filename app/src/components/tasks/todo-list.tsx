@@ -4,7 +4,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { FadeOut, LinearTransition, cubicBezier, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
@@ -26,9 +26,10 @@ const BLUR_IN = {
   from: { opacity: 0, filter: [{ blur: 10 }], transform: [{ translateY: 6 }, { scale: 0.985 }] },
   to: { opacity: 1, filter: [{ blur: 0 }], transform: [{ translateY: 0 }, { scale: 1 }] },
 }
+const EASE = cubicBezier(0.22, 1, 0.36, 1)
 const reveal = (i: number) => ({
   animationName: BLUR_IN, animationDuration: 380, animationDelay: motion.staggerDelay(Math.min(i, 8)),
-  animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
+  animationTimingFunction: EASE, animationFillMode: 'backwards',
 }) as const
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
