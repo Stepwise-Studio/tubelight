@@ -68,10 +68,6 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
         </View>
       </Field>
       <SoundField sound={sound} name={soundName} onChange={(u, n) => { setSound(u); setSoundName(n) }} />
-      <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() })) }}
-        accessibilityRole="button" style={{ height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
-        <Text variant="label" color="ink2">Preview the ringing screen</Text>
-      </Pressable>
     </EditorShell>
   )
 }
