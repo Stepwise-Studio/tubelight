@@ -70,7 +70,7 @@ export function ClockView({ active }: { active: boolean }) {
           action={{ label: 'Allow', onPress: () => Phone?.openRingSettings() }} />
       )}
 
-      <Section title="Alarms" count={rings.length ? `${rings.length} on` : undefined} onAdd={newAlarm} add="New alarm" />
+      <Section title="Alarms" count={rings.length ? String(rings.length) : undefined} onAdd={newAlarm} add="New alarm" />
       <AlarmGrid alarms={alarms} now={now} onAdd={newAlarm} />
 
       <Section title="Reminders" count={open.length ? String(open.length) : undefined} onAdd={newReminder} add="New reminder" />
@@ -95,7 +95,11 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 4, marginTop: 18, minHeight: 36 }}>
       <Text variant="heading" accessibilityRole="header">{title}</Text>
-      {count && <Text variant="label" color="ink3" tabular>{count}</Text>}
+      {count && (
+        <View style={{ height: 24, minWidth: 24, paddingHorizontal: 8, borderRadius: 12, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+          <Text variant="label" color="ink2" tabular>{count}</Text>
+        </View>
+      )}
       <View style={{ flex: 1 }} />
       {onAdd && <IconButton icon={Add01Icon} variant="soft" round size={34} iconSize={16} color={c.ink2} accessibilityLabel={add ?? 'Add'} onPress={onAdd} />}
     </View>
@@ -103,7 +107,8 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
 }
 
 /** Today, full width: what's left of it as a live countdown (each changed digit rolls down like an odometer), and the
- *  day as 24 bars in the Usage meters' style, one an hour, filled up from the bottom by how much of that hour is gone;
+ *  day as 24 rounded bars (zinc), one an hour, filled up from the bottom by how much of that hour is gone (the hour now
+ *  in full ink, the hours gone softer);
  *  an hour with an alarm or a reminder has a dot under it. Ticks only while the clock is on screen (`active`), and only
  *  this card redraws each second. */
 function Hero({ active, marks }: { active: boolean; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
@@ -134,16 +139,13 @@ function Hero({ active, marks }: { active: boolean; marks: { at: Date; kind: 'al
           const f = hourDone(h)
           return (
             <View key={h} style={{ flex: 1, alignItems: 'center', gap: 3 }}>
-              <View style={{ flex: 1, alignSelf: 'stretch', borderRadius: 2, backgroundColor: c.line, overflow: 'hidden', justifyContent: 'flex-end' }}>
-                {f > 0 && <View style={{ height: `${f * 100}%`, backgroundColor: f < 1 ? c.tube : `${c.tube}aa` }} />}
+              <View style={{ flex: 1, alignSelf: 'stretch', borderRadius: 99, backgroundColor: c.line, overflow: 'hidden', justifyContent: 'flex-end' }}>
+                {f > 0 && <View style={{ height: `${f * 100}%`, borderRadius: 99, backgroundColor: f < 1 ? c.ink : c.ink3 }} />}
               </View>
               <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: marked.get(h) ?? 'transparent' }} />
             </View>
           )
         })}
-      </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 4 }}>
-        {['12 am', '6 am', '12 pm', '6 pm', '12 am'].map((l, i) => <Text key={i} style={{ fontSize: 10, lineHeight: 13, color: c.ink4 }}>{l}</Text>)}
       </View>
     </Squircle>
   )
@@ -252,83 +254,79 @@ function AlarmCard({ a, now, width }: { a: Alarm; now: Date; width: number }) {
   )
 }
 
+/** Reminders as cards like the alarms': grouped Overdue / Today / Tomorrow / Later under small headings; each card a
+ *  bell (rose when overdue), the title, when (and repeat), and a ring to tick it off. Done ones fold away under a link. */
 function Reminders({ open, done, now, onAdd }: { open: { r: Reminder; at: Date }[]; done: Reminder[]; now: Date; onAdd: () => void }) {
   const { c } = useTheme()
   const [showDone, setShowDone] = useState(false)
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
   const group = (at: Date) => at < now ? 'Overdue' : at.getTime() < today + DAY_MS ? 'Today' : at.getTime() < today + 2 * DAY_MS ? 'Tomorrow' : 'Later'
   const groups = ['Overdue', 'Today', 'Tomorrow', 'Later'].map((g) => ({ g, rows: open.filter((x) => group(x.at) === g) })).filter((x) => x.rows.length)
+  const empty = (
+      <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel="New reminder"
+        style={{ minHeight: 88, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.edge, alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 20 }}>
+        <Icon icon={Notification03Icon} size={20} color="ink3" />
+        <Text variant="footnote" color="ink3" style={{ textAlign: 'center' }}>Your first reminder, or tell a teammate “remind me at 6 to call Mom”</Text>
+      </Pressable>
+  )
   return (
-    <Squircle style={{ borderRadius: 24, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingVertical: 6, overflow: 'hidden' }}>
+    <View style={{ gap: 10 }}>
+      {!open.length && empty}
       {groups.map(({ g, rows }) => (
-        <Animated.View key={g} layout={layout}>
-          <Text variant="overline" color={g === 'Overdue' ? 'danger' : 'ink3'} style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 2 }}>{g}</Text>
-          {rows.map(({ r, at }) => <ReminderRow key={r.id} r={r} at={at} now={now} />)}
+        <Animated.View key={g} layout={layout} style={{ gap: 8 }}>
+          <Text variant="label" color={g === 'Overdue' ? 'danger' : 'ink3'} style={{ paddingLeft: 4 }}>{g}</Text>
+          {rows.map(({ r, at }) => <ReminderCard key={r.id} r={r} at={at} now={now} />)}
         </Animated.View>
       ))}
-      {!open.length && (
-        <Pressable onPress={onAdd} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 }}>
-          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon icon={Notification03Icon} size={17} color="ink3" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text variant="bodyMedium">Nothing to be reminded of</Text>
-            <Text variant="footnote" color="ink3">Add one, or tell a teammate “remind me at 6 to call Mom”.</Text>
-          </View>
-        </Pressable>
-      )}
       {done.length > 0 && (
-        <Pressable onPress={() => { haptic.tap(); setShowDone((s) => !s) }} accessibilityRole="button" accessibilityState={{ expanded: showDone }}
-          style={{ paddingHorizontal: 16, height: 40, justifyContent: 'center', borderTopWidth: open.length ? 0.5 : 0, borderColor: c.line, marginTop: 6 }}>
-          <Text variant="footnote" color="ink3">{showDone ? 'Hide done' : `Done · ${done.length}`}</Text>
+        <Pressable onPress={() => { haptic.tap(); setShowDone((v) => !v) }} accessibilityRole="button" accessibilityState={{ expanded: showDone }}
+          style={{ alignSelf: 'flex-start', paddingHorizontal: 4, height: 32, justifyContent: 'center' }}>
+          <Text variant="label" color="ink3">{showDone ? 'Hide done' : `Done · ${done.length}`}</Text>
         </Pressable>
       )}
-      {showDone && done.map((r) => <ReminderRow key={r.id} r={r} at={new Date(r.at)} now={now} />)}
-    </Squircle>
+      {showDone && done.map((r) => <ReminderCard key={r.id} r={r} at={new Date(r.at)} now={now} />)}
+    </View>
   )
 }
 
-function ReminderRow({ r, at, now }: { r: Reminder; at: Date; now: Date }) {
+function ReminderCard({ r, at, now }: { r: Reminder; at: Date; now: Date }) {
   const { c } = useTheme()
   const ref = useRef<View>(null)
   const late = !r.done && at < now
   const tick = () => { if (!r.done) haptic.success(); else haptic.tap(); finishReminder(r) }
   const edit = () => router.push({ pathname: '/reminder/[id]', params: { id: r.id } })
-  const row = (lifted?: boolean) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: lifted ? c.panel : undefined, borderRadius: lifted ? 16 : 0 }}>
-      <View style={{ width: 54 }}>
-        <Text variant="bodyMedium" tabular color={late ? 'danger' : r.done ? 'ink3' : 'ink'}>{clockParts(at).main}</Text>
-        <Text variant="caption" color="ink3">{clockParts(at).suffix || ' '}</Text>
+  const t = clockParts(at)
+  const card = (lifted?: boolean) => (
+    <Squircle style={{ borderRadius: 24, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: c.panel, borderWidth: 1, borderColor: lifted ? c.edge : c.line, opacity: r.done ? 0.55 : 1 }}>
+      <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: late ? c.dangerSoft : c.panel2 }}>
+        <Icon icon={Notification03Icon} size={19} color={late ? 'danger' : 'ink2'} />
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text variant="body" color={r.done ? 'ink3' : 'ink'} numberOfLines={2} style={r.done ? { textDecorationLine: 'line-through' } : undefined}>{r.title}</Text>
-        {(!!r.repeat || !!r.notes || at.getTime() >= new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).getTime()) && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            {at.getTime() >= new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).getTime() && <Text variant="footnote" color="ink3">{dayWord(at, now)}</Text>}
-            {!!r.repeat && <Icon icon={RepeatIcon} size={12} color="ink3" />}
-            {!!r.notes && <Text variant="footnote" color="ink3" numberOfLines={1} style={{ flex: 1 }}>{r.notes.replace(/\s+/g, ' ')}</Text>}
-          </View>
-        )}
+        <Text variant="bodyMedium" numberOfLines={1} style={r.done ? { textDecorationLine: 'line-through' } : undefined}>{r.title}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Text variant="footnote" color={late ? 'danger' : 'ink3'} tabular>{`${dayWord(at, now)} · ${t.main}${t.suffix ? ` ${t.suffix}` : ''}`}</Text>
+          {!!r.repeat && <Icon icon={RepeatIcon} size={12} color="ink3" />}
+        </View>
       </View>
       <Pressable onPress={tick} hitSlop={12} accessibilityRole="checkbox" accessibilityState={{ checked: r.done }} accessibilityLabel={r.done ? 'Not done' : 'Done'}>
         <IconSwap swapKey={String(r.done)}>
-          <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: r.done ? 0 : 1.5, borderColor: late ? c.danger : c.edge,
+          <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: r.done ? 0 : 1.5, borderColor: late ? c.danger : c.edge,
             backgroundColor: r.done ? '#22a55b' : undefined, alignItems: 'center', justifyContent: 'center' }}>
-            {r.done && <Icon icon={Tick02Icon} size={14} color="#fff" strokeWidth={2.4} />}
+            {r.done && <Icon icon={Tick02Icon} size={15} color="#fff" strokeWidth={2.4} />}
           </View>
         </IconSwap>
       </Pressable>
-    </View>
+    </Squircle>
   )
   return (
     <Animated.View layout={layout} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
       <View ref={ref} collapsable={false}>
-        <Pressable onPress={edit} delayLongPress={320} android_ripple={{ color: c.wash }} accessibilityRole="button" accessibilityLabel={`${r.title}, ${dayWord(at, now)} ${clockParts(at).main}`}
-          onLongPress={() => showContextMenu(ref.current, row(true), [
+        <Pressable onPress={edit} delayLongPress={320} accessibilityRole="button" accessibilityLabel={`${r.title}, ${dayWord(at, now)} ${t.main}`}
+          onLongPress={() => showContextMenu(ref.current, card(true), [
             { label: r.done ? 'Not done' : 'Done', icon: Tick02Icon, onPress: tick },
             { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: () => { haptic.warning(); deleteReminder(r.id) } },
           ])}>
-          {row()}
+          {card()}
         </Pressable>
       </View>
     </Animated.View>

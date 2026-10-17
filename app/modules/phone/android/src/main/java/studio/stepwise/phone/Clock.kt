@@ -336,16 +336,12 @@ class AlarmActivity : Activity() {
       background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
         intArrayOf(Color.parseColor("#1a3591"), Color.parseColor("#0c1a4a"), Color.parseColor("#05070f"), Color.parseColor("#030406"), Color.parseColor("#030406")))
     }
-    // The waves: soft blue layers across the top that flow sideways forever (one animator, a few paths a frame).
+    // The waves: soft blue layers across the top, drawn once (still), blurred into light.
     val waves = Waves(this)
     // Blurred on the GPU into soft moving light (Android 12+; older phones get the plain waves).
     if (Build.VERSION.SDK_INT >= 31) waves.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(dp(36).toFloat(), dp(36).toFloat(), android.graphics.Shader.TileMode.CLAMP))
     root.addView(waves, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-    animators += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
-      duration = 14_000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
-      addUpdateListener { waves.phase = it.animatedValue as Float; waves.invalidate() }
-      start()
-    }
+    waves.phase = 1.2f
     fun blob(r: Int, g: Int, b: Int, a: Int, size: Int) = android.view.View(this).apply {
       background = GradientDrawable().apply {
         gradientType = GradientDrawable.RADIAL_GRADIENT; gradientRadius = size / 2f
@@ -428,7 +424,8 @@ class AlarmActivity : Activity() {
     // The fill: the track's own rounded shape, slid in from the left so its round right end sits just past the thumb
     // (concentric with it); the track clips the rest. Its edge is the thumb's right side, so at the end it's all filled.
     val fill = android.view.View(this).apply {
-      background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(235, 219, 234, 254)) }
+      background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.parseColor("#1a3591"), Color.parseColor("#3b6fe8")))
+        .apply { cornerRadius = h / 2f }
       alpha = 0f
     }
     track.addView(fill, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -436,14 +433,14 @@ class AlarmActivity : Activity() {
       text = "Slide to stop"; textSize = 17f; typeface = face; setTextColor(color); gravity = Gravity.CENTER
     }
     val hint = hintView(Color.argb(170, 255, 255, 255))
-    val hintDark = hintView(Color.parseColor("#0c1a4a"))
+    val hintDark = hintView(Color.WHITE) // over the blue fill the hint brightens
     track.addView(hint, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     track.addView(hintDark, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     val thumb = FrameLayout(this).apply {
       background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
       elevation = dp(4).toFloat()
       addView(android.view.View(this@AlarmActivity).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(Color.parseColor("#102466")) }
+        background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(Color.parseColor("#1a3591")) }
       }, FrameLayout.LayoutParams(dp(18), dp(18)).apply { gravity = Gravity.CENTER })
     }
     track.addView(thumb, FrameLayout.LayoutParams(size, size).apply { leftMargin = pad; topMargin = pad })
@@ -504,8 +501,8 @@ class AlarmActivity : Activity() {
   }
 }
 
-/** Three soft blue waves over the top of the ringing screen, each a band filled from the top edge down to a moving
- *  curve (two sines), fading out towards the curve; `phase` (0..2π, looping) moves them. */
+/** Three soft blue waves over the top of the ringing screen, each a band filled from the top edge down to a curve
+ *  (two sines), fading out towards it; `phase` sets where the curves sit (they don't move). */
 class Waves(c: Context) : android.view.View(c) {
   var phase = 0f
   private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
