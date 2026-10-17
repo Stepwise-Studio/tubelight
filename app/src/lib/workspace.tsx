@@ -79,6 +79,8 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const [previews, setPreviews] = useState<Record<string, Preview>>({})
   const [offline, setOffline] = useState(false)
   const loaded = useRef(false)
+  const previewsRef = useRef(previews)
+  useEffect(() => { previewsRef.current = previews }, [previews])
 
   const refresh = useCallback(async () => {
     if (!userId) return
@@ -113,12 +115,17 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
     setLoading(false)
     // Latest message per thread. ponytail: one query per thread; fine for tens of threads,
     // swap for an RPC / view with DISTINCT ON if a workspace grows to hundreds.
+    // Only threads with something newer than the preview we already hold are asked again (a refresh on every return
+    // to the app used to cost one request per thread).
+    const have = previewsRef.current
+    const stale = (th.data as Thread[]).filter((x) => x.last_message_at && !(have[x.id] && Date.parse(have[x.id].created_at) >= Date.parse(x.last_message_at!)))
     const rows = await Promise.all(
-      (th.data as Thread[]).filter((x) => x.last_message_at).map((x) =>
+      stale.map((x) =>
         supabase.from('messages').select('id,thread_id,sender_type,teammate_id,text,kind,created_at')
           .eq('thread_id', x.id).order('created_at', { ascending: false }).limit(1).maybeSingle()),
     )
     const next: Record<string, Preview> = {}
+    for (const x of th.data as Thread[]) if (have[x.id] && x.last_message_at) next[x.id] = have[x.id]
     for (const row of rows) if (row.data) next[row.data.thread_id] = row.data as Preview
     setPreviews(next)
     AsyncStorage.setItem(`tl.ws.${userId}`, JSON.stringify({ t: t.data, p: p.data, m: m.data, th: th.data, a: a.data, previews: next })).catch(() => {})

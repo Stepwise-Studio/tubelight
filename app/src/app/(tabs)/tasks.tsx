@@ -2,7 +2,8 @@
 // teammates will come back to), and the icon of the open one turns into the to-dos icon to come back. Each view
 // mounts the first time it's opened and stays mounted, so switching back is instant.
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
+import { useFocusLater } from '@/lib/focus'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
@@ -44,7 +45,7 @@ export default function Tasks() {
   }
 
   // Teammates add to-dos, alarms and follow-ups from chats: catch up whenever the tab comes into view.
-  useFocusEffect(useCallback(() => { refreshTasks() }, []))
+  useFocusLater(useCallback(() => { refreshTasks() }, []))
 
   // The calendar's and the clock's places: the open one shows the to-dos icon instead.
   const slot = (m: Mode, icon: typeof Calendar03Icon, label: string) => {

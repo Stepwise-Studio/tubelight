@@ -3,7 +3,8 @@ import * as Clipboard from 'expo-clipboard'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
-import { router, useFocusEffect } from 'expo-router'
+import { router } from 'expo-router'
+import { useFocusLater } from '@/lib/focus'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, AppState, Linking, PermissionsAndroid, Platform, RefreshControl, ScrollView, View } from 'react-native'
 import {
@@ -356,7 +357,7 @@ function PushSection() {
 /** How much of the free allowances is left, in one row: anything used up first, else the busiest. */
 function UsageSection() {
   const [items, setItems] = useState<{ id: string; used: number; limit: number | null; out?: boolean; unit: string }[] | null>(null)
-  useFocusEffect(useCallback(() => {
+  useFocusLater(useCallback(() => {
     api<{ sections: { items: { id: string; used: number; limit: number | null; out?: boolean; unit: string }[] }[] }>('/usage')
       .then((u) => setItems(u.sections.flatMap((s) => s.items)), () => setItems([]))
   }, []))
@@ -382,7 +383,7 @@ function SignInSection() {
   const [ids, setIds] = useState<{ provider: string; email: string | null }[] | null>(null)
   const [busy, setBusy] = useState(false)
   const load = useCallback(() => { identities().then(setIds, () => setIds([])) }, [])
-  useFocusEffect(load)
+  useFocusLater(load)
   const g = ids?.find((i) => i.provider === 'google')
   const mail = ids?.find((i) => i.provider === 'email')
   return (
@@ -408,7 +409,7 @@ function SignInSection() {
 
 function AutomationsSection() {
   const [items, setItems] = useState<Automation[] | null>(null)
-  useFocusEffect(useCallback(() => { api<Automation[]>('/automations').then(setItems, () => setItems([])) }, []))
+  useFocusLater(useCallback(() => { api<Automation[]>('/automations').then(setItems, () => setItems([])) }, []))
   const on = (items ?? []).filter((a) => a.enabled)
   const next = on.map((a) => a.next_run).filter((x): x is string => !!x).sort()[0]
   const summary = items === null ? 'Loading…' : items.length === 0 ? 'None yet: ask a teammate to do something on a schedule'
@@ -425,7 +426,7 @@ function AutomationsSection() {
 /** Your computers, in one row: which are online and what they share. */
 function ComputersSection() {
   const [items, setItems] = useState<{ name: string; online: boolean; folders: string[] }[] | null>(null)
-  useFocusEffect(useCallback(() => { api<{ computers: { name: string; online: boolean; folders: string[] }[] }>('/computers').then((d) => setItems(d.computers), () => setItems([])) }, []))
+  useFocusLater(useCallback(() => { api<{ computers: { name: string; online: boolean; folders: string[] }[] }>('/computers').then((d) => setItems(d.computers), () => setItems([])) }, []))
   const on = (items ?? []).filter((m) => m.online)
   const summary = items === null ? 'Loading…' : items.length === 0 ? 'Let teammates work on your laptop: run code, edit files you share'
     : on.length ? `${on.map((m) => m.name).join(', ')} online · ${on.reduce((n, m) => n + m.folders.length, 0)} shared folders` : `${items.length} linked, none online`
@@ -441,7 +442,7 @@ function ComputersSection() {
 /** What memory holds, in one row: open loops, people, facts, and whether it's still learning. */
 function MemorySection() {
   const [o, setO] = useState<MemoryOverview | null | undefined>(undefined)
-  useFocusEffect(useCallback(() => { api<MemoryOverview>('/memory/overview').then(setO, () => setO(null)) }, []))
+  useFocusLater(useCallback(() => { api<MemoryOverview>('/memory/overview').then(setO, () => setO(null)) }, []))
   const n = o?.counts
   const plural = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`
   const summary = o === undefined ? 'Loading…' : !n || (!n.facts && !n.waiting) ? 'Nothing yet: it fills in as you chat'

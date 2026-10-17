@@ -3,7 +3,8 @@
 // The same browser shows a folder or a category. Long-press a file to select several; long-press a folder for its menu.
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
-import { router, useFocusEffect } from 'expo-router'
+import { router } from 'expo-router'
+import { useFocusLater } from '@/lib/focus'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { RefreshControl, View, useWindowDimensions } from 'react-native'
 import { FlatList, GestureDetector } from 'react-native-gesture-handler'
@@ -343,7 +344,7 @@ function Places({ items, width }: { items: VaultItem[]; width: number }) {
   const { about, reload } = useDriveAbout()
   const [phone, setPhone] = useState(() => Phone?.storage?.() ?? null)
   // Fresh numbers each time the Vault comes into view (and a retry if Drive didn't answer before).
-  useFocusEffect(useCallback(() => { reload(); setPhone(Phone?.storage?.() ?? null) }, [reload]))
+  useFocusLater(useCallback(() => { reload(); setPhone(Phone?.storage?.() ?? null) }, [reload]))
   const go = (pathname: '/vault/phone' | '/vault/drive/[id]', params: Record<string, string>) => { haptic.tap(); router.push({ pathname, params } as never) }
   return (
     <View style={{ gap: 24, paddingTop: 4 }}>

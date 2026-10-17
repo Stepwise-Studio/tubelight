@@ -1,4 +1,3 @@
-import { useFonts } from 'expo-font'
 import { EdgeScreen } from '@/components/bottom-edge'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
@@ -17,25 +16,22 @@ import { registerPhone, useNotificationSync, usePhoneActions } from '@/lib/phone
 import { useThread } from '@/lib/use-thread'
 import { WorkspaceProvider, isPhone, useWorkspace } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
-import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@/ui'
+import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, SceneTarget, ToastHost, touchGlass } from '@/ui'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
+const hideSplash = () => { SplashScreen.hideAsync().catch(() => {}) }
 
 const OWN_EDGE = new Set(['vault/file/[id]', 'file', 'open', 'todo/[id]', 'alarm/[id]', 'reminder/[id]', 'event/[id]', '(tabs)', 'chat/[threadId]', 'sign-in'])
 
+// Inter Display and the other families are embedded natively by the expo-font plugin (app.json), so Android resolves
+// them by name from the first frame: nothing to load, and the app no longer waits on a font pass to draw.
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
-    'InterDisplay-Regular': require('@/assets/fonts/InterDisplay-Regular.ttf'),
-    'InterDisplay-Medium': require('@/assets/fonts/InterDisplay-Medium.ttf'),
-    'InterDisplay-SemiBold': require('@/assets/fonts/InterDisplay-SemiBold.ttf'),
-    'InterDisplay-Bold': require('@/assets/fonts/InterDisplay-Bold.ttf'),
-  })
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <KeyboardProvider>
           <ThemeProvider>
-            {fontsLoaded ? <Root /> : null}
+            <Root />
           </ThemeProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
@@ -48,7 +44,14 @@ function Root() {
   const { session, ready } = useSession()
   const signedIn = !!session
 
-  useEffect(() => { if (ready) SplashScreen.hideAsync().catch(() => {}) }, [ready])
+  // The splash stays until the saved workspace is on screen (signed in) so the inbox never flashes its skeleton; a
+  // slow read can't hold it past 2.5 s.
+  useEffect(() => {
+    if (!ready) return
+    if (!signedIn) { SplashScreen.hideAsync().catch(() => {}); return }
+    const t = setTimeout(hideSplash, 2500)
+    return () => clearTimeout(t)
+  }, [ready, signedIn])
   usePushRouting(signedIn)
   useNotificationSync(signedIn)
 
@@ -59,7 +62,8 @@ function Root() {
   return (
     <NavThemeProvider value={navTheme}>
       <WorkspaceProvider key={session?.user.id ?? 'signed-out'} userId={session?.user.id ?? null}>
-        <View style={{ flex: 1, backgroundColor: c.canvas }}>
+        <View style={{ flex: 1, backgroundColor: c.canvas }} onTouchStart={() => touchGlass(true)} onTouchEnd={() => touchGlass(false)} onTouchCancel={() => touchGlass(false)}>
+          <SceneTarget name="app">
           <Stack
             screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.canvas } }}
             // Every page's content fades and blurs under the bottom edge; tabs and chats do it under their own bars.
@@ -93,6 +97,8 @@ function Root() {
               <Stack.Screen name="open" options={{ animation: 'fade' }} />
             </Stack.Protected>
           </Stack>
+          </SceneTarget>
+          {signedIn && <SplashGate />}
           {signedIn && <SheetsHost />}
           {signedIn && <VaultSheetsHost />}
           {signedIn && session && <PhoneHub userId={session.user.id} />}
@@ -106,6 +112,12 @@ function Root() {
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     </NavThemeProvider>
   )
+}
+
+function SplashGate() {
+  const { loading } = useWorkspace()
+  useEffect(() => { if (!loading) hideSplash() }, [loading])
+  return null
 }
 
 /** The phone's own teammate: made the first time the app runs on a phone that can do phone actions, and the one place
