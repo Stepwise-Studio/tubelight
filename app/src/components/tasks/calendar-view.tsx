@@ -233,9 +233,11 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
       accessibilityRole="button" accessibilityState={{ selected: picked }}
       accessibilityLabel={`${new Date(day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${count ? `, ${count} events` : ''}`}
       style={{ flex: 1, height: CELL_H, paddingTop: 4, gap: 2, opacity: inMonth ? 1 : 0.35 }}>
-      <View style={{ alignSelf: 'center', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
-        borderWidth: picked ? 1.5 : 0, borderColor: today ? c.tube : c.ink2 }}>
-        <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : undefined }}>
+      {/* One round view for the day (filled when it's today); the picked ring is its own layer around it (a filled view
+          nested inside a bordered one drew square on Android). */}
+      <View style={{ alignSelf: 'center', width: 28, height: 28, margin: 2 }}>
+        {picked && <View pointerEvents="none" style={{ position: 'absolute', top: -3, left: -3, right: -3, bottom: -3, borderRadius: 17, borderWidth: 1.5, borderColor: today ? c.tube : c.ink2 }} />}
+        <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : 'transparent' }}>
           <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
         </View>
       </View>
