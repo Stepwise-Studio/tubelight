@@ -20,7 +20,8 @@ const SIZES = {
   default: { w: 44, h: 26, gap: 4 },
   lg: { w: 54, h: 32, gap: 4 },
 } as const
-const SPRING = { stiffness: 500, damping: 32 }
+// Critically damped: the knob settles at the end without overshooting the track.
+const SPRING = { duration: 260, dampingRatio: 1 }
 
 export interface ToggleProps {
   value: boolean
@@ -55,11 +56,11 @@ export function Toggle({ value, onChange, label, accessibilityLabel, description
   const knobStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: withSpring(value ? travel : 0, SPRING) },
-      { scaleX: flipped ? withSequence(withTiming(1.12, { duration: 110 }), withTiming(1, { duration: 110 })) : 1 },
+      { scaleX: flipped ? withSequence(withTiming(1.08, { duration: 110 }), withTiming(1, { duration: 110 })) : 1 },
     ],
   }), [value, travel, flipped])
   const sw = (
-    <Animated.View style={[{ width: w, height: h, borderRadius: h / 2, opacity: disabled ? 0.4 : 1 }, track]}>
+    <Animated.View style={[{ width: w, height: h, borderRadius: h / 2, opacity: disabled ? 0.4 : 1, overflow: 'hidden' }, track]}>
       <Animated.View style={[{ position: 'absolute', top: gap, left: gap, width: knob, height: knob, borderRadius: knob / 2, backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }, knobStyle]} />
     </Animated.View>
   )

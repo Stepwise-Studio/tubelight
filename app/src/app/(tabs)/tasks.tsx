@@ -61,7 +61,7 @@ export default function Tasks() {
       <View style={{ flex: 1 }}>
         {(['todos', 'calendar', 'clock'] as const).map((m) => seen[m] && (
           <Animated.View key={m} style={[StyleSheet.absoluteFill, mode === m ? shown : { display: 'none' }]}>
-            {m === 'todos' ? <Todos /> : m === 'calendar' ? <CalendarView /> : <ClockView />}
+            {m === 'todos' ? <Todos /> : m === 'calendar' ? <CalendarView /> : <ClockView active={mode === 'clock'} />}
           </Animated.View>
         ))}
       </View>

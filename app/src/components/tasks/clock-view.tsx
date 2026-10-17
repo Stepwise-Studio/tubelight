@@ -3,12 +3,10 @@
 // days and a switch; reminders in one card grouped Overdue / Today / Tomorrow / Later (tap the ring when it's done);
 // and what teammates will come back to.
 import { router } from 'expo-router'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import Animated, { Easing, FadeIn, FadeOut, Keyframe, LinearTransition, cubicBezier } from 'react-native-reanimated'
 import { Add01Icon, Delete02Icon, Notification03Icon, RepeatIcon, Tick02Icon } from '@hugeicons/core-free-icons'
-
-import Svg, { Circle, Defs, Line, LinearGradient, RadialGradient, Stop } from 'react-native-svg'
 
 import { useTabBarInset } from '@/components/tab-bar'
 import {
@@ -40,7 +38,7 @@ function dayWord(d: Date, now: Date) {
   return diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-export function ClockView() {
+export function ClockView({ active }: { active: boolean }) {
   const { c } = useTheme()
   const inset = useTabBarInset()
   const now = useMinute()
@@ -63,7 +61,7 @@ export function ClockView() {
     <ScrollView contentContainerStyle={{ paddingBottom: inset + 24, paddingHorizontal: 16, gap: 8 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await Promise.all([syncClock(), refreshTasks()]); setRefreshing(false) }}
         tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}>
-      <Hero now={now} marks={[
+      <Hero active={active} marks={[
         ...rings.filter((x) => x.at.getTime() - now.getTime() < DAY_MS).map((x) => ({ at: x.at, kind: 'alarm' as const, key: x.a.id })),
         ...open.filter((x) => x.at.getTime() >= now.getTime() && x.at.getTime() - now.getTime() < DAY_MS).map((x) => ({ at: x.at, kind: 'reminder' as const, key: x.r.id })),
       ]} />
@@ -104,66 +102,77 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
   )
 }
 
-/** Today as a dial: a 24-hour ring (midnight at the top) filled up to now in the tube's colour, the now point lit, hour
- *  ticks, today's alarms as short ink marks and reminders as amber dots on the ring; inside, the time and what's left of
- *  the day. No card: it sits on the page over a soft glow. */
-function Hero({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
+/** Today, full width: what's left of it as a live countdown (hours, minutes, seconds; each changed digit rolls in the
+ *  Stepwise way), over a midnight → midnight line filled up to now with today's alarms and reminders on it. Ticks only
+ *  while the clock is on screen (`active`), and only this card redraws each second. */
+function Hero({ active, marks }: { active: boolean; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
   const { c } = useTheme()
-  const S = 272
-  const R = S / 2 - 18
-  const C = 2 * Math.PI * R
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const frac = (ms: number) => (ms - start) / DAY_MS
-  const at = (f: number, r: number) => ({ x: S / 2 + r * Math.sin(f * 2 * Math.PI), y: S / 2 - r * Math.cos(f * 2 * Math.PI) })
-  const f = frac(now.getTime())
-  const dot = at(f, R)
-  const left = Math.max(0, Math.round((start + DAY_MS - now.getTime()) / 60_000))
-  const t = clockParts(now)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    let t: ReturnType<typeof setTimeout>
+    const tick = () => { setNow(Date.now()); t = setTimeout(tick, 1005 - (Date.now() % 1000)) }
+    tick()
+    return () => clearTimeout(t)
+  }, [active])
+  const d = new Date(now)
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const left = Math.max(0, Math.floor((start + DAY_MS - now) / 1000))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const text = `${pad(Math.floor(left / 3600))}:${pad(Math.floor(left / 60) % 60)}:${pad(left % 60)}`
+  const [w, setW] = useState(0)
+  const x = (ms: number) => ((ms - start) / DAY_MS) * w
   return (
-    <View style={{ alignItems: 'center', paddingTop: 6, paddingBottom: 4 }} accessible accessibilityLabel={`${t.main} ${t.suffix}, ${Math.floor(left / 60)} hours ${left % 60} minutes left today`}>
-      <View style={{ width: S, height: S }}>
-        <Svg width={S} height={S}>
-          <Defs>
-            <RadialGradient id="glow" cx="50%" cy="50%" r="50%">
-              <Stop offset="0" stopColor={c.tube} stopOpacity={0.16} />
-              <Stop offset="1" stopColor={c.tube} stopOpacity={0} />
-            </RadialGradient>
-            <LinearGradient id="arc" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor="#38bdf8" />
-              <Stop offset="1" stopColor={c.tube} />
-            </LinearGradient>
-          </Defs>
-          <Circle cx={S / 2} cy={S / 2} r={S / 2} fill="url(#glow)" />
-          {Array.from({ length: 24 }, (_, h) => {
-            const major = h % 6 === 0
-            const p1 = at(h / 24, R - 12)
-            const p2 = at(h / 24, R - (major ? 20 : 15))
-            return <Line key={h} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={major ? c.ink3 : c.ink4} strokeWidth={major ? 1.5 : 1} strokeLinecap="round" opacity={major ? 1 : 0.6} />
-          })}
-          <Circle cx={S / 2} cy={S / 2} r={R} stroke={c.line} strokeWidth={6} fill="none" />
-          <Circle cx={S / 2} cy={S / 2} r={R} stroke="url(#arc)" strokeWidth={6} fill="none" strokeLinecap="round"
-            strokeDasharray={`${C * f} ${C}`} transform={`rotate(-90 ${S / 2} ${S / 2})`} />
-          {marks.filter((m) => m.at.getTime() < start + DAY_MS).map((m) => {
-            const mf = frac(m.at.getTime())
-            if (m.kind === 'alarm') {
-              const p1 = at(mf, R - 7)
-              const p2 = at(mf, R + 7)
-              return <Line key={m.key} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={c.ink} strokeWidth={3} strokeLinecap="round" />
-            }
-            const p = at(mf, R)
-            return <Circle key={m.key} cx={p.x} cy={p.y} r={4.5} fill={c.warning} stroke={c.canvas} strokeWidth={2} />
-          })}
-          <Circle cx={dot.x} cy={dot.y} r={11} fill={c.tube} opacity={0.22} />
-          <Circle cx={dot.x} cy={dot.y} r={5.5} fill={c.tube} stroke={c.canvas} strokeWidth={2} />
-        </Svg>
-        <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-            <Text style={{ fontFamily: fonts.regular, fontSize: 54, lineHeight: 62, letterSpacing: -2, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
-            {!!t.suffix && <Text variant="label" color="ink2">{t.suffix}</Text>}
-          </View>
-          <Text variant="footnote" color="ink3" tabular>{`${Math.floor(left / 60)} h ${left % 60} min left today`}</Text>
-        </View>
+    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 20, paddingBottom: 16, marginTop: 4 }}
+      accessible accessibilityLabel={`${Math.floor(left / 3600)} hours ${Math.floor(left / 60) % 60} minutes left today`}>
+      <Text variant="overline" color="ink3">Left today</Text>
+      <Rolling text={text} style={{ fontFamily: fonts.regular, fontSize: 60, lineHeight: 70, letterSpacing: -2, color: c.ink }} />
+      <View style={{ height: 18, marginTop: 12 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+        {w > 0 && (
+          <>
+            <View style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 2, borderRadius: 1, backgroundColor: c.line }} />
+            <View style={{ position: 'absolute', left: 0, width: x(now), top: 8, height: 2, borderRadius: 1, backgroundColor: c.tube, opacity: 0.55 }} />
+            {[6, 12, 18].map((h) => <View key={h} style={{ position: 'absolute', left: x(start + h * 3_600_000), top: 5, width: 1, height: 8, backgroundColor: c.edge }} />)}
+            {marks.filter((m) => m.at.getTime() < start + DAY_MS).map((m) => m.kind === 'alarm'
+              ? <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 2, top: 1, width: 4, height: 16, borderRadius: 2, backgroundColor: c.ink }} />
+              : <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.warning, borderWidth: 2, borderColor: c.panel }} />)}
+            <View style={{ position: 'absolute', left: x(now) - 7, top: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: c.tubeSoft }} />
+            <View style={{ position: 'absolute', left: x(now) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.tube }} />
+          </>
+        )}
       </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+        <Text style={{ fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
+        <Text style={{ fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
+      </View>
+    </Squircle>
+  )
+}
+
+// Stepwise UI's qty-input digit swap: each place keeps its slot; a changed digit's old one slides 12 px down and out, the
+// new one comes in from 12 px above out of a 3 px blur, 180 ms on (0.22, 1, 0.36, 1). Unchanged digits don't move.
+const DIGIT_IN = {
+  from: { opacity: 0, transform: [{ translateY: -12 }], filter: [{ blur: 3 }] },
+  to: { opacity: 1, transform: [{ translateY: 0 }], filter: [{ blur: 0 }] },
+}
+const DIGIT_EASE = cubicBezier(0.22, 1, 0.36, 1)
+const DIGIT_OUT = new Keyframe({
+  0: { opacity: 1, transform: [{ translateY: 0 }] },
+  100: { opacity: 0, transform: [{ translateY: 12 }], easing: Easing.bezier(0.22, 1, 0.36, 1) },
+}).duration(180)
+
+function Rolling({ text, style }: { text: string; style: object }) {
+  const chars = text.split('')
+  return (
+    <View style={{ flexDirection: 'row' }} importantForAccessibility="no-hide-descendants">
+      {chars.map((ch, i) => (
+        <View key={chars.length - i} style={{ overflow: 'hidden' }}>
+          <Animated.View key={ch} exiting={DIGIT_OUT}
+            style={{ animationName: DIGIT_IN, animationDuration: 180, animationTimingFunction: DIGIT_EASE }}>
+            <Text tabular style={style}>{ch}</Text>
+          </Animated.View>
+        </View>
+      ))}
     </View>
   )
 }

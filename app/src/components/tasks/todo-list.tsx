@@ -20,15 +20,12 @@ const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const layout = LinearTransition.duration(280).easing(motion.ease.smoothOut)
-/** A row coming in: a blur reveal (out of a soft blur, faded, a touch low), each 40 ms after the last, capped. A CSS
- *  animation runs once when the row mounts and then leaves the plain style in place (nothing to snap back to). */
-const BLUR_IN = {
-  from: { opacity: 0, filter: [{ blur: 10 }], transform: [{ translateY: 6 }, { scale: 0.985 }] },
-  to: { opacity: 1, filter: [{ blur: 0 }], transform: [{ translateY: 0 }, { scale: 1 }] },
-}
+/** A row coming in: a quiet fade and a 4 px rise, one after another (35 ms apart, capped). A CSS animation runs once
+ *  when the row mounts and leaves the plain style in place (nothing to snap back to). */
+const RISE = { from: { opacity: 0, transform: [{ translateY: 4 }] }, to: { opacity: 1, transform: [{ translateY: 0 }] } }
 const EASE = cubicBezier(0.22, 1, 0.36, 1)
 const reveal = (i: number) => ({
-  animationName: BLUR_IN, animationDuration: 380, animationDelay: motion.staggerDelay(Math.min(i, 8)),
+  animationName: RISE, animationDuration: 240, animationDelay: Math.min(i, 8) * 35,
   animationTimingFunction: EASE, animationFillMode: 'backwards',
 }) as const
 
@@ -119,7 +116,7 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
   todo: Todo; index: number; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
 }) {
   const { c } = useTheme()
-  // Its own blur reveal, fixed at mount (a later render never restarts it).
+  // Its own reveal, fixed at mount (a later render never restarts it).
   const [revealStyle] = useState(() => reveal(index))
   // Its labels, less the one it's grouped under.
   const labels = t.labels?.length ? all.filter((l) => l.id !== group && t.labels.includes(l.id)) : []

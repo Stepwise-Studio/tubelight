@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { Pressable, TextInput, View } from 'react-native'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { Add01Icon, ArrowLeft01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, ArrowLeft01Icon, Delete02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { LABEL_COLORS, addLabel, deleteLabel, updateLabel, useLabels, useTodos, type Label } from '@/lib/tasks'
 import { motion, type, useTheme } from '@/theme'
@@ -112,13 +112,13 @@ function LabelEditor({ label, uses, onDone }: { label: Label; uses: number; onDo
       </View>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <View style={{ flex: 1 }}>
-          <Button label="Delete" variant="ghost" onPress={async () => {
+          <Button label="Delete" variant="destructive" icon={Delete02Icon} fullWidth onPress={async () => {
             if (!await confirm({ title: `Delete “${label.name}”?`, body: 'It comes off every to-do that has it.', confirmLabel: 'Delete label', destructive: true })) return
             deleteLabel(label.id)
             onDone()
           }} />
         </View>
-        <View style={{ flex: 1 }}><Button label="Save" onPress={save} disabled={!clean} /></View>
+        <View style={{ flex: 1 }}><Button label="Save" icon={Tick02Icon} fullWidth onPress={save} disabled={!clean} /></View>
       </View>
     </Animated.View>
   )

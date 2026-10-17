@@ -2,13 +2,13 @@
 // your own sounds first (files you picked for any alarm, and "Choose a file…" for a new one from the phone's storage),
 // then the phone's alarm sounds and ringtones. Tapping one plays a few seconds of it on the alarm stream.
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { FlatList, Pressable, View } from 'react-native'
 import { Add01Icon, ArrowRight01Icon, MusicNote01Icon } from '@hugeicons/core-free-icons'
 
 import { useAlarms } from '@/lib/clock'
 import { Phone } from '@/lib/phone'
 import { useTheme } from '@/theme'
-import { Icon, RadioRow, Sheet, Squircle, Text, haptic } from '@/ui'
+import { Icon, Sheet, Squircle, Text, haptic } from '@/ui'
 
 type Tone = { title: string; uri: string; kind: 'alarm' | 'ringtone' }
 const tidy = (t: string) => t.replace(/_/g, ' ')
@@ -34,9 +34,42 @@ export function SoundField({ sound, name, onChange }: { sound: string; name: str
     if (f) pick(f.uri, f.title)
   }
   const close = () => { Phone?.stopTone?.(); setOpen(false) }
-  const row = (uri: string, title: string, sub?: string) => (
-    <RadioRow key={uri || 'default'} title={tidy(title)} subtitle={sub} checked={uri === sound} onPress={() => pick(uri, title)} />
-  )
+  // One flat, virtualised list (only what's on screen is drawn), light rows with a plain radio: it opens at once.
+  type Item = { key: string; group?: string; uri?: string; title?: string; sub?: string; file?: boolean }
+  const items: Item[] = [
+    { key: 'g:mine', group: 'Your sounds' },
+    ...[...mine].map(([uri, title]) => ({ key: uri, uri, title })),
+    { key: 'file', file: true },
+    { key: 'g:alarm', group: 'Alarm sounds' },
+    { key: 'default', uri: '', title: 'Phone’s alarm sound', sub: 'What your clock app rings with' },
+    ...tones.filter((t) => t.kind === 'alarm').map((t) => ({ key: t.uri, uri: t.uri, title: t.title })),
+    ...(tones.some((t) => t.kind === 'ringtone') ? [{ key: 'g:ring', group: 'Ringtones' }] : []),
+    ...tones.filter((t) => t.kind === 'ringtone').map((t) => ({ key: t.uri, uri: t.uri, title: t.title })),
+  ]
+  const draw = ({ item }: { item: Item }) => {
+    if (item.group) return <Group title={item.group} />
+    if (item.file) return (
+      <Pressable onPress={choose} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, height: 52, paddingHorizontal: 12 }}>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={Add01Icon} size={15} color="ink2" />
+        </View>
+        <Text variant="bodyMedium" color="tube">Choose a file…</Text>
+      </Pressable>
+    )
+    const on = item.uri === sound
+    return (
+      <Pressable onPress={() => pick(item.uri!, item.title!)} android_ripple={{ color: c.wash }} accessibilityRole="radio" accessibilityState={{ checked: on }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingHorizontal: 12 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="body" numberOfLines={1}>{tidy(item.title!)}</Text>
+          {!!item.sub && <Text variant="footnote" color="ink3">{item.sub}</Text>}
+        </View>
+        <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: on ? 0 : 1.5, borderColor: c.edge, backgroundColor: on ? c.ink : undefined, alignItems: 'center', justifyContent: 'center' }}>
+          {on && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.canvas }} />}
+        </View>
+      </Pressable>
+    )
+  }
 
   return (
     <>
@@ -53,21 +86,8 @@ export function SoundField({ sound, name, onChange }: { sound: string; name: str
         </Squircle>
       </Pressable>
       <Sheet open={open} onClose={close} title="Sound">
-        <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 16 }}>
-          <Group title="Your sounds" />
-          {[...mine].map(([uri, title]) => row(uri, title))}
-          <Pressable onPress={choose} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, height: 52, paddingHorizontal: 12 }}>
-            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon icon={Add01Icon} size={15} color="ink2" />
-            </View>
-            <Text variant="bodyMedium" color="tube">Choose a file…</Text>
-          </Pressable>
-          <Group title="Alarm sounds" />
-          {row('', 'Phone’s alarm sound', 'What your clock app rings with')}
-          {tones.filter((t) => t.kind === 'alarm').map((t) => row(t.uri, t.title))}
-          {tones.some((t) => t.kind === 'ringtone') && <Group title="Ringtones" />}
-          {tones.filter((t) => t.kind === 'ringtone').map((t) => row(t.uri, t.title))}
-        </ScrollView>
+        <FlatList data={items} renderItem={draw} keyExtractor={(i) => i.key} style={{ maxHeight: 520 }}
+          contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 16 }} initialNumToRender={12} windowSize={5} />
       </Sheet>
     </>
   )

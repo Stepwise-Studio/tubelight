@@ -334,7 +334,7 @@ class AlarmActivity : Activity() {
 
     val root = FrameLayout(this).apply {
       background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-        intArrayOf(Color.parseColor("#1b3a9c"), Color.parseColor("#102466"), Color.parseColor("#081233"), Color.parseColor("#04060c")))
+        intArrayOf(Color.parseColor("#1a3591"), Color.parseColor("#0c1a4a"), Color.parseColor("#05070f"), Color.parseColor("#030406"), Color.parseColor("#030406")))
     }
     // The lights: big soft radial blobs drifting on slow, different loops (one animator moves all three).
     fun blob(r: Int, g: Int, b: Int, a: Int, size: Int) = android.view.View(this).apply {
@@ -345,9 +345,10 @@ class AlarmActivity : Activity() {
     }
     val w = resources.displayMetrics.widthPixels
     // Each light fades out within its own square (radius = half its side), so no edge ever shows.
-    val lights = listOf(blob(59, 130, 246, 150, dp(500)) to floatArrayOf(-0.25f, 0.05f, 0.18f, 0.10f, 1f),
-      blob(99, 102, 241, 130, dp(500)) to floatArrayOf(0.35f, 0.30f, 0.22f, 0.12f, 1.6f),
-      blob(34, 211, 238, 90, dp(500)) to floatArrayOf(0.05f, 0.55f, 0.20f, 0.08f, 0.7f))
+    // They stay in the upper part, so the lower half is near black (as in the reference).
+    val lights = listOf(blob(59, 130, 246, 110, dp(500)) to floatArrayOf(-0.25f, -0.35f, 0.18f, 0.08f, 1f),
+      blob(99, 102, 241, 95, dp(500)) to floatArrayOf(0.35f, -0.20f, 0.22f, 0.08f, 1.6f),
+      blob(34, 211, 238, 55, dp(500)) to floatArrayOf(0.05f, 0.05f, 0.20f, 0.06f, 0.7f))
     for ((v, _) in lights) root.addView(v, FrameLayout.LayoutParams(dp(500), dp(500)))
     animators += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
       duration = 22_000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
@@ -364,7 +365,7 @@ class AlarmActivity : Activity() {
     val now = Date()
     val h24 = android.text.format.DateFormat.is24HourFormat(this)
     // The glow behind the time, breathing.
-    val halo = blob(147, 197, 253, 110, dp(360))
+    val halo = blob(147, 197, 253, 70, dp(360))
     val clock = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
       if (title != null) addView(text(title, 22f, 235, medium).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END },
@@ -380,6 +381,7 @@ class AlarmActivity : Activity() {
         LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
     }
     val middle = FrameLayout(this).apply {
+      clipChildren = false
       addView(halo, FrameLayout.LayoutParams(dp(360), dp(360)).apply { gravity = Gravity.CENTER })
       addView(clock, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { gravity = Gravity.CENTER })
     }
@@ -409,7 +411,7 @@ class AlarmActivity : Activity() {
       }
     }
     val column = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
+      orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false
       setPadding(dp(24), dp(56), dp(24), dp(40))
       addView(middle, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
       addView(choices, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) })
@@ -432,16 +434,19 @@ class AlarmActivity : Activity() {
       background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(22, 255, 255, 255)); setStroke(dp(1), Color.argb(36, 255, 255, 255)) }
       clipToOutline = true
     }
+    // The fill: the whole track's shape, light, revealed from the left edge up to the thumb's centre (clip bounds:
+    // nothing lays out while sliding). The hint is drawn twice, white and dark; the dark copy shows only over the fill.
     val fill = android.view.View(this).apply {
-      background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.argb(40, 255, 255, 255), Color.argb(110, 191, 219, 254)))
-        .apply { cornerRadius = size / 2f }
-      pivotX = 0f
+      background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(235, 219, 234, 254)) }
     }
-    track.addView(fill, FrameLayout.LayoutParams(MATCH_PARENT, size).apply { leftMargin = pad; topMargin = pad; rightMargin = pad })
-    val hint = TextView(this).apply {
-      text = "Slide to stop"; textSize = 17f; typeface = face; setTextColor(Color.argb(170, 255, 255, 255)); gravity = Gravity.CENTER
+    track.addView(fill, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    fun hintView(color: Int) = TextView(this).apply {
+      text = "Slide to stop"; textSize = 17f; typeface = face; setTextColor(color); gravity = Gravity.CENTER
     }
+    val hint = hintView(Color.argb(170, 255, 255, 255))
+    val hintDark = hintView(Color.parseColor("#0c1a4a"))
     track.addView(hint, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    track.addView(hintDark, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     val thumb = FrameLayout(this).apply {
       background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
       elevation = dp(4).toFloat()
@@ -450,11 +455,12 @@ class AlarmActivity : Activity() {
       }, FrameLayout.LayoutParams(dp(18), dp(18)).apply { gravity = Gravity.CENTER })
     }
     track.addView(thumb, FrameLayout.LayoutParams(size, size).apply { leftMargin = pad; topMargin = pad })
-    // The fill reaches from the left edge to the thumb's right edge (a scale, so nothing lays out while sliding).
+    val clip = android.graphics.Rect()
     fun follow(x: Float) {
-      val full = (track.width - pad * 2).toFloat()
-      if (full > 0) fill.scaleX = ((x + size) / full).coerceIn(size / full, 1f)
-      fill.alpha = (x / (size * 0.6f)).coerceIn(0f, 1f) // nothing behind the thumb at rest; the light grows as it moves
+      val edge = if (x <= 0f) 0 else (pad + x + size / 2f).toInt() // at rest: nothing filled
+      clip.set(0, 0, edge, track.height)
+      fill.clipBounds = clip
+      hintDark.clipBounds = clip
     }
     track.post { follow(0f) }
     var downX = 0f
@@ -466,7 +472,6 @@ class AlarmActivity : Activity() {
         android.view.MotionEvent.ACTION_MOVE -> {
           v.translationX = (e.rawX - downX).coerceIn(0f, max)
           follow(v.translationX)
-          hint.alpha = 1f - v.translationX / max
           true
         }
         android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
@@ -477,7 +482,6 @@ class AlarmActivity : Activity() {
           } else {
             v.animate().translationX(0f).setDuration(320).setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
               .setUpdateListener { follow(v.translationX) }.start()
-            hint.animate().alpha(1f).setDuration(200).start()
           }
           true
         }
