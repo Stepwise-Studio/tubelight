@@ -1,5 +1,7 @@
 package studio.stepwise.phone
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlarmManager
 import android.app.Notification
@@ -239,7 +241,7 @@ class AlarmService : Service() {
       lockscreenVisibility = Notification.VISIBILITY_PUBLIC
     })
     val time = String.format("%02d:%02d", o.optInt("hour"), o.optInt("minute"))
-    val full = PendingIntent.getActivity(this, 7, Intent(this, AlarmActivity::class.java).putExtra("id", id)
+    val full = PendingIntent.getActivity(this, 7, AlarmActivity.intent(this, o, false)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val n = Notification.Builder(this, Clock.ALARM_CHANNEL)
       .setSmallIcon(Clock.icon(this)).setContentTitle(o.optString("title").ifBlank { "Alarm" }).setContentText(time)
@@ -249,7 +251,7 @@ class AlarmService : Service() {
       .addAction(Notification.Action.Builder(null, "Stop", stopper(Clock.STOP, id)).build())
       .build()
     if (Build.VERSION.SDK_INT >= 29) startForeground(NOTE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) else startForeground(NOTE, n)
-    ring()
+    ring(o.optString("sound"))
     quiet.removeCallbacksAndMessages(null)
     quiet.postDelayed({ finish() }, 10 * 60_000L)
     return START_NOT_STICKY
@@ -258,16 +260,16 @@ class AlarmService : Service() {
   private fun stopper(act: String, id: String) = PendingIntent.getService(this, act.hashCode(),
     Intent(this, AlarmService::class.java).setAction(act).putExtra("id", id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-  private fun ring() {
+  /** The alarm's own tone, else the phone's alarm sound (also if its tone was removed from the phone). */
+  private fun ring(sound: String) {
     player?.release()
-    val uri = RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_ALARM)
+    val fallback = RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_ALARM)
       ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-    player = runCatching {
-      MediaPlayer().apply {
-        setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-        setDataSource(this@AlarmService, uri); isLooping = true; prepare(); start()
-      }
-    }.getOrNull()
+    fun play(uri: Uri) = MediaPlayer().apply {
+      setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+      setDataSource(this@AlarmService, uri); isLooping = true; prepare(); start()
+    }
+    player = runCatching { play(if (sound.isNotBlank()) Uri.parse(sound) else fallback) }.recoverCatching { play(fallback) }.getOrNull()
     val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 500), 0), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
   }
@@ -291,50 +293,110 @@ class AlarmService : Service() {
   companion object { const val NOTE = 4712 }
 }
 
-/** The ringing alarm, full screen over the lock screen: the time, its name, Snooze and Stop. */
+/** The ringing alarm, full screen over the lock screen: its name, the time big, the date, on the alarm's own gradient
+ *  slowly shifting between its two palettes; Snooze and Stop as pills. `preview` (from the alarm editor) only closes. */
 class AlarmActivity : Activity() {
+  private var shift: ValueAnimator? = null
+
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)
     current = this
     if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
     else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
-    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
     val id = intent.getStringExtra("id") ?: ""
-    val o = Clock.item(this, id)
+    val preview = intent.getBooleanExtra("preview", false)
+    val title = intent.getStringExtra("title")?.ifBlank { null } ?: "Alarm"
+    val colors = (intent.getStringArrayExtra("colors")?.takeIf { it.size == 6 } ?: DEFAULT).map { Color.parseColor(it) }
     val d = resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
-    fun text(s: String, size: Float, color: Int, face: Typeface) = TextView(this).apply {
-      this.text = s; textSize = size; setTextColor(color); typeface = face; gravity = Gravity.CENTER
+    fun text(s: String, size: Float, alpha: Int, face: Typeface) = TextView(this).apply {
+      this.text = s; textSize = size; setTextColor(Color.argb(alpha, 255, 255, 255)); typeface = face; gravity = Gravity.CENTER
     }
-    fun button(s: String, solid: Boolean, act: String) = TextView(this).apply {
+    fun pill(s: String, solid: Boolean, act: String) = TextView(this).apply {
       text = s; textSize = 18f; gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
       setTextColor(if (solid) Color.parseColor("#0b0b0c") else Color.WHITE)
-      background = GradientDrawable().apply { cornerRadius = dp(32).toFloat(); setColor(if (solid) Color.WHITE else Color.parseColor("#26262a")) }
-      setOnClickListener { startService(Intent(this@AlarmActivity, AlarmService::class.java).setAction(act).putExtra("id", id)); finish() }
+      background = GradientDrawable().apply { cornerRadius = dp(34).toFloat(); setColor(if (solid) Color.WHITE else Color.argb(46, 255, 255, 255)) }
+      setOnClickListener {
+        if (!preview) startService(Intent(this@AlarmActivity, AlarmService::class.java).setAction(act).putExtra("id", id))
+        finish()
+      }
+    }
+    // The background: three stops from top to bottom, each easing between palette A and B and back, forever.
+    val bg = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[0], colors[1], colors[2]))
+    val mix = ArgbEvaluator()
+    shift = ValueAnimator.ofFloat(0f, 1f).apply {
+      duration = 7000; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+      interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+      addUpdateListener { a ->
+        val f = a.animatedValue as Float
+        bg.colors = IntArray(3) { i -> mix.evaluate(f, colors[i], colors[i + 3]) as Int }
+      }
+      start()
     }
     val now = Date()
     val root = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setBackgroundColor(Color.parseColor("#0b0b0c"))
-      setPadding(dp(28), dp(120), dp(28), dp(56))
-      addView(text(o?.optString("title")?.ifBlank { null } ?: "Alarm", 20f, Color.parseColor("#a1a1aa"), Typeface.create("sans-serif", Typeface.NORMAL)))
-      addView(text(DateFormat.getTimeInstance(DateFormat.SHORT).format(now), 84f, Color.WHITE, Typeface.create("sans-serif-light", Typeface.NORMAL)),
-        LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
-      addView(text(DateFormat.getDateInstance(DateFormat.FULL).format(now), 16f, Color.parseColor("#71717a"), Typeface.create("sans-serif", Typeface.NORMAL)))
+      orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; background = bg
+      setPadding(dp(28), dp(140), dp(28), dp(64))
+      addView(text(title, 22f, 230, Typeface.create("sans-serif-medium", Typeface.NORMAL)))
+      addView(text(DateFormat.getTimeInstance(DateFormat.SHORT).format(now), 96f, 255, Typeface.create("sans-serif-thin", Typeface.NORMAL)),
+        LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
+      addView(text(DateFormat.getDateInstance(DateFormat.FULL).format(now), 16f, 170, Typeface.create("sans-serif", Typeface.NORMAL)))
       addView(android.view.View(this@AlarmActivity), LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-      addView(button("Snooze 5 min", false, Clock.SNOOZE), LinearLayout.LayoutParams(MATCH_PARENT, dp(64)))
-      addView(button("Stop", true, Clock.STOP), LinearLayout.LayoutParams(MATCH_PARENT, dp(64)).apply { topMargin = dp(12) })
+      addView(pill("Snooze 5 min", false, Clock.SNOOZE), LinearLayout.LayoutParams(MATCH_PARENT, dp(68)))
+      addView(pill("Stop", true, Clock.STOP), LinearLayout.LayoutParams(MATCH_PARENT, dp(68)).apply { topMargin = dp(12) })
     }
     setContentView(root)
   }
 
   // Back doesn't stop the alarm by accident.
   @Deprecated("Back does nothing while ringing")
-  override fun onBackPressed() {}
+  override fun onBackPressed() { if (intent.getBooleanExtra("preview", false)) finish() }
 
   override fun onDestroy() {
+    shift?.cancel()
     if (current === this) current = null
     super.onDestroy()
   }
 
-  companion object { var current: AlarmActivity? = null }
+  companion object {
+    var current: AlarmActivity? = null
+    private val DEFAULT = arrayOf("#0f172a", "#312e81", "#0e7490", "#1e1b4b", "#0f766e", "#4338ca")
+
+    /** An alarm item ({title, colors}) on its screen; `preview` from the editor. */
+    fun intent(c: Context, o: JSONObject, preview: Boolean): Intent {
+      val colors = o.optJSONArray("colors")?.let { a -> Array(a.length()) { a.getString(it) } }
+      return Intent(c, AlarmActivity::class.java).putExtra("id", o.optString("id")).putExtra("title", o.optString("title"))
+        .putExtra("colors", colors).putExtra("preview", preview)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+    }
+  }
+}
+
+/** The phone's alarm tones for the alarm editor, and a short preview of one (on the alarm stream). */
+object Tones {
+  private var playing: android.media.Ringtone? = null
+  private val stopper = Handler(Looper.getMainLooper())
+
+  fun list(c: Context): List<Map<String, String>> {
+    val rm = RingtoneManager(c).apply { setType(RingtoneManager.TYPE_ALARM) }
+    val out = mutableListOf<Map<String, String>>()
+    rm.cursor.use { cur -> while (cur.moveToNext()) out.add(mapOf("title" to cur.getString(RingtoneManager.TITLE_COLUMN_INDEX), "uri" to rm.getRingtoneUri(cur.position).toString())) }
+    return out
+  }
+
+  fun preview(c: Context, uri: String) {
+    stop()
+    val u = if (uri.isBlank()) RingtoneManager.getActualDefaultRingtoneUri(c, RingtoneManager.TYPE_ALARM) ?: return else Uri.parse(uri)
+    playing = RingtoneManager.getRingtone(c, u)?.apply {
+      audioAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build(); play()
+    }
+    stopper.postDelayed({ stop() }, 6000)
+  }
+
+  fun stop() {
+    stopper.removeCallbacksAndMessages(null)
+    playing?.stop()
+    playing = null
+  }
 }

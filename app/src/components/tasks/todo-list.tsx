@@ -5,12 +5,12 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { Add01Icon, ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
 import type { Project, Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
-import { Icon, IconButton, IconSwap, Text, TeammateAvatar, haptic, showContextMenu, toast, type MenuItem } from '@/ui'
+import { Icon, IconSwap, Text, TeammateAvatar, haptic, showContextMenu, toast, type MenuItem } from '@/ui'
 
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 
@@ -21,11 +21,11 @@ const MONTH_MS = 30 * 86_400_000
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const layout = LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)
 
-interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean; add?: () => void }
+interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
 
-export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen, onAdd }: {
+export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }: {
   todos: Todo[]; labels: Label[]; groupBy: GroupBy; teammate: (id: string) => Teammate | undefined; projects: Project[]
-  onOpen: (t: Todo) => void; onAdd: (o: { status?: TodoStatus; label?: string }) => void
+  onOpen: (t: Todo) => void
 }) {
   // Folded by default: canceled (by status), finished ones stay in their label's group, dimmed, at the end.
   const [fold, setFold] = useState<Record<string, boolean>>({ canceled: true })
@@ -40,16 +40,16 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen, o
       let rows = live.filter((t) => t.status === value)
       if (value === 'done') rows = rows.sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
       return { key: value, title: statusLabel(value), glyph: <StatusGlyph status={value} size={16} />, rows,
-        foldable: true, add: value === 'done' || value === 'canceled' ? undefined : () => onAdd({ status: value }) }
+        foldable: true }
     }).filter((g) => g.rows.length || g.key === 'todo' || g.key === 'doing')
   } else {
     const inOrder = (rows: Todo[]) => rows.sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.sort - b.sort)
     groups = labels.map((l) => ({
       key: l.id, title: l.name, glyph: <LabelDot color={l.color} size={10} />, foldable: true,
-      rows: inOrder(live.filter((t) => t.labels?.includes(l.id))), add: () => onAdd({ label: l.id }),
+      rows: inOrder(live.filter((t) => t.labels?.includes(l.id))),
     }))
     const none = inOrder(live.filter((t) => !t.labels?.some((id) => byLabel.has(id))))
-    if (none.length) groups.push({ key: '_none', title: 'No label', glyph: <LabelDot color="transparent" size={10} ring />, rows: none, foldable: true, add: () => onAdd({}) })
+    if (none.length) groups.push({ key: '_none', title: 'No label', glyph: <LabelDot color="transparent" size={10} ring />, rows: none, foldable: true })
   }
 
   return (
@@ -59,7 +59,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen, o
         return (
           <Animated.View key={g.key} layout={layout}>
             <GroupHeader title={g.title} glyph={g.glyph} count={g.rows.length} open={shown}
-              onToggle={() => { haptic.tap(); setFold((f) => ({ ...f, [g.key]: shown })) }} onAdd={g.add} />
+              onToggle={() => { haptic.tap(); setFold((f) => ({ ...f, [g.key]: shown })) }} />
             {shown && g.rows.map((t) => (
               <TodoRow key={t.id} todo={t} onOpen={onOpen} labels={labels} group={g.key}
                 who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
@@ -80,10 +80,9 @@ export function LabelDot({ color, size = 8, ring }: { color: string; size?: numb
   return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: ring ? 1.5 : 0, borderColor: c.ink4 }} />
 }
 
-function GroupHeader({ title, glyph, count, open, onToggle, onAdd }: {
-  title: string; glyph: React.ReactNode; count: number; open: boolean; onToggle: () => void; onAdd?: () => void
+function GroupHeader({ title, glyph, count, open, onToggle }: {
+  title: string; glyph: React.ReactNode; count: number; open: boolean; onToggle: () => void
 }) {
-  const { c } = useTheme()
   // The chevron points down while the group is open, right while it's folded.
   const p = useSharedValue(open ? 1 : 0)
   useEffect(() => { p.value = withTiming(open ? 1 : 0, { duration: motion.duration.fast, easing: motion.ease.smoothOut }) }, [open, p])
@@ -97,7 +96,6 @@ function GroupHeader({ title, glyph, count, open, onToggle, onAdd }: {
         <Text variant="label" numberOfLines={1} style={{ flexShrink: 1 }}>{title}</Text>
         <Text variant="label" color="ink3" tabular>{count}</Text>
       </Pressable>
-      {onAdd && <IconButton icon={Add01Icon} size={34} iconSize={16} color={c.ink3} accessibilityLabel={`Add to ${title}`} onPress={() => { haptic.tap(); onAdd() }} />}
     </View>
   )
 }

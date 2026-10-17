@@ -86,6 +86,10 @@ class PhoneModule : Module() {
     Function("setClock") { json: String -> Clock.set(context, json) }
     Function("takeClockDone") { Clock.takeDone(context) }
     Function("canExactAlarm") { Clock.canExact(context) }
+    AsyncFunction("alarmTones") { Tones.list(context) }
+    Function("previewTone") { uri: String -> Tones.preview(context, uri) }
+    Function("stopTone") { Tones.stop() }
+    Function("previewAlarm") { json: String -> context.startActivity(AlarmActivity.intent(context, org.json.JSONObject(json), true)) }
     Function("openExactAlarm") { start(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))) }
     AsyncFunction("calendars") { Cal.calendars(context) }
     AsyncFunction("calendarEvents") { from: Double, to: Double -> Cal.events(context, from.toLong(), to.toLong()) }

@@ -7,11 +7,12 @@ import { Keyboard, ScrollView, TextInput, View } from 'react-native'
 import { KeyboardStickyView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, CheckListIcon, Delete02Icon, Tag01Icon, Tick02Icon, UserCircleIcon,
+  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, Delete02Icon, Tag01Icon, User03Icon, Tick02Icon, UserCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 import { DayPicker } from '@/components/tasks/day-picker'
 import { PriorityGlyph, StatusGlyph } from '@/components/tasks/glyphs'
+import { GroupAvatar } from '@/components/thread-avatar'
 import { LabelSheet } from '@/components/tasks/label-sheet'
 import { PickerSheet } from '@/components/tasks/picker-sheet'
 import { LabelDot } from '@/components/tasks/todo-list'
@@ -106,7 +107,7 @@ function Editor({ todo, start, label }: { todo: Todo | null; start?: TodoStatus;
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Press radius={24} onPress={() => setPicker('project')} accessibilityLabel={`In ${project?.name ?? 'Personal'}. Change`}
             style={{ height: 48, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, maxWidth: 220 }}>
-            {project ? <View style={{ width: 14, height: 14, borderRadius: 4.5, backgroundColor: project.color }} /> : <Icon icon={CheckListIcon} size={18} color="tube" />}
+            {project ? <GroupAvatar color={project.color} icon={project.icon} size={24} /> : <Icon icon={User03Icon} size={18} color="tube" />}
             <Text variant="headline" numberOfLines={1} style={{ flexShrink: 1 }}>{project?.name ?? 'Personal'}</Text>
           </Press>
         </View>
@@ -173,8 +174,8 @@ function Editor({ todo, start, label }: { todo: Todo | null; start?: TodoStatus;
         footer={<Text variant="footnote" color="ink3" style={{ paddingHorizontal: 14, paddingTop: 8 }}>A teammate gets it in their chat, starts on it and keeps its status up to date.</Text>} />
       <PickerSheet open={picker === 'project'} title="List" value={d.project_id} onClose={() => setPicker(null)} onPick={(project_id) => set({ project_id })}
         choices={[
-          { value: null, label: 'Personal', glyph: <Icon icon={CheckListIcon} size={18} color="tube" /> },
-          ...ws.projects.map((p) => ({ value: p.id as string | null, label: p.name, glyph: <View style={{ width: 14, height: 14, borderRadius: 4.5, backgroundColor: p.color }} /> })),
+          { value: null, label: 'Personal', sub: 'Just yours', glyph: <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={User03Icon} size={16} color="tube" /></View> },
+          ...ws.projects.map((p) => ({ value: p.id as string | null, label: p.name, glyph: <GroupAvatar color={p.color} icon={p.icon} size={28} /> })),
         ]} />
       <LabelSheet open={picker === 'labels'} value={d.labels} onChange={(labels) => set({ labels })} onClose={() => setPicker(null)} />
       <Sheet open={picker === 'due'} onClose={() => setPicker(null)} title="Due date">

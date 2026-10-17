@@ -17,9 +17,24 @@ export interface Alarm {
   enabled: boolean
   /** A one-off's moment (set whenever it's switched on). */
   at: string | null
+  /** The tone's content:// uri; '' = the phone's alarm sound. */
+  sound: string
+  /** The ringing screen's gradient (LOOKS). */
+  look: Look
   created_at: string
   updated_at: string
 }
+/** The ringing screen's gradients: palette A (top → bottom) easing into B and back (Clock.kt AlarmActivity). */
+export const LOOKS = {
+  aurora: { label: 'Aurora', a: ['#0f172a', '#312e81', '#0e7490'], b: ['#1e1b4b', '#0f766e', '#4338ca'] },
+  dawn: { label: 'Dawn', a: ['#1e1b4b', '#9d174d', '#f59e0b'], b: ['#312e81', '#db2777', '#fb923c'] },
+  ocean: { label: 'Ocean', a: ['#020617', '#0c4a6e', '#0284c7'], b: ['#082f49', '#0369a1', '#22d3ee'] },
+  ember: { label: 'Ember', a: ['#1c0a00', '#7c2d12', '#ea580c'], b: ['#2a0a0a', '#b91c1c', '#f97316'] },
+  forest: { label: 'Forest', a: ['#022c22', '#065f46', '#10b981'], b: ['#052e16', '#15803d', '#34d399'] },
+} as const
+export type Look = keyof typeof LOOKS
+export const lookColors = (look: string) => { const l = LOOKS[look as Look] ?? LOOKS.aurora; return [...l.a, ...l.b] }
+
 export type Repeat = '' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'yearly'
 export interface Reminder {
   id: string
@@ -106,7 +121,8 @@ function arm() {
   const items: ClockItem[] = [
     ...alarms.map((a) => {
       const [hour, minute] = hm(a.time)
-      return { id: a.id, kind: 'alarm' as const, title: a.label, hour, minute, days: a.days, at: a.at ? Date.parse(a.at) : 0, repeat: '', enabled: a.enabled }
+      return { id: a.id, kind: 'alarm' as const, title: a.label, hour, minute, days: a.days, at: a.at ? Date.parse(a.at) : 0, repeat: '', enabled: a.enabled,
+        sound: a.sound ?? '', colors: lookColors(a.look) }
     }),
     ...reminders.filter((r) => !r.done).map((r) => ({
       id: r.id, kind: 'reminder' as const, title: r.title, body: r.notes, hour: 0, minute: 0, days: [], at: Date.parse(r.at), repeat: r.repeat, enabled: true,
@@ -156,7 +172,7 @@ export function useMinute() {
   return now
 }
 
-export function addAlarm(a: Pick<Alarm, 'time' | 'days' | 'label'>) {
+export function addAlarm(a: Pick<Alarm, 'time' | 'days' | 'label' | 'sound' | 'look'>) {
   const now = new Date().toISOString()
   return alarmList.add({ ...a, enabled: true, at: a.days.length ? null : nextAt(a.time), created_at: now, updated_at: now })
 }

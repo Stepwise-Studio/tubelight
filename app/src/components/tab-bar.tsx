@@ -19,8 +19,8 @@ const GAP = 10
 
 const PLACES = [
   { name: 'index', label: 'Inbox', icon: InboxIcon },
-  { name: 'tasks', label: 'Tasks', icon: CircleCheckIcon },
   { name: 'vault', label: 'Vault', icon: VaultIcon },
+  { name: 'tasks', label: 'Tasks', icon: CircleCheckIcon },
   { name: 'activity', label: 'Activity', icon: WorkHistoryIcon },
   { name: 'profile', label: 'Profile', icon: UserCircleIcon },
 ]

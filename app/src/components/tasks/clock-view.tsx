@@ -1,5 +1,5 @@
 // The Tasks tab's clock. On top, the next alarm in big numerals over the next 24 hours as a track (now lit in the
-// tube's colour, alarms and reminders marked where they fall). Then alarms as cards, two to a row, each with its
+// tube's colour, alarms and reminders marked where they fall). Then alarms as full-width cards, each with its
 // days and a switch; reminders in one card grouped Overdue / Today / Tomorrow / Later (tap the ring when it's done);
 // and what teammates will come back to.
 import { router } from 'expo-router'
@@ -156,15 +156,17 @@ function DayLine({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' |
 function AlarmGrid({ alarms, now, onAdd }: { alarms: Alarm[]; now: Date; onAdd: () => void }) {
   const { c } = useTheme()
   const { width } = useWindowDimensions()
-  const cell = (width - 32 - 10) / 2
+  const cell = width - 32
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+    <View style={{ gap: 10 }}>
       {alarms.map((a) => <AlarmCard key={a.id} a={a} now={now} width={cell} />)}
-      <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel="New alarm"
-        style={{ width: alarms.length ? cell : width - 32, minHeight: alarms.length ? 128 : 88, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.edge, alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-        <Icon icon={Add01Icon} size={20} color="ink3" />
-        <Text variant="footnote" color="ink3">{alarms.length ? 'Add alarm' : 'Your first alarm'}</Text>
-      </Pressable>
+      {!alarms.length && (
+        <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel="New alarm"
+          style={{ width: cell, minHeight: 88, borderRadius: 24, borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.edge, alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Icon icon={Add01Icon} size={20} color="ink3" />
+          <Text variant="footnote" color="ink3">Your first alarm</Text>
+        </Pressable>
+      )}
     </View>
   )
 }
@@ -188,17 +190,17 @@ function AlarmCard({ a, now, width }: { a: Alarm; now: Date; width: number }) {
       <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
         <View style={{ flex: 1, minWidth: 0, opacity: on ? 1 : 0.45 }}>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-            <Text style={{ fontFamily: fonts.regular, fontSize: 34, lineHeight: 40, letterSpacing: -1.2, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
+            <Text style={{ fontFamily: fonts.regular, fontSize: 42, lineHeight: 50, letterSpacing: -1.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
             {!!t.suffix && <Text variant="caption" color="ink2">{t.suffix}</Text>}
           </View>
           <Text variant="footnote" color="ink2" numberOfLines={1}>{a.label || (a.days.length ? daysText(a.days) : 'Alarm')}</Text>
         </View>
-        <Toggle size="sm" value={on} onChange={toggle} accessibilityLabel={`Alarm ${t.main} ${t.suffix}`} />
+        <Toggle value={on} onChange={toggle} accessibilityLabel={`Alarm ${t.main} ${t.suffix}`} />
       </View>
       {a.days.length ? (
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', opacity: on ? 1 : 0.45 }}>
+        <View style={{ flexDirection: 'row', gap: 12, opacity: on ? 1 : 0.45 }}>
           {LETTERS.map((l, i) => (
-            <Text key={i} style={{ fontSize: 11, lineHeight: 14, fontFamily: a.days.includes(i) ? fonts.semibold : fonts.regular, color: a.days.includes(i) ? (i > 4 ? c.danger : c.ink) : c.ink4 }}>{l}</Text>
+            <Text key={i} style={{ fontSize: 12, lineHeight: 16, fontFamily: a.days.includes(i) ? fonts.semibold : fonts.regular, color: a.days.includes(i) ? (i > 4 ? c.danger : c.ink) : c.ink4 }}>{l}</Text>
           ))}
         </View>
       ) : (

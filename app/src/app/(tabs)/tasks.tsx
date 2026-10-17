@@ -6,17 +6,18 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { AlarmClockIcon, ArrowDown01Icon, Calendar03Icon, CheckListIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, AlarmClockIcon, ArrowDown01Icon, Calendar03Icon, CheckListIcon, Tag01Icon } from '@hugeicons/core-free-icons'
 
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
 import { CalendarView } from '@/components/tasks/calendar-view'
 import { ClockView } from '@/components/tasks/clock-view'
+import { LabelSheet } from '@/components/tasks/label-sheet'
 import { TodoList, type GroupBy } from '@/components/tasks/todo-list'
 import { dueLabel, refreshTasks, useLabels, useTodos, type Todo, type TodoStatus } from '@/lib/tasks'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Reveal, Skeleton, Text, haptic, showContextMenu } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, IconSwap, Press, Reveal, Skeleton, Text, elevation, haptic, showContextMenu } from '@/ui'
 
 type Mode = 'todos' | 'calendar' | 'clock'
 const TITLES: Record<Mode, string> = { todos: 'Tasks', calendar: 'Calendar', clock: 'Clock' }
@@ -69,13 +70,14 @@ export default function Tasks() {
 }
 
 function Todos() {
-  const { c } = useTheme()
+  const { c, scheme } = useTheme()
   const ws = useWorkspace()
   const inset = useTabBarInset()
   const { todos, error, offline, unsynced } = useTodos()
   const labels = useLabels()
   const [groupBy, setGroupBy] = useState<GroupBy>('status')
   const [refreshing, setRefreshing] = useState(false)
+  const [labelsOpen, setLabelsOpen] = useState(false)
   useEffect(() => { AsyncStorage.getItem(GROUP_KEY).then((g) => { if (g === 'label' || g === 'status') setGroupBy(g) }, () => {}) }, [])
   const group = (g: GroupBy) => { setGroupBy(g); AsyncStorage.setItem(GROUP_KEY, g).catch(() => {}) }
 
@@ -92,20 +94,22 @@ function Todos() {
   const onOpen = useCallback((t: Todo) => router.push({ pathname: '/todo/[id]', params: { id: t.id } }), [])
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView
-      contentContainerStyle={{ paddingBottom: inset + 24, flexGrow: 1 }}
+      contentContainerStyle={{ paddingBottom: inset + 88, flexGrow: 1 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refreshTasks(); setRefreshing(false) }}
         tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
     >
       {!!todos?.length && (
         <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 10 }}>
           <Text variant="footnote" color="ink3" style={{ flex: 1 }} numberOfLines={1}>{summary}</Text>
+          <IconButton icon={Tag01Icon} size={32} iconSize={16} color={c.ink3} accessibilityLabel="Labels" onPress={() => { haptic.tap(); setLabelsOpen(true) }} />
           <GroupButton value={groupBy} onChange={group} />
         </View>
       )}
       <Reveal ready={todos !== null || !!error} style={{ flexGrow: 1 }} skeleton={<Rows />}>
         {todos?.length ? (
-          <TodoList todos={todos} labels={labels} groupBy={groupBy} teammate={ws.teammate} projects={ws.projects} onOpen={onOpen} onAdd={add} />
+          <TodoList todos={todos} labels={labels} groupBy={groupBy} teammate={ws.teammate} projects={ws.projects} onOpen={onOpen} />
         ) : (
           <EmptyState
             art={<View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={CheckListIcon} size={26} color="tube" /></View>}
@@ -116,6 +120,15 @@ function Todos() {
         )}
       </Reveal>
     </ScrollView>
+    {/* New to-do: one button, bottom right, just above the tab bar. */}
+    {!!todos?.length && (
+      <Press radius={28} smoothing={0} onPress={() => add()} accessibilityLabel="New to-do" outerStyle={[{ position: 'absolute', right: 20, bottom: inset + 6 }, elevation(scheme)]}
+        style={{ width: 56, height: 56, alignItems: 'center', justifyContent: 'center', backgroundColor: c.ink }}>
+        <Icon icon={Add01Icon} size={24} color={c.canvas} strokeWidth={2} />
+      </Press>
+    )}
+    <LabelSheet open={labelsOpen} onClose={() => setLabelsOpen(false)} />
+    </View>
   )
 }
 

@@ -15,6 +15,8 @@ from . import items
 
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 REPEATS = ("", "daily", "weekdays", "weekly", "monthly", "yearly")
+# The ringing screen's gradients (the app's lib/clock.ts LOOKS has their colours).
+LOOKS = ("aurora", "dawn", "ocean", "ember", "forest")
 
 
 def _when(v: Any) -> str | None:
@@ -34,8 +36,10 @@ def _clean_alarm(r: dict[str, Any]) -> dict[str, Any]:
     if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
         raise ValueError("Give the alarm time as HH:MM, 24-hour.")
     days = sorted({int(d) for d in (r.get("days") or []) if 0 <= int(d) <= 6})
+    look = str(r.get("look") or "aurora")
     return {"time": t, "days": days, "label": str(r.get("label") or "").strip()[:60], "enabled": bool(r.get("enabled", True)),
-            "at": None if days else _when(r.get("at"))}
+            "at": None if days else _when(r.get("at")), "sound": str(r.get("sound") or "")[:500],
+            "look": look if look in LOOKS else "aurora"}
 
 
 def _clean_reminder(r: dict[str, Any]) -> dict[str, Any]:
@@ -52,7 +56,8 @@ def _clean_reminder(r: dict[str, Any]) -> dict[str, Any]:
             "done": done, "done_at": (r.get("done_at") or datetime.now(UTC).isoformat()) if done else None}
 
 
-ALARMS = items.Items("alarms", _clean_alarm, {"time": "07:00", "days": [], "label": "", "enabled": True, "at": None}, "time")
+ALARMS = items.Items("alarms", _clean_alarm, {"time": "07:00", "days": [], "label": "", "enabled": True, "at": None, "sound": "",
+                                              "look": "aurora"}, "time")
 REMINDERS = items.Items("reminders", _clean_reminder, {"title": "", "notes": "", "at": None, "repeat": "", "done": False}, "at")
 
 
