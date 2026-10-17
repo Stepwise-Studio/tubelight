@@ -4,7 +4,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeOut, LinearTransition, cubicBezier, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
@@ -20,14 +20,8 @@ const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const layout = LinearTransition.duration(280).easing(motion.ease.smoothOut)
-/** A row coming in: a quiet fade and a 4 px rise, one after another (35 ms apart, capped). A CSS animation runs once
- *  when the row mounts and leaves the plain style in place (nothing to snap back to). */
-const RISE = { from: { opacity: 0, transform: [{ translateY: 4 }] }, to: { opacity: 1, transform: [{ translateY: 0 }] } }
-const EASE = cubicBezier(0.22, 1, 0.36, 1)
-const reveal = (i: number) => ({
-  animationName: RISE, animationDuration: 240, animationDelay: Math.min(i, 8) * 35,
-  animationTimingFunction: EASE, animationFillMode: 'backwards',
-}) as const
+/** Rows that appear (a group opened, the first load) fade in together: one native fade, no per-row timing. */
+const ENTER = FadeIn.duration(200)
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
 
@@ -62,7 +56,6 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
 
   // One flat list (headers, rows, "Nothing here"), keyed by to-do: a to-do that changes status keeps its view and
   // glides to its new place (layout transition) instead of vanishing from one group and popping into another.
-  // Rows that appear (a group opened, the first load) come in staggered.
   const views: React.ReactNode[] = []
   for (const g of groups) {
     const shown = !fold[g.key]
@@ -73,13 +66,13 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
       </Animated.View>,
     )
     if (!shown) continue
-    g.rows.forEach((t, i) => views.push(
-      <TodoRow key={groupBy === 'status' ? t.id : `${g.key}:${t.id}`} index={i} todo={t} onOpen={onOpen} labels={labels} group={g.key}
+    g.rows.forEach((t) => views.push(
+      <TodoRow key={groupBy === 'status' ? t.id : `${g.key}:${t.id}`} todo={t} onOpen={onOpen} labels={labels} group={g.key}
         who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
         project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />,
     ))
     if (!g.rows.length) views.push(
-      <Animated.View key={`e:${g.key}`} layout={layout} style={reveal(0)} exiting={FadeOut.duration(motion.duration.quick)}>
+      <Animated.View key={`e:${g.key}`} layout={layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)}>
         <Text variant="footnote" color="ink4" style={{ paddingLeft: 52, paddingBottom: 12, paddingTop: 2 }}>Nothing here</Text>
       </Animated.View>,
     )
@@ -112,12 +105,10 @@ function GroupHeader({ title, glyph, count, open, onToggle }: {
   )
 }
 
-const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who, project, onOpen }: {
-  todo: Todo; index: number; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
+const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, project, onOpen }: {
+  todo: Todo; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
 }) {
   const { c } = useTheme()
-  // Its own reveal, fixed at mount (a later render never restarts it).
-  const [revealStyle] = useState(() => reveal(index))
   // Its labels, less the one it's grouped under.
   const labels = t.labels?.length ? all.filter((l) => l.id !== group && t.labels.includes(l.id)) : []
   const ref = useRef<View>(null)
@@ -189,8 +180,7 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
   )
 
   return (
-    <Animated.View layout={layout} exiting={FadeOut.duration(motion.duration.quick)}>
-     <Animated.View style={revealStyle}>
+    <Animated.View layout={layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)}>
       <GestureDetector gesture={gesture}>
         <View ref={ref} collapsable={false} accessible accessibilityRole="button"
           accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`} accessibilityHint="Opens it. Use the actions to change its status."
@@ -200,7 +190,6 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
           {body()}
         </View>
       </GestureDetector>
-     </Animated.View>
     </Animated.View>
   )
 }, (a, b) =>

@@ -336,30 +336,21 @@ class AlarmActivity : Activity() {
       background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
         intArrayOf(Color.parseColor("#1a3591"), Color.parseColor("#0c1a4a"), Color.parseColor("#05070f"), Color.parseColor("#030406"), Color.parseColor("#030406")))
     }
-    // The lights: big soft radial blobs drifting on slow, different loops (one animator moves all three).
+    // The waves: soft blue layers across the top that flow sideways forever (one animator, a few paths a frame).
+    val waves = Waves(this)
+    // Blurred on the GPU into soft moving light (Android 12+; older phones get the plain waves).
+    if (Build.VERSION.SDK_INT >= 31) waves.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(dp(36).toFloat(), dp(36).toFloat(), android.graphics.Shader.TileMode.CLAMP))
+    root.addView(waves, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    animators += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
+      duration = 14_000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
+      addUpdateListener { waves.phase = it.animatedValue as Float; waves.invalidate() }
+      start()
+    }
     fun blob(r: Int, g: Int, b: Int, a: Int, size: Int) = android.view.View(this).apply {
       background = GradientDrawable().apply {
         gradientType = GradientDrawable.RADIAL_GRADIENT; gradientRadius = size / 2f
         colors = intArrayOf(Color.argb(a, r, g, b), Color.argb(0, r, g, b))
       }
-    }
-    val w = resources.displayMetrics.widthPixels
-    // Each light fades out within its own square (radius = half its side), so no edge ever shows.
-    // They stay in the upper part, so the lower half is near black (as in the reference).
-    val lights = listOf(blob(59, 130, 246, 110, dp(500)) to floatArrayOf(-0.25f, -0.35f, 0.18f, 0.08f, 1f),
-      blob(99, 102, 241, 95, dp(500)) to floatArrayOf(0.35f, -0.20f, 0.22f, 0.08f, 1.6f),
-      blob(34, 211, 238, 55, dp(500)) to floatArrayOf(0.05f, 0.05f, 0.20f, 0.06f, 0.7f))
-    for ((v, _) in lights) root.addView(v, FrameLayout.LayoutParams(dp(500), dp(500)))
-    animators += ValueAnimator.ofFloat(0f, (2 * Math.PI).toFloat()).apply {
-      duration = 22_000; repeatCount = ValueAnimator.INFINITE; interpolator = android.view.animation.LinearInterpolator()
-      addUpdateListener { a ->
-        val t = a.animatedValue as Float
-        for ((v, p) in lights) { // p: x, y (fractions of the width), swing x, swing y, speed
-          v.translationX = w * (p[0] + p[2] * kotlin.math.sin(t * p[4])) - dp(250) + w / 2f
-          v.translationY = w * (p[1] + p[3] * kotlin.math.cos(t * p[4] * 0.8f)) + dp(40)
-        }
-      }
-      start()
     }
 
     val now = Date()
@@ -434,10 +425,11 @@ class AlarmActivity : Activity() {
       background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(22, 255, 255, 255)); setStroke(dp(1), Color.argb(36, 255, 255, 255)) }
       clipToOutline = true
     }
-    // The fill: the whole track's shape, light, revealed from the left edge up to the thumb's centre (clip bounds:
-    // nothing lays out while sliding). The hint is drawn twice, white and dark; the dark copy shows only over the fill.
+    // The fill: the track's own rounded shape, slid in from the left so its round right end sits just past the thumb
+    // (concentric with it); the track clips the rest. Its edge is the thumb's right side, so at the end it's all filled.
     val fill = android.view.View(this).apply {
       background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(235, 219, 234, 254)) }
+      alpha = 0f
     }
     track.addView(fill, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     fun hintView(color: Int) = TextView(this).apply {
@@ -457,9 +449,10 @@ class AlarmActivity : Activity() {
     track.addView(thumb, FrameLayout.LayoutParams(size, size).apply { leftMargin = pad; topMargin = pad })
     val clip = android.graphics.Rect()
     fun follow(x: Float) {
-      val edge = if (x <= 0f) 0 else (pad + x + size / 2f).toInt() // at rest: nothing filled
-      clip.set(0, 0, edge, track.height)
-      fill.clipBounds = clip
+      val edge = x + size + pad * 2 // the thumb's right side, plus the track's inset
+      fill.translationX = edge - track.width
+      fill.alpha = if (x <= 0f) 0f else 1f // at rest: nothing filled
+      clip.set(0, 0, if (x <= 0f) 0 else edge.toInt(), track.height)
       hintDark.clipBounds = clip
     }
     track.post { follow(0f) }
@@ -508,6 +501,47 @@ class AlarmActivity : Activity() {
     fun intent(c: Context, o: JSONObject, preview: Boolean): Intent =
       Intent(c, AlarmActivity::class.java).putExtra("id", o.optString("id")).putExtra("title", o.optString("title")).putExtra("preview", preview)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+  }
+}
+
+/** Three soft blue waves over the top of the ringing screen, each a band filled from the top edge down to a moving
+ *  curve (two sines), fading out towards the curve; `phase` (0..2π, looping) moves them. */
+class Waves(c: Context) : android.view.View(c) {
+  var phase = 0f
+  private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+  private val path = android.graphics.Path()
+  // depth (fraction of the height), amplitude (fraction), waves across, speed, colour, alpha
+  private val layers = listOf(
+    floatArrayOf(0.42f, 0.05f, 1.1f, 1f, 37f, 99f, 235f, 150f),
+    floatArrayOf(0.34f, 0.07f, 0.8f, -1.3f, 79f, 70f, 229f, 120f),
+    floatArrayOf(0.26f, 0.05f, 1.6f, 2f, 56f, 189f, 248f, 80f),
+  )
+
+  private var shaders: List<android.graphics.Shader> = emptyList()
+
+  override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+    shaders = layers.map { l ->
+      android.graphics.LinearGradient(0f, 0f, 0f, (l[0] + l[1]) * h,
+        Color.argb(l[7].toInt(), l[4].toInt(), l[5].toInt(), l[6].toInt()), Color.argb(0, l[4].toInt(), l[5].toInt(), l[6].toInt()),
+        android.graphics.Shader.TileMode.CLAMP)
+    }
+  }
+
+  override fun onDraw(canvas: android.graphics.Canvas) {
+    val w = width.toFloat(); val h = height.toFloat()
+    for ((i, l) in layers.withIndex()) {
+      val base = l[0] * h; val amp = l[1] * h
+      fun y(x: Float): Float {
+        val t = x / w * 2f * Math.PI.toFloat() * l[2]
+        return base + amp * kotlin.math.sin(t + phase * l[3]) + amp * 0.45f * kotlin.math.sin(t * 1.7f - phase * l[3] * 0.6f)
+      }
+      path.reset(); path.moveTo(0f, 0f); path.lineTo(0f, y(0f))
+      var x = 0f
+      while (x <= w) { path.lineTo(x, y(x)); x += w / 48f }
+      path.lineTo(w, y(w)); path.lineTo(w, 0f); path.close()
+      paint.shader = shaders.getOrNull(i) ?: continue
+      canvas.drawPath(path, paint)
+    }
   }
 }
 

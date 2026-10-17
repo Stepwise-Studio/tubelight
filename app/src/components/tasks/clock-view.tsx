@@ -5,7 +5,7 @@
 import { router } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
-import Animated, { Easing, FadeIn, FadeOut, Keyframe, LinearTransition, cubicBezier } from 'react-native-reanimated'
+import Animated, { Easing, FadeIn, FadeOut, Keyframe, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated'
 import { Add01Icon, Delete02Icon, Notification03Icon, RepeatIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { useTabBarInset } from '@/components/tab-bar'
@@ -102,9 +102,10 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
   )
 }
 
-/** Today, full width: what's left of it as a live countdown (hours, minutes, seconds; each changed digit rolls in the
- *  Stepwise way), over a midnight → midnight line filled up to now with today's alarms and reminders on it. Ticks only
- *  while the clock is on screen (`active`), and only this card redraws each second. */
+/** Today, full width: what's left of it as a live countdown (each changed digit rolls down like an odometer), and the
+ *  day as 24 bars in the Usage meters' style, one an hour, filled up from the bottom by how much of that hour is gone;
+ *  an hour with an alarm or a reminder has a dot under it. Ticks only while the clock is on screen (`active`), and only
+ *  this card redraws each second. */
 function Hero({ active, marks }: { active: boolean; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
   const { c } = useTheme()
   const [now, setNow] = useState(() => Date.now())
@@ -120,60 +121,62 @@ function Hero({ active, marks }: { active: boolean; marks: { at: Date; kind: 'al
   const left = Math.max(0, Math.floor((start + DAY_MS - now) / 1000))
   const pad = (n: number) => String(n).padStart(2, '0')
   const text = `${pad(Math.floor(left / 3600))}:${pad(Math.floor(left / 60) % 60)}:${pad(left % 60)}`
-  const [w, setW] = useState(0)
-  const x = (ms: number) => ((ms - start) / DAY_MS) * w
+  const hourDone = (h: number) => Math.min(1, Math.max(0, (now - start - h * 3_600_000) / 3_600_000))
+  const marked = new Map<number, string>()
+  for (const m of marks) if (m.at.getTime() < start + DAY_MS) marked.set(m.at.getHours(), m.kind === 'alarm' ? c.ink : c.warning)
   return (
-    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 20, paddingBottom: 16, marginTop: 4 }}
+    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 14, marginTop: 4, alignItems: 'center' }}
       accessible accessibilityLabel={`${Math.floor(left / 3600)} hours ${Math.floor(left / 60) % 60} minutes left today`}>
-      <Text variant="overline" color="ink3">Left today</Text>
-      <Rolling text={text} style={{ fontFamily: fonts.regular, fontSize: 60, lineHeight: 70, letterSpacing: -2, color: c.ink }} />
-      <View style={{ height: 18, marginTop: 12 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
-        {w > 0 && (
-          <>
-            <View style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 2, borderRadius: 1, backgroundColor: c.line }} />
-            <View style={{ position: 'absolute', left: 0, width: x(now), top: 8, height: 2, borderRadius: 1, backgroundColor: c.tube, opacity: 0.55 }} />
-            {[6, 12, 18].map((h) => <View key={h} style={{ position: 'absolute', left: x(start + h * 3_600_000), top: 5, width: 1, height: 8, backgroundColor: c.edge }} />)}
-            {marks.filter((m) => m.at.getTime() < start + DAY_MS).map((m) => m.kind === 'alarm'
-              ? <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 2, top: 1, width: 4, height: 16, borderRadius: 2, backgroundColor: c.ink }} />
-              : <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.warning, borderWidth: 2, borderColor: c.panel }} />)}
-            <View style={{ position: 'absolute', left: x(now) - 7, top: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: c.tubeSoft }} />
-            <View style={{ position: 'absolute', left: x(now) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.tube }} />
-          </>
-        )}
+      <Text variant="label" color="ink3">Left today</Text>
+      <Rolling text={text} height={72} style={{ fontFamily: fonts.regular, fontSize: 62, lineHeight: 72, letterSpacing: -2, color: c.ink }} />
+      <View style={{ flexDirection: 'row', gap: 3, height: 34, marginTop: 14, alignSelf: 'stretch' }}>
+        {Array.from({ length: 24 }, (_, h) => {
+          const f = hourDone(h)
+          return (
+            <View key={h} style={{ flex: 1, alignItems: 'center', gap: 3 }}>
+              <View style={{ flex: 1, alignSelf: 'stretch', borderRadius: 2, backgroundColor: c.line, overflow: 'hidden', justifyContent: 'flex-end' }}>
+                {f > 0 && <View style={{ height: `${f * 100}%`, backgroundColor: f < 1 ? c.tube : `${c.tube}aa` }} />}
+              </View>
+              <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: marked.get(h) ?? 'transparent' }} />
+            </View>
+          )
+        })}
       </View>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-        <Text style={{ fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
-        <Text style={{ fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignSelf: 'stretch', marginTop: 4 }}>
+        {['12 am', '6 am', '12 pm', '6 pm', '12 am'].map((l, i) => <Text key={i} style={{ fontSize: 10, lineHeight: 13, color: c.ink4 }}>{l}</Text>)}
       </View>
     </Squircle>
   )
 }
 
-// Stepwise UI's qty-input digit swap: each place keeps its slot; a changed digit's old one slides 12 px down and out, the
-// new one comes in from 12 px above out of a 3 px blur, 180 ms on (0.22, 1, 0.36, 1). Unchanged digits don't move.
-const DIGIT_IN = {
-  from: { opacity: 0, transform: [{ translateY: -12 }], filter: [{ blur: 3 }] },
-  to: { opacity: 1, transform: [{ translateY: 0 }], filter: [{ blur: 0 }] },
-}
-const DIGIT_EASE = cubicBezier(0.22, 1, 0.36, 1)
-const DIGIT_OUT = new Keyframe({
-  0: { opacity: 1, transform: [{ translateY: 0 }] },
-  100: { opacity: 0, transform: [{ translateY: 12 }], easing: Easing.bezier(0.22, 1, 0.36, 1) },
-}).duration(180)
+// An odometer: each place keeps its slot (clipped to one line); when its digit changes, the old one rolls down out of
+// the slot as the new one rolls down into it from above. Unchanged digits stay put; nothing animates on first show.
+const rollIn = (h: number) => new Keyframe({
+  0: { transform: [{ translateY: -h }] },
+  100: { transform: [{ translateY: 0 }], easing: Easing.out(Easing.cubic) },
+}).duration(320)
+const rollOut = (h: number) => new Keyframe({
+  0: { transform: [{ translateY: 0 }], opacity: 1 },
+  100: { transform: [{ translateY: h }], opacity: 0.2, easing: Easing.out(Easing.cubic) },
+}).duration(320)
+const ROLLS = new Map<number, { enter: ReturnType<typeof rollIn>; exit: ReturnType<typeof rollOut> }>()
+const roll = (h: number) => ROLLS.get(h) ?? ROLLS.set(h, { enter: rollIn(h), exit: rollOut(h) }).get(h)!
 
-function Rolling({ text, style }: { text: string; style: object }) {
+function Rolling({ text, height, style }: { text: string; height: number; style: object }) {
   const chars = text.split('')
+  const r = roll(height)
   return (
-    <View style={{ flexDirection: 'row' }} importantForAccessibility="no-hide-descendants">
-      {chars.map((ch, i) => (
-        <View key={chars.length - i} style={{ overflow: 'hidden' }}>
-          <Animated.View key={ch} exiting={DIGIT_OUT}
-            style={{ animationName: DIGIT_IN, animationDuration: 180, animationTimingFunction: DIGIT_EASE }}>
-            <Text tabular style={style}>{ch}</Text>
-          </Animated.View>
-        </View>
-      ))}
-    </View>
+    <LayoutAnimationConfig skipEntering>
+      <View style={{ flexDirection: 'row' }} importantForAccessibility="no-hide-descendants">
+        {chars.map((ch, i) => (
+          <View key={chars.length - i} style={{ height, overflow: 'hidden' }}>
+            <Animated.View key={ch} entering={r.enter} exiting={r.exit}>
+              <Text tabular style={style}>{ch}</Text>
+            </Animated.View>
+          </View>
+        ))}
+      </View>
+    </LayoutAnimationConfig>
   )
 }
 
