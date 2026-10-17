@@ -8,7 +8,7 @@ import { Add01Icon, ArrowLeft01Icon, Tick02Icon } from '@hugeicons/core-free-ico
 
 import { LABEL_COLORS, addLabel, deleteLabel, updateLabel, useLabels, useTodos, type Label } from '@/lib/tasks'
 import { motion, type, useTheme } from '@/theme'
-import { Button, Icon, IconButton, Sheet, Text, confirm, haptic } from '@/ui'
+import { Icon, IconButton, Sheet, Text, confirm, haptic } from '@/ui'
 
 import { LabelDot } from './todo-list'
 
@@ -116,11 +116,16 @@ function LabelEditor({ label, uses, onDone }: { label: Label; uses: number; onDo
             if (!await confirm({ title: `Delete “${label.name}”?`, body: 'It comes off every to-do that has it.', confirmLabel: 'Delete label', destructive: true })) return
             deleteLabel(label.id)
             onDone()
-          }} style={{ height: 44, borderRadius: 18, backgroundColor: c.dangerSoft, alignItems: 'center', justifyContent: 'center' }}>
+          }} style={{ height: 44, borderRadius: 22, backgroundColor: c.dangerSoft, alignItems: 'center', justifyContent: 'center' }}>
             <Text variant="bodyMedium" color="danger">Delete</Text>
           </Pressable>
         </View>
-        <View style={{ flex: 1 }}><Button label="Save" fullWidth onPress={save} disabled={!clean} /></View>
+        <View style={{ flex: 1 }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Save label" accessibilityState={{ disabled: !clean }} disabled={!clean} onPress={save}
+            style={{ height: 44, borderRadius: 22, backgroundColor: c.ink, opacity: clean ? 1 : 0.4, alignItems: 'center', justifyContent: 'center' }}>
+            <Text variant="bodyMedium" style={{ color: c.canvas }}>Save</Text>
+          </Pressable>
+        </View>
       </View>
     </Animated.View>
   )
