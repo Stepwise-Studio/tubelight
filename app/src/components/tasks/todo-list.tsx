@@ -4,7 +4,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { FadeOut, Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
@@ -19,7 +19,12 @@ const ORDER: Record<TodoStatus, number> = { backlog: 0, todo: 1, doing: 2, done:
 const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
-const layout = LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)
+const layout = LinearTransition.duration(280).easing(motion.ease.smoothOut)
+/** A row coming in: fades in from 8 px above, each one 40 ms after the last (capped), made once and reused. */
+const ENTER = Array.from({ length: 9 }, (_, i) => new Keyframe({
+  0: { opacity: 0, transform: [{ translateY: -motion.distance.base }] },
+  100: { opacity: 1, transform: [{ translateY: 0 }], easing: motion.ease.smoothOut },
+}).duration(motion.duration.fast).delay(motion.staggerDelay(i)))
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
 
@@ -52,27 +57,31 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
     if (none.length) groups.push({ key: '_none', title: 'No label', glyph: <LabelDot color="transparent" size={10} ring />, rows: none, foldable: true })
   }
 
-  return (
-    <View>
-      {groups.map((g) => {
-        const shown = !fold[g.key]
-        return (
-          <Animated.View key={g.key} layout={layout}>
-            <GroupHeader title={g.title} glyph={g.glyph} count={g.rows.length} open={shown}
-              onToggle={() => { haptic.tap(); setFold((f) => ({ ...f, [g.key]: shown })) }} />
-            {shown && g.rows.map((t) => (
-              <TodoRow key={t.id} todo={t} onOpen={onOpen} labels={labels} group={g.key}
-                who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
-                project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />
-            ))}
-            {shown && !g.rows.length && (
-              <Text variant="footnote" color="ink4" style={{ paddingLeft: 52, paddingBottom: 12, paddingTop: 2 }}>Nothing here</Text>
-            )}
-          </Animated.View>
-        )
-      })}
-    </View>
-  )
+  // One flat list (headers, rows, "Nothing here"), keyed by to-do: a to-do that changes status keeps its view and
+  // glides to its new place (layout transition) instead of vanishing from one group and popping into another.
+  // Rows that appear (a group opened, the first load) come in staggered.
+  const views: React.ReactNode[] = []
+  for (const g of groups) {
+    const shown = !fold[g.key]
+    views.push(
+      <Animated.View key={`h:${g.key}`} layout={layout}>
+        <GroupHeader title={g.title} glyph={g.glyph} count={g.rows.length} open={shown}
+          onToggle={() => { haptic.tap(); setFold((f) => ({ ...f, [g.key]: shown })) }} />
+      </Animated.View>,
+    )
+    if (!shown) continue
+    g.rows.forEach((t, i) => views.push(
+      <TodoRow key={groupBy === 'status' ? t.id : `${g.key}:${t.id}`} index={i} todo={t} onOpen={onOpen} labels={labels} group={g.key}
+        who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
+        project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />,
+    ))
+    if (!g.rows.length) views.push(
+      <Animated.View key={`e:${g.key}`} layout={layout} entering={ENTER[0]} exiting={FadeOut.duration(motion.duration.quick)}>
+        <Text variant="footnote" color="ink4" style={{ paddingLeft: 52, paddingBottom: 12, paddingTop: 2 }}>Nothing here</Text>
+      </Animated.View>,
+    )
+  }
+  return <View>{views}</View>
 }
 
 export function LabelDot({ color, size = 8, ring }: { color: string; size?: number; ring?: boolean }) {
@@ -100,8 +109,8 @@ function GroupHeader({ title, glyph, count, open, onToggle }: {
   )
 }
 
-const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, project, onOpen }: {
-  todo: Todo; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
+const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who, project, onOpen }: {
+  todo: Todo; index: number; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
 }) {
   const { c } = useTheme()
   // Its labels, less the one it's grouped under.
@@ -175,7 +184,7 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
   )
 
   return (
-    <Animated.View layout={layout} entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>
+    <Animated.View layout={layout} entering={ENTER[Math.min(index, ENTER.length - 1)]} exiting={FadeOut.duration(motion.duration.quick)}>
       <GestureDetector gesture={gesture}>
         <View ref={ref} collapsable={false} accessible accessibilityRole="button"
           accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`} accessibilityHint="Opens it. Use the actions to change its status."

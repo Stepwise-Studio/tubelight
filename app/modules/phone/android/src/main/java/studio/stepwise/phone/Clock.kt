@@ -1,6 +1,5 @@
 package studio.stepwise.phone
 
-import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlarmManager
@@ -31,11 +30,11 @@ import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
 
@@ -293,10 +292,12 @@ class AlarmService : Service() {
   companion object { const val NOTE = 4712 }
 }
 
-/** The ringing alarm, full screen over the lock screen: its name, the time big, the date, on the alarm's own gradient
- *  slowly shifting between its two palettes; Snooze and Stop as pills. `preview` (from the alarm editor) only closes. */
+/** The ringing alarm, full screen over the lock screen (also its preview from the alarm editor, which only closes).
+ *  Deep blue fading to black, a soft glow breathing behind the time; the alarm's name, the time big in Inter Display
+ *  with AM/PM beside it, the date; at the bottom a frosted Snooze and a slide-to-stop track (no stopping it by a stray
+ *  tap). Everything is plain views and two property animations: nothing redraws but the glow's alpha and the thumb. */
 class AlarmActivity : Activity() {
-  private var shift: ValueAnimator? = null
+  private var glow: ValueAnimator? = null
 
   override fun onCreate(state: Bundle?) {
     super.onCreate(state)
@@ -304,79 +305,140 @@ class AlarmActivity : Activity() {
     if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
     else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+    window.statusBarColor = Color.TRANSPARENT
+    window.navigationBarColor = Color.TRANSPARENT
     val id = intent.getStringExtra("id") ?: ""
     val preview = intent.getBooleanExtra("preview", false)
     val title = intent.getStringExtra("title")?.ifBlank { null } ?: "Alarm"
-    val colors = (intent.getStringArrayExtra("colors")?.takeIf { it.size == 6 } ?: DEFAULT).map { Color.parseColor(it) }
     val d = resources.displayMetrics.density
     fun dp(v: Int) = (v * d).toInt()
-    fun text(s: String, size: Float, alpha: Int, face: Typeface) = TextView(this).apply {
-      this.text = s; textSize = size; setTextColor(Color.argb(alpha, 255, 255, 255)); typeface = face; gravity = Gravity.CENTER
+    fun font(name: String, fallback: String) = runCatching { Typeface.createFromAsset(assets, "fonts/$name.ttf") }.getOrElse { Typeface.create(fallback, Typeface.NORMAL) }
+    val regular = font("InterDisplay-Regular", "sans-serif")
+    val medium = font("InterDisplay-Medium", "sans-serif-medium")
+    fun white(a: Int) = Color.argb(a, 255, 255, 255)
+    fun text(s: String, size: Float, alpha: Int, face: Typeface, spacing: Float = 0f) = TextView(this).apply {
+      this.text = s; textSize = size; setTextColor(white(alpha)); typeface = face; gravity = Gravity.CENTER
+      letterSpacing = spacing; includeFontPadding = false
     }
-    fun pill(s: String, solid: Boolean, act: String) = TextView(this).apply {
-      text = s; textSize = 18f; gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-      setTextColor(if (solid) Color.parseColor("#0b0b0c") else Color.WHITE)
-      background = GradientDrawable().apply { cornerRadius = dp(34).toFloat(); setColor(if (solid) Color.WHITE else Color.argb(46, 255, 255, 255)) }
-      setOnClickListener {
-        if (!preview) startService(Intent(this@AlarmActivity, AlarmService::class.java).setAction(act).putExtra("id", id))
-        finish()
+    fun act(a: String) {
+      if (!preview) startService(Intent(this, AlarmService::class.java).setAction(a).putExtra("id", id))
+      finish()
+    }
+
+    val root = FrameLayout(this).apply {
+      background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.parseColor("#2346b8"), Color.parseColor("#132a78"), Color.parseColor("#0a1438"), Color.parseColor("#05070d")))
+    }
+    // The glow: a soft blue light behind the time, breathing (alpha only).
+    val halo = android.view.View(this).apply {
+      background = GradientDrawable().apply {
+        gradientType = GradientDrawable.RADIAL_GRADIENT; gradientRadius = dp(220).toFloat()
+        colors = intArrayOf(Color.argb(150, 96, 165, 250), Color.argb(0, 96, 165, 250))
       }
+      alpha = 0.5f
     }
-    // The background: three stops from top to bottom, each easing between palette A and B and back, forever.
-    val bg = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[0], colors[1], colors[2]))
-    val mix = ArgbEvaluator()
-    shift = ValueAnimator.ofFloat(0f, 1f).apply {
-      duration = 7000; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+    root.addView(halo, FrameLayout.LayoutParams(dp(440), dp(440)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(70) })
+    glow = ValueAnimator.ofFloat(0.35f, 0.9f).apply {
+      duration = 2600; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
       interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-      addUpdateListener { a ->
-        val f = a.animatedValue as Float
-        bg.colors = IntArray(3) { i -> mix.evaluate(f, colors[i], colors[i + 3]) as Int }
-      }
+      addUpdateListener { halo.alpha = it.animatedValue as Float }
       start()
     }
+
     val now = Date()
-    val root = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; background = bg
-      setPadding(dp(28), dp(140), dp(28), dp(64))
-      addView(text(title, 22f, 230, Typeface.create("sans-serif-medium", Typeface.NORMAL)))
-      // The time big, AM/PM small beside it (one line: "7:07 pm" at this size wrapped).
-      val h24 = android.text.format.DateFormat.is24HourFormat(this@AlarmActivity)
+    val h24 = android.text.format.DateFormat.is24HourFormat(this)
+    val column = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+      setPadding(dp(24), dp(108), dp(24), dp(40))
+      addView(text("ALARM", 12f, 150, medium, 0.18f))
+      addView(text(title, 22f, 235, medium).apply { maxLines = 2 }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) })
       addView(LinearLayout(this@AlarmActivity).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; isBaselineAligned = true
-        addView(text(java.text.SimpleDateFormat(if (h24) "HH:mm" else "h:mm", java.util.Locale.getDefault()).format(now), 96f, 255,
-          Typeface.create("sans-serif-thin", Typeface.NORMAL)).apply { includeFontPadding = false; isSingleLine = true })
-        if (!h24) addView(text(java.text.SimpleDateFormat("a", java.util.Locale.getDefault()).format(now).uppercase(), 24f, 220,
-          Typeface.create("sans-serif-light", Typeface.NORMAL)), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8) })
-      }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
-      addView(text(DateFormat.getDateInstance(DateFormat.FULL).format(now), 16f, 170, Typeface.create("sans-serif", Typeface.NORMAL)))
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+        addView(text(java.text.SimpleDateFormat(if (h24) "HH:mm" else "h:mm", java.util.Locale.getDefault()).format(now), 104f, 255, regular, -0.04f)
+          .apply { isSingleLine = true })
+        if (!h24) addView(text(java.text.SimpleDateFormat("a", java.util.Locale.getDefault()).format(now).uppercase(), 24f, 190, medium),
+          LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8); bottomMargin = dp(18) })
+      }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+      addView(text(java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(now), 17f, 160, regular))
       addView(android.view.View(this@AlarmActivity), LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-      addView(pill("Snooze 5 min", false, Clock.SNOOZE), LinearLayout.LayoutParams(MATCH_PARENT, dp(68)))
-      addView(pill("Stop", true, Clock.STOP), LinearLayout.LayoutParams(MATCH_PARENT, dp(68)).apply { topMargin = dp(12) })
+      // Snooze: frosted, quiet.
+      addView(text("Snooze  ·  5 min", 17f, 240, medium).apply {
+        background = GradientDrawable().apply { cornerRadius = dp(30).toFloat(); setColor(white(30)); setStroke(dp(1), white(40)) }
+        setOnClickListener { performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM); act(Clock.SNOOZE) }
+      }, LinearLayout.LayoutParams(MATCH_PARENT, dp(60)))
+      addView(slider(dp(72), ::dp, medium) { act(Clock.STOP) }, LinearLayout.LayoutParams(MATCH_PARENT, dp(72)).apply { topMargin = dp(14) })
     }
+    root.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
     setContentView(root)
+    // In: the content rises a little and fades up.
+    column.alpha = 0f; column.translationY = dp(16).toFloat()
+    column.animate().alpha(1f).translationY(0f).setDuration(420).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
   }
 
-  // Back doesn't stop the alarm by accident.
+  /** "Slide to stop": a frosted track, a white thumb with a stop mark; past three quarters it stops, else it springs back. */
+  private fun slider(h: Int, dp: (Int) -> Int, face: Typeface, onStop: () -> Unit): FrameLayout {
+    val pad = dp(6)
+    val track = FrameLayout(this).apply {
+      background = GradientDrawable().apply { cornerRadius = h / 2f; setColor(Color.argb(22, 255, 255, 255)); setStroke(dp(1), Color.argb(36, 255, 255, 255)) }
+    }
+    val hint = TextView(this).apply {
+      text = "Slide to stop"; textSize = 17f; typeface = face; setTextColor(Color.argb(170, 255, 255, 255)); gravity = Gravity.CENTER
+    }
+    track.addView(hint, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    val size = h - pad * 2
+    val thumb = FrameLayout(this).apply {
+      background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+      elevation = dp(4).toFloat()
+      addView(android.view.View(this@AlarmActivity).apply {
+        background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(Color.parseColor("#132a78")) }
+      }, FrameLayout.LayoutParams(dp(18), dp(18)).apply { gravity = Gravity.CENTER })
+    }
+    track.addView(thumb, FrameLayout.LayoutParams(size, size).apply { leftMargin = pad; topMargin = pad })
+    var downX = 0f
+    var done = false
+    thumb.setOnTouchListener { v, e ->
+      val max = (track.width - size - pad * 2).toFloat()
+      when (e.actionMasked) {
+        android.view.MotionEvent.ACTION_DOWN -> { downX = e.rawX - v.translationX; v.animate().cancel(); true }
+        android.view.MotionEvent.ACTION_MOVE -> {
+          v.translationX = (e.rawX - downX).coerceIn(0f, max)
+          hint.alpha = 1f - v.translationX / max
+          true
+        }
+        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+          if (!done && v.translationX > max * 0.75f) {
+            done = true
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+            v.animate().translationX(max).setDuration(120).withEndAction(onStop).start()
+          } else {
+            v.animate().translationX(0f).setDuration(320).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).start()
+            hint.animate().alpha(1f).setDuration(200).start()
+          }
+          true
+        }
+        else -> false
+      }
+    }
+    return track
+  }
+
+  // Back doesn't stop the alarm by accident (a preview just closes).
   @Deprecated("Back does nothing while ringing")
   override fun onBackPressed() { if (intent.getBooleanExtra("preview", false)) finish() }
 
   override fun onDestroy() {
-    shift?.cancel()
+    glow?.cancel()
     if (current === this) current = null
     super.onDestroy()
   }
 
   companion object {
     var current: AlarmActivity? = null
-    private val DEFAULT = arrayOf("#0f172a", "#312e81", "#0e7490", "#1e1b4b", "#0f766e", "#4338ca")
 
-    /** An alarm item ({title, colors}) on its screen; `preview` from the editor. */
-    fun intent(c: Context, o: JSONObject, preview: Boolean): Intent {
-      val colors = o.optJSONArray("colors")?.let { a -> Array(a.length()) { a.getString(it) } }
-      return Intent(c, AlarmActivity::class.java).putExtra("id", o.optString("id")).putExtra("title", o.optString("title"))
-        .putExtra("colors", colors).putExtra("preview", preview)
+    /** An alarm item ({id, title}) on its screen; `preview` from the editor. */
+    fun intent(c: Context, o: JSONObject, preview: Boolean): Intent =
+      Intent(c, AlarmActivity::class.java).putExtra("id", o.optString("id")).putExtra("title", o.optString("title")).putExtra("preview", preview)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
-    }
   }
 }
 

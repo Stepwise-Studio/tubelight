@@ -1,12 +1,11 @@
 // An alarm: its name, the time on big wheels, the days it repeats (none: once). `new` makes one.
 import { router, useLocalSearchParams } from 'expo-router'
-import { LinearGradient } from 'expo-linear-gradient'
 import { useEffect, useState } from 'react'
 import { Pressable, TextInput, View } from 'react-native'
 
 import { ClockWheel } from '@/components/tasks/clock-wheel'
 import { EditorShell, Field } from '@/components/tasks/editor-shell'
-import { LOOKS, addAlarm, alarmNext, daysText, deleteAlarm, lookColors, nextAt, untilText, updateAlarm, useAlarms, type Alarm, type Look } from '@/lib/clock'
+import { addAlarm, alarmNext, daysText, deleteAlarm, nextAt, untilText, updateAlarm, useAlarms, type Alarm } from '@/lib/clock'
 import { Phone } from '@/lib/phone'
 import { type, useTheme } from '@/theme'
 import { PickerField, Text, haptic, toast } from '@/ui'
@@ -28,7 +27,6 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
   const [days, setDays] = useState<number[]>(alarm?.days ?? [])
   const [label, setLabel] = useState(alarm?.label ?? '')
   const [sound, setSound] = useState(alarm?.sound ?? '')
-  const [look, setLook] = useState<Look>(alarm?.look ?? 'aurora')
   const [tones, setTones] = useState<{ title: string; uri: string; kind: 'alarm' | 'ringtone' }[]>([])
   useEffect(() => {
     Phone?.alarmTones?.().then(setTones, () => {})
@@ -36,12 +34,12 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
   }, [])
   const [h, m] = time.split(':').map(Number)
   const pad = (n: number) => String(n).padStart(2, '0')
-  const at = alarmNext({ ...(alarm ?? { id: '', created_at: '', updated_at: '' }), time, days, label, sound, look, enabled: true, at: days.length ? null : nextAt(time) })
+  const at = alarmNext({ ...(alarm ?? { id: '', created_at: '', updated_at: '' }), time, days, label, sound, enabled: true, at: days.length ? null : nextAt(time) })
 
   const save = () => {
     Phone?.stopTone?.()
-    if (alarm) updateAlarm(alarm, { time, days, label: label.trim(), sound, look, enabled: true })
-    else addAlarm({ time, days, label: label.trim(), sound, look })
+    if (alarm) updateAlarm(alarm, { time, days, label: label.trim(), sound, enabled: true })
+    else addAlarm({ time, days, label: label.trim(), sound })
     haptic.success()
     if (at) toast({ title: `Alarm ${untilText(at)}` })
     router.back()
@@ -77,23 +75,10 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
           onChange={(v) => { setSound(v); Phone?.previewTone?.(v) }}
           options={[{ value: '', title: 'Phone’s alarm sound', group: 'Alarm sounds' }, ...tones.map((t) => ({ value: t.uri, title: t.title.replace(/_/g, ' '), group: t.kind === 'alarm' ? 'Alarm sounds' : 'Ringtones' }))]} />
       )}
-      <Field label={`Ringing screen · ${LOOKS[look].label}`}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          {(Object.keys(LOOKS) as Look[]).map((k) => {
-            const on = k === look
-            return (
-              <Pressable key={k} onPress={() => { haptic.tap(); setLook(k) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={LOOKS[k].label}
-                style={{ width: 52, height: 52, borderRadius: 26, padding: 3, borderWidth: 2, borderColor: on ? c.ink : 'transparent' }}>
-                <LinearGradient colors={[...LOOKS[k].a]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, borderRadius: 22 }} />
-              </Pressable>
-            )
-          })}
-        </View>
-        <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() || 'Alarm', colors: lookColors(look) })) }}
-          accessibilityRole="button" style={{ height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2, marginTop: 4 }}>
-          <Text variant="label" color="ink2">Preview the ringing screen</Text>
-        </Pressable>
-      </Field>
+      <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() || 'Alarm' })) }}
+        accessibilityRole="button" style={{ height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
+        <Text variant="label" color="ink2">Preview the ringing screen</Text>
+      </Pressable>
     </EditorShell>
   )
 }

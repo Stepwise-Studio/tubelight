@@ -1,83 +1,125 @@
-// Labels. For a to-do (`value`/`onChange`): tick any number, type a name to make one (ticked at once), hold one to
-// rename, recolour or delete it everywhere. Without them (the Labels button on Tasks): all labels, tap one to edit it.
+// Labels. For a to-do (`value`/`onChange`): tick any number, type a name to make one (ticked at once), hold one to edit
+// it. Without them (the Labels button on Tasks): every label with its open to-dos, tap one to edit it. Editing happens in
+// place in the same sheet: the name, a row of colours, Save and Delete.
 import { useState } from 'react'
 import { Pressable, TextInput, View } from 'react-native'
-import { Add01Icon, Delete02Icon, Edit02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
+import Animated, { FadeIn } from 'react-native-reanimated'
+import { Add01Icon, ArrowLeft01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { LABEL_COLORS, addLabel, deleteLabel, updateLabel, useLabels, useTodos, type Label } from '@/lib/tasks'
-import { type, useTheme } from '@/theme'
-import { Icon, Sheet, Text, confirm, haptic, showMenu } from '@/ui'
+import { motion, type, useTheme } from '@/theme'
+import { Button, Icon, IconButton, Sheet, Text, confirm, haptic } from '@/ui'
 
 import { LabelDot } from './todo-list'
 
 const NONE: string[] = []
-const COLOR_NAMES = ['Blue', 'Green', 'Amber', 'Pink', 'Violet', 'Teal', 'Red', 'Slate']
 
 export function LabelSheet({ open, value = NONE, onChange, onClose }: { open: boolean; value?: string[]; onChange?: (ids: string[]) => void; onClose: () => void }) {
   const { c } = useTheme()
   const labels = useLabels()
+  const { todos } = useTodos()
   const [name, setName] = useState('')
-  const [renaming, setRenaming] = useState<Label | null>(null)
+  const [editing, setEditing] = useState<Label | null>(null)
   const counts = new Map<string, number>()
-  for (const t of useTodos().todos ?? []) for (const id of t.labels ?? []) if (t.status !== 'done' && t.status !== 'canceled') counts.set(id, (counts.get(id) ?? 0) + 1)
+  for (const t of todos ?? []) for (const id of t.labels ?? []) if (t.status !== 'done' && t.status !== 'canceled') counts.set(id, (counts.get(id) ?? 0) + 1)
   const toggle = (id: string) => { haptic.tap(); onChange?.(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]) }
-  const submit = () => {
+  const add = () => {
     const n = name.trim().replace(/\s+/g, ' ')
     if (!n) return
-    if (renaming) updateLabel(renaming.id, { name: n })
-    else {
-      const have = labels.find((l) => l.name.toLowerCase() === n.toLowerCase())
-      const id = have?.id ?? addLabel(n).id
-      if (onChange && !value.includes(id)) onChange([...value, id])
-    }
+    const have = labels.find((l) => l.name.toLowerCase() === n.toLowerCase())
+    const id = have?.id ?? addLabel(n).id
+    if (onChange && !value.includes(id)) onChange([...value, id])
     haptic.success()
     setName('')
-    setRenaming(null)
   }
-  const hold = (l: Label) => showMenu({
-    title: l.name,
-    items: [
-      { label: 'Rename', icon: Edit02Icon, onPress: () => { setRenaming(l); setName(l.name) } },
-      { label: 'Colour', glyph: <LabelDot color={l.color} size={14} />, onPress: () => setTimeout(() => showMenu({
-        title: `${l.name} colour`,
-        items: LABEL_COLORS.map((color, i) => ({ label: COLOR_NAMES[i], glyph: <LabelDot color={color} size={14} />, checked: color === l.color, onPress: () => updateLabel(l.id, { color }) })),
-      }), 250) },
-      { label: 'Delete', icon: Delete02Icon, destructive: true, onPress: async () => {
-        if (await confirm({ title: `Delete “${l.name}”?`, body: 'It comes off every to-do that has it.', confirmLabel: 'Delete label', destructive: true })) deleteLabel(l.id)
-      } },
-    ],
-  })
+  const close = () => { setEditing(null); onClose() }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Labels">
-      <View style={{ paddingHorizontal: 12, paddingBottom: 16 }}>
-        {labels.map((l) => {
-          const on = value.includes(l.id)
+    <Sheet open={open} onClose={close} title={editing ? 'Edit label' : 'Labels'}>
+      {editing ? (
+        <LabelEditor key={editing.id} label={editing} uses={counts.get(editing.id) ?? 0} onDone={() => setEditing(null)} />
+      ) : (
+        <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ paddingHorizontal: 12, paddingBottom: 16 }}>
+          {labels.map((l) => {
+            const on = value.includes(l.id)
+            return (
+              <Pressable key={l.id} onPress={() => (onChange ? toggle(l.id) : setEditing(l))} onLongPress={() => { haptic.light(); setEditing(l) }}
+                android_ripple={{ color: c.wash }} accessibilityRole={onChange ? 'checkbox' : 'button'} accessibilityState={{ checked: on }}
+                accessibilityLabel={l.name} accessibilityHint={onChange ? 'Hold to edit' : 'Edit'}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 14, height: 50, paddingHorizontal: 10, borderRadius: 14 }}>
+                <LabelDot color={l.color} size={12} />
+                <Text variant="body" style={{ flex: 1 }} numberOfLines={1}>{l.name}</Text>
+                {onChange ? on && <Icon icon={Tick02Icon} size={20} color="ink" strokeWidth={2} /> : <Text variant="label" color="ink3" tabular>{counts.get(l.id) ?? 0}</Text>}
+              </Pressable>
+            )
+          })}
+          {!labels.length && (
+            <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 10, paddingBottom: 10 }}>Labels group to-dos across statuses: study, dev, home…</Text>
+          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, height: 52, marginTop: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.panel2 }}>
+            <Icon icon={Add01Icon} size={18} color="ink3" />
+            <TextInput value={name} onChangeText={setName} onSubmitEditing={add} submitBehavior="submit" returnKeyType="done"
+              placeholder="New label" placeholderTextColor={c.ink4} maxLength={40}
+              cursorColor={c.tube} selectionColor={c.tube} style={[type.body, { flex: 1, color: c.ink, padding: 0 }]} accessibilityLabel="New label name" />
+            {!!name.trim() && (
+              <Pressable onPress={add} hitSlop={10} accessibilityRole="button" accessibilityLabel="Add label">
+                <Text variant="label" color="tube">Add</Text>
+              </Pressable>
+            )}
+          </View>
+        </Animated.View>
+      )}
+    </Sheet>
+  )
+}
+
+/** One label: how it reads on a to-do, its name, a row of colours, Save and Delete. */
+function LabelEditor({ label, uses, onDone }: { label: Label; uses: number; onDone: () => void }) {
+  const { c } = useTheme()
+  const [name, setName] = useState(label.name)
+  const [color, setColor] = useState(label.color)
+  const clean = name.trim().replace(/\s+/g, ' ')
+  const save = () => {
+    if (!clean) return
+    if (clean !== label.name || color !== label.color) updateLabel(label.id, { name: clean, color })
+    haptic.success()
+    onDone()
+  }
+  return (
+    <Animated.View entering={FadeIn.duration(motion.duration.quick)} style={{ paddingHorizontal: 20, paddingBottom: 18, gap: 18 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: -10 }}>
+        <IconButton icon={ArrowLeft01Icon} size={36} iconSize={18} color={c.ink2} accessibilityLabel="Back to labels" onPress={onDone} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 12, borderRadius: 15, backgroundColor: `${color}22` }}>
+          <LabelDot color={color} size={8} />
+          <Text variant="label" numberOfLines={1}>{clean || 'Label'}</Text>
+        </View>
+        <View style={{ flex: 1 }} />
+        <Text variant="footnote" color="ink3">{uses ? `${uses} open to-do${uses === 1 ? '' : 's'}` : 'Not on any open to-do'}</Text>
+      </View>
+      <TextInput value={name} onChangeText={setName} onSubmitEditing={save} submitBehavior="blurAndSubmit" returnKeyType="done" maxLength={40}
+        placeholder="Label name" placeholderTextColor={c.ink4} cursorColor={c.tube} selectionColor={c.tube}
+        style={[type.body, { color: c.ink, height: 52, paddingHorizontal: 16, borderRadius: 16, backgroundColor: c.panel2, fontSize: 17 }]} accessibilityLabel="Label name" />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        {LABEL_COLORS.map((col) => {
+          const on = col === color
           return (
-            <Pressable key={l.id} onPress={() => (onChange ? toggle(l.id) : hold(l))} onLongPress={() => hold(l)} android_ripple={{ color: c.wash }}
-              accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={l.name} accessibilityHint="Hold to rename or delete"
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, height: 50, paddingHorizontal: 10, borderRadius: 14 }}>
-              <LabelDot color={l.color} size={12} />
-              <Text variant="body" style={{ flex: 1 }} numberOfLines={1}>{l.name}</Text>
-              {onChange ? on && <Icon icon={Tick02Icon} size={20} color="ink" strokeWidth={2} /> : <Text variant="label" color="ink3" tabular>{counts.get(l.id) ?? 0}</Text>}
+            <Pressable key={col} onPress={() => { haptic.tap(); setColor(col) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={`Colour ${col}`}
+              style={{ width: 36, height: 36, borderRadius: 18, padding: 3, borderWidth: 2, borderColor: on ? c.ink : 'transparent' }}>
+              <View style={{ flex: 1, borderRadius: 14, backgroundColor: col }} />
             </Pressable>
           )
         })}
-        {!labels.length && (
-          <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 10, paddingBottom: 10 }}>Labels group to-dos across statuses: study, dev, home…</Text>
-        )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, height: 52, marginTop: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: c.panel2 }}>
-          <Icon icon={renaming ? Edit02Icon : Add01Icon} size={18} color="ink3" />
-          <TextInput value={name} onChangeText={setName} onSubmitEditing={submit} submitBehavior="submit" returnKeyType="done"
-            placeholder={renaming ? `Rename ${renaming.name}` : 'New label'} placeholderTextColor={c.ink4} maxLength={40}
-            cursorColor={c.tube} selectionColor={c.tube} style={[type.body, { flex: 1, color: c.ink, padding: 0 }]} accessibilityLabel="Label name" />
-          {!!name.trim() && (
-            <Pressable onPress={submit} hitSlop={10} accessibilityRole="button" accessibilityLabel={renaming ? 'Rename' : 'Add label'}>
-              <Text variant="label" color="tube">{renaming ? 'Rename' : 'Add'}</Text>
-            </Pressable>
-          )}
-        </View>
       </View>
-    </Sheet>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Delete" variant="ghost" onPress={async () => {
+            if (!await confirm({ title: `Delete “${label.name}”?`, body: 'It comes off every to-do that has it.', confirmLabel: 'Delete label', destructive: true })) return
+            deleteLabel(label.id)
+            onDone()
+          }} />
+        </View>
+        <View style={{ flex: 1 }}><Button label="Save" onPress={save} disabled={!clean} /></View>
+      </View>
+    </Animated.View>
   )
 }

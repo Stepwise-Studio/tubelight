@@ -1,10 +1,10 @@
 // The full-screen editors' frame (to-do, alarm, reminder, event): close on the left, what it is in the middle, save on
-// the right (an arrow up while new, a tick while editing), the form scrolling below, delete at the end.
+// the right (a tick), the form scrolling below, delete at the end.
 import { router } from 'expo-router'
 import type { ReactNode } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ArrowUp02Icon, Cancel01Icon, Delete02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { Cancel01Icon, Delete02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { useTheme } from '@/theme'
 import { Button, Icon, Press, Text, confirm, haptic } from '@/ui'
@@ -31,7 +31,7 @@ export function EditorShell({ title, editing, ready, onSave, onDelete, deleteWha
       <View style={{ paddingTop: insets.top + 10, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <RoundButton icon={Cancel01Icon} label="Close" onPress={() => router.back()} />
         <Text variant="headline" style={{ flex: 1, textAlign: 'center' }} numberOfLines={1}>{title}</Text>
-        <RoundButton icon={editing ? Tick02Icon : ArrowUp02Icon} label="Save" solid={ready} disabled={!ready} onPress={onSave} />
+        <RoundButton icon={Tick02Icon} label="Save" solid={ready} disabled={!ready} onPress={onSave} />
       </View>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: insets.bottom + 40, gap: 22 }}>
         {children}

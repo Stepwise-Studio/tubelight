@@ -111,8 +111,8 @@ export interface ClockItem {
   id: string; kind: 'alarm' | 'reminder'; title: string; body?: string
   hour: number; minute: number; /** 0 = Monday; an alarm with none rings once, at `at` */ days: number[]
   /** ms; 0 for none */ at: number; repeat: string; enabled: boolean
-  /** Alarms: a tone's content:// uri ('' = the phone's alarm sound) and the ringing screen's two palettes (3 + 3 hex). */
-  sound?: string; colors?: string[]
+  /** Alarms: a tone's content:// uri ('' = the phone's alarm sound). */
+  sound?: string
 }
 export interface PhoneCalendar { id: string; name: string; color: string; account: string; writable: boolean; visible: boolean; primary: boolean; local: boolean }
 export interface PhoneEvent {

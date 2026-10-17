@@ -7,7 +7,7 @@ import { Keyboard, ScrollView, TextInput, View } from 'react-native'
 import { KeyboardStickyView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  ArrowRight01Icon, ArrowUp02Icon, Calendar03Icon, Cancel01Icon, Delete02Icon, Tag01Icon, User03Icon, Tick02Icon, UserCircleIcon,
+  ArrowRight01Icon, Calendar03Icon, Cancel01Icon, Delete02Icon, Tag01Icon, Tick02Icon, UserCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 import { DayPicker } from '@/components/tasks/day-picker'
@@ -22,6 +22,9 @@ import {
 import { useWorkspace } from '@/lib/workspace'
 import { type, useTheme } from '@/theme'
 import { Button, Icon, IconButton, Press, Sheet, Text, TeammateAvatar, confirm, haptic, toast } from '@/ui'
+
+/** Personal's picture: the face the user picked (Calendy's). */
+const PERSONAL = { avatar_shape: 'face:cap', color: '#fafafa', name: 'Personal' }
 
 type Draft = Pick<Todo, 'title' | 'notes' | 'status' | 'priority' | 'due' | 'project_id' | 'assignee' | 'labels'>
 type Picker = 'status' | 'priority' | 'assignee' | 'due' | 'project' | 'labels' | null
@@ -107,13 +110,13 @@ function Editor({ todo, start, label }: { todo: Todo | null; start?: TodoStatus;
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Press radius={24} onPress={() => setPicker('project')} accessibilityLabel={`In ${project?.name ?? 'Personal'}. Change`}
             style={{ height: 48, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, maxWidth: 220 }}>
-            {project ? <GroupAvatar color={project.color} icon={project.icon} size={24} /> : <Icon icon={User03Icon} size={18} color="tube" />}
+            {project ? <GroupAvatar color={project.color} icon={project.icon} size={24} /> : <TeammateAvatar teammate={PERSONAL} size={24} interactive={false} />}
             <Text variant="headline" numberOfLines={1} style={{ flexShrink: 1 }}>{project?.name ?? 'Personal'}</Text>
           </Press>
         </View>
         {editing
           ? <RoundButton icon={Tick02Icon} label="Done" onPress={() => router.back()} />
-          : <RoundButton icon={ArrowUp02Icon} label="Add to-do" solid={ready} disabled={!ready || saving} onPress={create} />}
+          : <RoundButton icon={Tick02Icon} label="Add to-do" solid={ready} disabled={!ready || saving} onPress={create} />}
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 28, paddingBottom: 220, gap: 10 }}>
@@ -174,7 +177,7 @@ function Editor({ todo, start, label }: { todo: Todo | null; start?: TodoStatus;
         footer={<Text variant="footnote" color="ink3" style={{ paddingHorizontal: 14, paddingTop: 8 }}>A teammate gets it in their chat, starts on it and keeps its status up to date.</Text>} />
       <PickerSheet open={picker === 'project'} title="List" value={d.project_id} onClose={() => setPicker(null)} onPick={(project_id) => set({ project_id })}
         choices={[
-          { value: null, label: 'Personal', sub: 'Just yours', glyph: <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={User03Icon} size={16} color="tube" /></View> },
+          { value: null, label: 'Personal', sub: 'Just yours', glyph: <TeammateAvatar teammate={PERSONAL} size={28} interactive={false} /> },
           ...ws.projects.map((p) => ({ value: p.id as string | null, label: p.name, glyph: <GroupAvatar color={p.color} icon={p.icon} size={28} /> })),
         ]} />
       <LabelSheet open={picker === 'labels'} value={d.labels} onChange={(labels) => set({ labels })} onClose={() => setPicker(null)} />
