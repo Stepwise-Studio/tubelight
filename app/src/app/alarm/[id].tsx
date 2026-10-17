@@ -1,14 +1,15 @@
 // An alarm: its name, the time on big wheels, the days it repeats (none: once). `new` makes one.
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Pressable, TextInput, View } from 'react-native'
 
 import { ClockWheel } from '@/components/tasks/clock-wheel'
 import { EditorShell, Field } from '@/components/tasks/editor-shell'
+import { SoundField } from '@/components/tasks/sound-field'
 import { addAlarm, alarmNext, daysText, deleteAlarm, nextAt, untilText, updateAlarm, useAlarms, type Alarm } from '@/lib/clock'
 import { Phone } from '@/lib/phone'
 import { type, useTheme } from '@/theme'
-import { PickerField, Text, haptic, toast } from '@/ui'
+import { Text, haptic, toast } from '@/ui'
 
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -27,19 +28,15 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
   const [days, setDays] = useState<number[]>(alarm?.days ?? [])
   const [label, setLabel] = useState(alarm?.label ?? '')
   const [sound, setSound] = useState(alarm?.sound ?? '')
-  const [tones, setTones] = useState<{ title: string; uri: string; kind: 'alarm' | 'ringtone' }[]>([])
-  useEffect(() => {
-    Phone?.alarmTones?.().then(setTones, () => {})
-    return () => Phone?.stopTone?.()
-  }, [])
+  const [soundName, setSoundName] = useState(alarm?.sound_name ?? '')
   const [h, m] = time.split(':').map(Number)
   const pad = (n: number) => String(n).padStart(2, '0')
-  const at = alarmNext({ ...(alarm ?? { id: '', created_at: '', updated_at: '' }), time, days, label, sound, enabled: true, at: days.length ? null : nextAt(time) })
+  const at = alarmNext({ ...(alarm ?? { id: '', created_at: '', updated_at: '' }), time, days, label, sound, sound_name: soundName, enabled: true, at: days.length ? null : nextAt(time) })
 
   const save = () => {
     Phone?.stopTone?.()
-    if (alarm) updateAlarm(alarm, { time, days, label: label.trim(), sound, enabled: true })
-    else addAlarm({ time, days, label: label.trim(), sound })
+    if (alarm) updateAlarm(alarm, { time, days, label: label.trim(), sound, sound_name: soundName, enabled: true })
+    else addAlarm({ time, days, label: label.trim(), sound, sound_name: soundName })
     haptic.success()
     if (at) toast({ title: `Alarm ${untilText(at)}` })
     router.back()
@@ -70,11 +67,7 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
           })}
         </View>
       </Field>
-      {tones.length > 0 && (
-        <PickerField label="Sound" value={sound} stayOpen placeholder="Phone’s alarm sound"
-          onChange={(v) => { setSound(v); Phone?.previewTone?.(v) }}
-          options={[{ value: '', title: 'Phone’s alarm sound', group: 'Alarm sounds' }, ...tones.map((t) => ({ value: t.uri, title: t.title.replace(/_/g, ' '), group: t.kind === 'alarm' ? 'Alarm sounds' : 'Ringtones' }))]} />
-      )}
+      <SoundField sound={sound} name={soundName} onChange={(u, n) => { setSound(u); setSoundName(n) }} />
       <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() })) }}
         accessibilityRole="button" style={{ height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2 }}>
         <Text variant="label" color="ink2">Preview the ringing screen</Text>

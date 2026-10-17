@@ -89,6 +89,24 @@ class PhoneModule : Module() {
     AsyncFunction("alarmTones") { Tones.list(context) }
     Function("previewTone") { uri: String -> Tones.preview(context, uri) }
     Function("stopTone") { Tones.stop() }
+    // A sound of their own for an alarm: Android's file picker for audio; the read grant is kept so it rings later.
+    AsyncFunction("pickSoundFile") { promise: expo.modules.kotlin.Promise ->
+      soundPick?.resolve(null)
+      soundPick = promise
+      appContext.throwingActivity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"), SOUND_PICK)
+    }
+    OnActivityResult { _, (requestCode, resultCode, data) ->
+      if (requestCode != SOUND_PICK) return@OnActivityResult
+      val promise = soundPick ?: return@OnActivityResult
+      soundPick = null
+      val uri = data?.data
+      if (resultCode != android.app.Activity.RESULT_OK || uri == null) { promise.resolve(null); return@OnActivityResult }
+      runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+      val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst()) c.getString(0) else null
+      } ?: "Your sound"
+      promise.resolve(mapOf("uri" to uri.toString(), "title" to name.substringBeforeLast('.')))
+    }
     Function("previewAlarm") { json: String -> context.startActivity(AlarmActivity.intent(context, org.json.JSONObject(json), true)) }
     Function("openExactAlarm") { start(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}"))) }
     AsyncFunction("calendars") { Cal.calendars(context) }
@@ -392,6 +410,8 @@ class PhoneModule : Module() {
       "apple" to "com.apple.android.music",
       "jiosaavn" to "com.jio.media.jiobeats", "saavn" to "com.jio.media.jiobeats", "amazon" to "com.amazon.mp3", "wynk" to "com.bsbportal.music")
     private const val RING_ID = 4711
+    private const val SOUND_PICK = 4721
+    private var soundPick: expo.modules.kotlin.Promise? = null
     private const val RING_CHANNEL = "tl-ring"
   }
 }

@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Cancel01Icon, Delete02Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { useTheme } from '@/theme'
-import { Button, Icon, Press, Text, confirm, haptic } from '@/ui'
+import { Icon, Press, Text, confirm, haptic } from '@/ui'
 
 export function RoundButton({ icon, label, onPress, solid, disabled }: { icon: Parameters<typeof Icon>[0]['icon']; label: string; onPress: () => void; solid?: boolean; disabled?: boolean }) {
   const { c } = useTheme()
@@ -36,11 +36,14 @@ export function EditorShell({ title, editing, ready, onSave, onDelete, deleteWha
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: insets.bottom + 40, gap: 22 }}>
         {children}
         {editing && onDelete && (
-          <Button label={`Delete ${deleteWhat}`} variant="ghost" icon={Delete02Icon} onPress={async () => {
+          <Pressable accessibilityRole="button" accessibilityLabel={`Delete ${deleteWhat}`} onPress={async () => {
             if (!await confirm({ title: `Delete this ${deleteWhat}?`, confirmLabel: `Delete ${deleteWhat}`, destructive: true })) return
             router.back()
             onDelete()
-          }} />
+          }} style={{ height: 52, borderRadius: 26, backgroundColor: c.dangerSoft, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 6 }}>
+            <Icon icon={Delete02Icon} size={18} color="danger" />
+            <Text variant="bodyMedium" color="danger">{`Delete ${deleteWhat}`}</Text>
+          </Pressable>
         )}
       </ScrollView>
     </View>

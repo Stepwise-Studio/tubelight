@@ -96,6 +96,9 @@ export function offlineList<T extends Row>(o: {
       while (outbox.length) {
         try {
           await send(outbox[0])
+          // Sent: fold it into the kept list, so the list on screen doesn't flick back to the old value until the
+          // server's fresh list arrives (that showed as a to-do going todo → done → todo → done).
+          server = replay(server ?? [], [outbox[0]])
         } catch (e) {
           if (unreachable(e)) { offline = true; publish(); retry = setTimeout(sync, RETRY_MS); return }
           if (!(e instanceof ApiError && e.status === 404)) toast({ title: `A ${o.noun} change didn’t save`, body: (e as Error).message, tone: 'error' })

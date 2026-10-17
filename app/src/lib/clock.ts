@@ -19,6 +19,8 @@ export interface Alarm {
   at: string | null
   /** The tone's content:// uri; '' = the phone's alarm sound. */
   sound: string
+  /** The tone's name as shown (a file of their own has no other way to be named). */
+  sound_name: string
   created_at: string
   updated_at: string
 }
@@ -159,7 +161,7 @@ export function useMinute() {
   return now
 }
 
-export function addAlarm(a: Pick<Alarm, 'time' | 'days' | 'label' | 'sound'>) {
+export function addAlarm(a: Pick<Alarm, 'time' | 'days' | 'label' | 'sound' | 'sound_name'>) {
   const now = new Date().toISOString()
   return alarmList.add({ ...a, enabled: true, at: a.days.length ? null : nextAt(a.time), created_at: now, updated_at: now })
 }

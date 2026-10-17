@@ -8,6 +8,8 @@ import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { Add01Icon, Delete02Icon, Notification03Icon, RepeatIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 
+import Svg, { Circle, Defs, Line, LinearGradient, RadialGradient, Stop } from 'react-native-svg'
+
 import { useTabBarInset } from '@/components/tab-bar'
 import {
   alarmNext, daysText, deleteAlarm, deleteReminder, finishReminder, nextAt, reminderNext, syncClock, untilText, updateAlarm,
@@ -61,7 +63,7 @@ export function ClockView() {
     <ScrollView contentContainerStyle={{ paddingBottom: inset + 24, paddingHorizontal: 16, gap: 8 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await Promise.all([syncClock(), refreshTasks()]); setRefreshing(false) }}
         tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}>
-      <Hero next={rings[0]} now={now} marks={[
+      <Hero now={now} marks={[
         ...rings.filter((x) => x.at.getTime() - now.getTime() < DAY_MS).map((x) => ({ at: x.at, kind: 'alarm' as const, key: x.a.id })),
         ...open.filter((x) => x.at.getTime() >= now.getTime() && x.at.getTime() - now.getTime() < DAY_MS).map((x) => ({ at: x.at, kind: 'reminder' as const, key: x.r.id })),
       ]} />
@@ -76,12 +78,13 @@ export function ClockView() {
       <Section title="Reminders" count={open.length ? String(open.length) : undefined} onAdd={newReminder} add="New reminder" />
       <Reminders open={open} done={done} now={now} onAdd={newReminder} />
 
-      {!!(follow.pending?.length || follow.done.length) && (
+      {follow.pending !== null && (
         <>
-          <Section title="Teammates will come back" count={follow.pending?.length ? String(follow.pending.length) : undefined} />
-          <Squircle style={{ borderRadius: 24, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingBottom: 10, overflow: 'hidden' }}>
-            <FollowupList pending={follow.pending ?? []} done={follow.done} onOpen={onFollow} />
-          </Squircle>
+          <Section title="Follow-ups" count={follow.pending.length ? String(follow.pending.length) : undefined} />
+          {/* Full width: out of the page's side padding. */}
+          <View style={{ marginHorizontal: -16 }}>
+            <FollowupList pending={follow.pending} done={follow.done} onOpen={onFollow} />
+          </View>
         </>
       )}
       <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={() => setFsheet((s) => ({ ...s, open: false }))} />
@@ -101,53 +104,65 @@ function Section({ title, count, onAdd, add }: { title: string; count?: string; 
   )
 }
 
-/** The next alarm, big (or the time now), over today as a line: the part gone filled, what's left said. */
-function Hero({ next, now, marks }: { next?: { a: Alarm; at: Date }; now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
+/** Today as a dial: a 24-hour ring (midnight at the top) filled up to now in the tube's colour, the now point lit, hour
+ *  ticks, today's alarms as short ink marks and reminders as amber dots on the ring; inside, the time and what's left of
+ *  the day. No card: it sits on the page over a soft glow. */
+function Hero({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
   const { c } = useTheme()
-  const t = clockParts(next?.at ?? now)
-  return (
-    <Squircle style={{ borderRadius: 28, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 20, paddingBottom: 16, marginTop: 4 }}>
-      <Text variant="overline" color={next ? 'tube' : 'ink3'}>
-        {next ? ['Next alarm', dayWord(next.at, now), next.a.label].filter(Boolean).join(' · ') : 'Now'}
-      </Text>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
-        <Text style={{ fontFamily: fonts.regular, fontSize: 64, lineHeight: 74, letterSpacing: -2.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
-        {!!t.suffix && <Text variant="headline" color="ink2">{t.suffix}</Text>}
-      </View>
-      <DayLine now={now} marks={marks} />
-    </Squircle>
-  )
-}
-
-/** Today, midnight to midnight: filled up to now (the lit dot), today's alarms as bars and reminders as dots, the hours
- *  every six under it, and how much of the day is left. */
-function DayLine({ now, marks }: { now: Date; marks: { at: Date; kind: 'alarm' | 'reminder'; key: string }[] }) {
-  const { c } = useTheme()
-  const [w, setW] = useState(0)
+  const S = 272
+  const R = S / 2 - 18
+  const C = 2 * Math.PI * R
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const x = (ms: number) => ((ms - start) / DAY_MS) * w
+  const frac = (ms: number) => (ms - start) / DAY_MS
+  const at = (f: number, r: number) => ({ x: S / 2 + r * Math.sin(f * 2 * Math.PI), y: S / 2 - r * Math.cos(f * 2 * Math.PI) })
+  const f = frac(now.getTime())
+  const dot = at(f, R)
   const left = Math.max(0, Math.round((start + DAY_MS - now.getTime()) / 60_000))
-  const today = marks.filter((m) => m.at.getTime() < start + DAY_MS)
+  const t = clockParts(now)
   return (
-    <View style={{ marginTop: 14, gap: 8 }}>
-      <View style={{ height: 18 }} onLayout={(e) => setW(e.nativeEvent.layout.width)} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        {w > 0 && (
-          <>
-            <View style={{ position: 'absolute', left: 0, right: 0, top: 8, height: 2, borderRadius: 1, backgroundColor: c.line }} />
-            <View style={{ position: 'absolute', left: 0, width: x(now.getTime()), top: 8, height: 2, borderRadius: 1, backgroundColor: c.tube, opacity: 0.55 }} />
-            {[6, 12, 18].map((h) => <View key={h} style={{ position: 'absolute', left: x(start + h * 3_600_000), top: 5, width: 1, height: 8, backgroundColor: c.edge }} />)}
-            {today.map((m) => m.kind === 'alarm'
-              ? <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 2, top: 1, width: 4, height: 16, borderRadius: 2, backgroundColor: c.ink }} />
-              : <View key={m.key} style={{ position: 'absolute', left: x(m.at.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.warning, borderWidth: 2, borderColor: c.panel }} />)}
-            <View style={{ position: 'absolute', left: x(now.getTime()) - 7, top: 2, width: 14, height: 14, borderRadius: 7, backgroundColor: c.tubeSoft }} />
-            <View style={{ position: 'absolute', left: x(now.getTime()) - 4, top: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: c.tube }} />
-          </>
-        )}
-      </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <Text style={{ flex: 1, fontSize: 11, lineHeight: 14, color: c.ink4 }}>12 am</Text>
-        <Text variant="caption" color="ink2" tabular>{`${Math.floor(left / 60)} h ${left % 60} min left today`}</Text>
-        <Text style={{ flex: 1, fontSize: 11, lineHeight: 14, color: c.ink4, textAlign: 'right' }}>12 am</Text>
+    <View style={{ alignItems: 'center', paddingTop: 6, paddingBottom: 4 }} accessible accessibilityLabel={`${t.main} ${t.suffix}, ${Math.floor(left / 60)} hours ${left % 60} minutes left today`}>
+      <View style={{ width: S, height: S }}>
+        <Svg width={S} height={S}>
+          <Defs>
+            <RadialGradient id="glow" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor={c.tube} stopOpacity={0.16} />
+              <Stop offset="1" stopColor={c.tube} stopOpacity={0} />
+            </RadialGradient>
+            <LinearGradient id="arc" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor="#38bdf8" />
+              <Stop offset="1" stopColor={c.tube} />
+            </LinearGradient>
+          </Defs>
+          <Circle cx={S / 2} cy={S / 2} r={S / 2} fill="url(#glow)" />
+          {Array.from({ length: 24 }, (_, h) => {
+            const major = h % 6 === 0
+            const p1 = at(h / 24, R - 12)
+            const p2 = at(h / 24, R - (major ? 20 : 15))
+            return <Line key={h} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={major ? c.ink3 : c.ink4} strokeWidth={major ? 1.5 : 1} strokeLinecap="round" opacity={major ? 1 : 0.6} />
+          })}
+          <Circle cx={S / 2} cy={S / 2} r={R} stroke={c.line} strokeWidth={6} fill="none" />
+          <Circle cx={S / 2} cy={S / 2} r={R} stroke="url(#arc)" strokeWidth={6} fill="none" strokeLinecap="round"
+            strokeDasharray={`${C * f} ${C}`} transform={`rotate(-90 ${S / 2} ${S / 2})`} />
+          {marks.filter((m) => m.at.getTime() < start + DAY_MS).map((m) => {
+            const mf = frac(m.at.getTime())
+            if (m.kind === 'alarm') {
+              const p1 = at(mf, R - 7)
+              const p2 = at(mf, R + 7)
+              return <Line key={m.key} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={c.ink} strokeWidth={3} strokeLinecap="round" />
+            }
+            const p = at(mf, R)
+            return <Circle key={m.key} cx={p.x} cy={p.y} r={4.5} fill={c.warning} stroke={c.canvas} strokeWidth={2} />
+          })}
+          <Circle cx={dot.x} cy={dot.y} r={11} fill={c.tube} opacity={0.22} />
+          <Circle cx={dot.x} cy={dot.y} r={5.5} fill={c.tube} stroke={c.canvas} strokeWidth={2} />
+        </Svg>
+        <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+            <Text style={{ fontFamily: fonts.regular, fontSize: 54, lineHeight: 62, letterSpacing: -2, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
+            {!!t.suffix && <Text variant="label" color="ink2">{t.suffix}</Text>}
+          </View>
+          <Text variant="footnote" color="ink3" tabular>{`${Math.floor(left / 60)} h ${left % 60} min left today`}</Text>
+        </View>
       </View>
     </View>
   )
@@ -185,27 +200,29 @@ function AlarmCard({ a, now, width }: { a: Alarm; now: Date; width: number }) {
     if (at) toast({ title: `Alarm ${untilText(at)}` })
   }
   const edit = () => router.push({ pathname: '/alarm/[id]', params: { id: a.id } })
+  // The time and its switch; under it, the name (cut short if long) and the days it rings, on one line.
   const card = (lifted?: boolean) => (
-    <Squircle style={{ width, borderRadius: 24, padding: 16, gap: 10, backgroundColor: c.panel, borderWidth: 1, borderColor: lifted ? c.edge : c.line }}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-        <View style={{ flex: 1, minWidth: 0, opacity: on ? 1 : 0.45 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-            <Text style={{ fontFamily: fonts.regular, fontSize: 42, lineHeight: 50, letterSpacing: -1.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
-            {!!t.suffix && <Text variant="caption" color="ink2">{t.suffix}</Text>}
-          </View>
-          <Text variant="footnote" color="ink2" numberOfLines={1}>{a.label || (a.days.length ? daysText(a.days) : 'Alarm')}</Text>
+    <Squircle style={{ width, borderRadius: 24, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 14, backgroundColor: c.panel, borderWidth: 1, borderColor: lifted ? c.edge : c.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'baseline', gap: 3, opacity: on ? 1 : 0.45 }}>
+          <Text style={{ fontFamily: fonts.regular, fontSize: 42, lineHeight: 50, letterSpacing: -1.5, color: c.ink, fontVariant: ['tabular-nums'] }}>{t.main}</Text>
+          {!!t.suffix && <Text variant="caption" color="ink2">{t.suffix}</Text>}
         </View>
         <Toggle value={on} onChange={toggle} accessibilityLabel={`Alarm ${t.main} ${t.suffix}`} />
       </View>
-      {a.days.length ? (
-        <View style={{ flexDirection: 'row', gap: 12, opacity: on ? 1 : 0.45 }}>
-          {LETTERS.map((l, i) => (
-            <Text key={i} style={{ fontSize: 12, lineHeight: 16, fontFamily: a.days.includes(i) ? fonts.semibold : fonts.regular, color: a.days.includes(i) ? (i > 4 ? c.danger : c.ink) : c.ink4 }}>{l}</Text>
-          ))}
-        </View>
-      ) : (
-        <Text variant="caption" color={on ? 'tube' : 'ink4'}>{on && next ? `Once · ${dayWord(next, now)}` : 'Once · off'}</Text>
-      )}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, opacity: on ? 1 : 0.45 }}>
+        {!!a.label && <Text variant="footnote" color="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>{a.label}</Text>}
+        {!!a.label && <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: c.ink4 }} />}
+        {a.days.length ? (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {LETTERS.map((l, i) => (
+              <Text key={i} style={{ fontSize: 12, lineHeight: 16, fontFamily: a.days.includes(i) ? fonts.semibold : fonts.regular, color: a.days.includes(i) ? (i > 4 ? c.danger : c.ink) : c.ink4 }}>{l}</Text>
+            ))}
+          </View>
+        ) : (
+          <Text variant="footnote" color={on ? 'tube' : 'ink4'}>{on && next ? `Once · ${dayWord(next, now)}` : 'Once'}</Text>
+        )}
+      </View>
     </Squircle>
   )
   return (

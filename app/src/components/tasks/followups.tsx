@@ -11,7 +11,7 @@ import { cancelFollowup, editFollowup, followupNow, isoDay, type Followup } from
 import { useWorkspace } from '@/lib/workspace'
 import { motion, type, useTheme } from '@/theme'
 import {
-  Button, Collapse, Icon, Press, Segment, Sheet, Squircle, TeammateAvatar, Text, TimePicker, confirm, haptic, toast,
+  Button, Icon, Press, Segment, Sheet, Squircle, TeammateAvatar, Text, TimePicker, confirm, haptic, toast,
 } from '@/ui'
 
 import { DayPicker } from './day-picker'
@@ -28,8 +28,18 @@ function dayHeading(iso: string, now = new Date()) {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
+type State = 'pending' | 'fired' | 'done' | 'cancelled' | 'dropped'
+const STATES: { id: State; label: string }[] = [
+  { id: 'pending', label: 'Pending' }, { id: 'fired', label: 'Picked up' }, { id: 'done', label: 'Done' },
+  { id: 'cancelled', label: 'Cancelled' }, { id: 'dropped', label: 'No longer needed' },
+]
+
+/** Follow-ups by state: a row of chips with counts (Pending first; the others when they have any), and the picked
+ *  state's list under it, full width. Pending ones are grouped by day (and "Waiting on something"). */
 export function FollowupList({ pending, done, onOpen }: { pending: Followup[]; done: Followup[]; onOpen: (f: Followup) => void }) {
-  const [showDone, setShowDone] = useState(false)
+  const { c } = useTheme()
+  const [state, setState] = useState<State>('pending')
+  const count = (id: State) => (id === 'pending' ? pending.length : done.filter((f) => f.status === id).length)
   const groups = new Map<string, Followup[]>()
   for (const f of pending) {
     const key = f.at ? dayHeading(f.at) : 'Waiting on something'
@@ -38,22 +48,27 @@ export function FollowupList({ pending, done, onOpen }: { pending: Followup[]; d
   const order = [...groups.keys()].sort((a, b) => (a === 'Waiting on something' ? 1 : b === 'Waiting on something' ? -1 : 0))
   return (
     <View>
-      {order.map((g) => (
-        <Animated.View key={g} layout={layout}>
-          <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: 6 }}>{g}</Text>
-          {groups.get(g)!.map((f) => <FollowupRow key={f.id} f={f} onPress={() => onOpen(f)} />)}
-        </Animated.View>
-      ))}
-      {done.length > 0 && (
-        <Animated.View layout={layout}>
-          <Press radius={10} static onPress={() => { haptic.tap(); setShowDone((v) => !v) }} accessibilityState={{ expanded: showDone }}
-            outerStyle={{ alignSelf: 'flex-start', marginLeft: 14, marginTop: 18 }} style={{ paddingHorizontal: 6, minHeight: 32, justifyContent: 'center' }}>
-            <Text variant="overline" color="ink3">{showDone ? 'Hide finished' : `Finished · ${done.length}`}</Text>
-          </Press>
-          <Collapse open={showDone}>
-            <View>{done.map((f) => <FollowupRow key={f.id} f={f} finished />)}</View>
-          </Collapse>
-        </Animated.View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 4 }}>
+        {STATES.filter((x) => x.id === 'pending' || count(x.id)).map((x) => {
+          const on = x.id === state
+          return (
+            <Press key={x.id} radius={18} static onPress={() => { haptic.tap(); setState(x.id) }} accessibilityRole="tab" accessibilityState={{ selected: on }}
+              style={{ height: 36, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: on ? c.ink : c.panel2 }}>
+              <Text variant="label" style={{ color: on ? c.canvas : c.ink2 }}>{x.label}</Text>
+              <Text variant="label" tabular style={{ color: on ? c.canvas : c.ink3, opacity: 0.8 }}>{count(x.id)}</Text>
+            </Press>
+          )
+        })}
+      </ScrollView>
+      {state === 'pending' ? (
+        pending.length ? order.map((g) => (
+          <Animated.View key={g} layout={layout}>
+            <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 }}>{g}</Text>
+            {groups.get(g)!.map((f) => <FollowupRow key={f.id} f={f} onPress={() => onOpen(f)} />)}
+          </Animated.View>
+        )) : <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 16, paddingVertical: 14 }}>Nothing pending. Ask a teammate to “check back when the design is done”.</Text>
+      ) : (
+        <View style={{ paddingTop: 6 }}>{done.filter((f) => f.status === state).map((f) => <FollowupRow key={f.id} f={f} finished />)}</View>
       )}
     </View>
   )

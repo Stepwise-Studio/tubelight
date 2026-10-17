@@ -4,7 +4,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeOut, Keyframe, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
@@ -20,11 +20,16 @@ const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const layout = LinearTransition.duration(280).easing(motion.ease.smoothOut)
-/** A row coming in: fades in from 8 px above, each one 40 ms after the last (capped), made once and reused. */
-const ENTER = Array.from({ length: 9 }, (_, i) => new Keyframe({
-  0: { opacity: 0, transform: [{ translateY: -motion.distance.base }] },
-  100: { opacity: 1, transform: [{ translateY: 0 }], easing: motion.ease.smoothOut },
-}).duration(motion.duration.fast).delay(motion.staggerDelay(i)))
+/** A row coming in: a blur reveal (out of a soft blur, faded, a touch low), each 40 ms after the last, capped. A CSS
+ *  animation runs once when the row mounts and then leaves the plain style in place (nothing to snap back to). */
+const BLUR_IN = {
+  from: { opacity: 0, filter: [{ blur: 10 }], transform: [{ translateY: 6 }, { scale: 0.985 }] },
+  to: { opacity: 1, filter: [{ blur: 0 }], transform: [{ translateY: 0 }, { scale: 1 }] },
+}
+const reveal = (i: number) => ({
+  animationName: BLUR_IN, animationDuration: 380, animationDelay: motion.staggerDelay(Math.min(i, 8)),
+  animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
+}) as const
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
 
@@ -76,7 +81,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
         project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />,
     ))
     if (!g.rows.length) views.push(
-      <Animated.View key={`e:${g.key}`} layout={layout} entering={ENTER[0]} exiting={FadeOut.duration(motion.duration.quick)}>
+      <Animated.View key={`e:${g.key}`} layout={layout} style={reveal(0)} exiting={FadeOut.duration(motion.duration.quick)}>
         <Text variant="footnote" color="ink4" style={{ paddingLeft: 52, paddingBottom: 12, paddingTop: 2 }}>Nothing here</Text>
       </Animated.View>,
     )
@@ -113,6 +118,8 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
   todo: Todo; index: number; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
 }) {
   const { c } = useTheme()
+  // Its own blur reveal, fixed at mount (a later render never restarts it).
+  const [revealStyle] = useState(() => reveal(index))
   // Its labels, less the one it's grouped under.
   const labels = t.labels?.length ? all.filter((l) => l.id !== group && t.labels.includes(l.id)) : []
   const ref = useRef<View>(null)
@@ -184,7 +191,8 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
   )
 
   return (
-    <Animated.View layout={layout} entering={ENTER[Math.min(index, ENTER.length - 1)]} exiting={FadeOut.duration(motion.duration.quick)}>
+    <Animated.View layout={layout} exiting={FadeOut.duration(motion.duration.quick)}>
+     <Animated.View style={revealStyle}>
       <GestureDetector gesture={gesture}>
         <View ref={ref} collapsable={false} accessible accessibilityRole="button"
           accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`} accessibilityHint="Opens it. Use the actions to change its status."
@@ -194,6 +202,7 @@ const TodoRow = memo(function TodoRow({ todo: t, index, labels: all, group, who,
           {body()}
         </View>
       </GestureDetector>
+     </Animated.View>
     </Animated.View>
   )
 }, (a, b) =>

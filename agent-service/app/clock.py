@@ -35,7 +35,8 @@ def _clean_alarm(r: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Give the alarm time as HH:MM, 24-hour.")
     days = sorted({int(d) for d in (r.get("days") or []) if 0 <= int(d) <= 6})
     return {"time": t, "days": days, "label": str(r.get("label") or "").strip()[:60], "enabled": bool(r.get("enabled", True)),
-            "at": None if days else _when(r.get("at")), "sound": str(r.get("sound") or "")[:500]}
+            "at": None if days else _when(r.get("at")), "sound": str(r.get("sound") or "")[:500],
+            "sound_name": str(r.get("sound_name") or "")[:120]}
 
 
 def _clean_reminder(r: dict[str, Any]) -> dict[str, Any]:
@@ -52,7 +53,7 @@ def _clean_reminder(r: dict[str, Any]) -> dict[str, Any]:
             "done": done, "done_at": (r.get("done_at") or datetime.now(UTC).isoformat()) if done else None}
 
 
-ALARMS = items.Items("alarms", _clean_alarm, {"time": "07:00", "days": [], "label": "", "enabled": True, "at": None, "sound": ""},
+ALARMS = items.Items("alarms", _clean_alarm, {"time": "07:00", "days": [], "label": "", "enabled": True, "at": None, "sound": "", "sound_name": ""},
                      "time")
 REMINDERS = items.Items("reminders", _clean_reminder, {"title": "", "notes": "", "at": None, "repeat": "", "done": False}, "at")
 

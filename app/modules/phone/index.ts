@@ -65,6 +65,8 @@ interface PhoneModule {
   alarmTones?(): Promise<{ title: string; uri: string; kind: 'alarm' | 'ringtone' }[]>
   previewTone?(uri: string): void
   stopTone?(): void
+  /** A sound file of their own (Android's picker); null if they backed out. */
+  pickSoundFile?(): Promise<{ uri: string; title: string } | null>
   /** The ringing screen for an alarm (JSON ClockItem), as a preview that only closes. */
   previewAlarm?(json: string): void
   openExactAlarm?(): void
