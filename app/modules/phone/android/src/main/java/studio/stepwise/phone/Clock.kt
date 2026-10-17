@@ -339,8 +339,15 @@ class AlarmActivity : Activity() {
       orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; background = bg
       setPadding(dp(28), dp(140), dp(28), dp(64))
       addView(text(title, 22f, 230, Typeface.create("sans-serif-medium", Typeface.NORMAL)))
-      addView(text(DateFormat.getTimeInstance(DateFormat.SHORT).format(now), 96f, 255, Typeface.create("sans-serif-thin", Typeface.NORMAL)),
-        LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
+      // The time big, AM/PM small beside it (one line: "7:07 pm" at this size wrapped).
+      val h24 = android.text.format.DateFormat.is24HourFormat(this@AlarmActivity)
+      addView(LinearLayout(this@AlarmActivity).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; isBaselineAligned = true
+        addView(text(java.text.SimpleDateFormat(if (h24) "HH:mm" else "h:mm", java.util.Locale.getDefault()).format(now), 96f, 255,
+          Typeface.create("sans-serif-thin", Typeface.NORMAL)).apply { includeFontPadding = false; isSingleLine = true })
+        if (!h24) addView(text(java.text.SimpleDateFormat("a", java.util.Locale.getDefault()).format(now).uppercase(), 24f, 220,
+          Typeface.create("sans-serif-light", Typeface.NORMAL)), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8) })
+      }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(4) })
       addView(text(DateFormat.getDateInstance(DateFormat.FULL).format(now), 16f, 170, Typeface.create("sans-serif", Typeface.NORMAL)))
       addView(android.view.View(this@AlarmActivity), LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
       addView(pill("Snooze 5 min", false, Clock.SNOOZE), LinearLayout.LayoutParams(MATCH_PARENT, dp(68)))
@@ -378,11 +385,16 @@ object Tones {
   private var playing: android.media.Ringtone? = null
   private val stopper = Handler(Looper.getMainLooper())
 
+  /** The phone's alarm tones, then its ringtones (some phones ship only two alarm tones). */
   fun list(c: Context): List<Map<String, String>> {
-    val rm = RingtoneManager(c).apply { setType(RingtoneManager.TYPE_ALARM) }
     val out = mutableListOf<Map<String, String>>()
-    rm.cursor.use { cur -> while (cur.moveToNext()) out.add(mapOf("title" to cur.getString(RingtoneManager.TITLE_COLUMN_INDEX), "uri" to rm.getRingtoneUri(cur.position).toString())) }
-    return out
+    for ((type, kind) in listOf(RingtoneManager.TYPE_ALARM to "alarm", RingtoneManager.TYPE_RINGTONE to "ringtone")) {
+      val rm = RingtoneManager(c).apply { setType(type) }
+      runCatching {
+        rm.cursor.use { cur -> while (cur.moveToNext()) out.add(mapOf("title" to cur.getString(RingtoneManager.TITLE_COLUMN_INDEX), "uri" to rm.getRingtoneUri(cur.position).toString(), "kind" to kind)) }
+      }
+    }
+    return out.distinctBy { it["uri"] }
   }
 
   fun preview(c: Context, uri: String) {

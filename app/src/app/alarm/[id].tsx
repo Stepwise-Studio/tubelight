@@ -29,7 +29,7 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
   const [label, setLabel] = useState(alarm?.label ?? '')
   const [sound, setSound] = useState(alarm?.sound ?? '')
   const [look, setLook] = useState<Look>(alarm?.look ?? 'aurora')
-  const [tones, setTones] = useState<{ title: string; uri: string }[]>([])
+  const [tones, setTones] = useState<{ title: string; uri: string; kind: 'alarm' | 'ringtone' }[]>([])
   useEffect(() => {
     Phone?.alarmTones?.().then(setTones, () => {})
     return () => Phone?.stopTone?.()
@@ -75,25 +75,24 @@ function Editor({ alarm }: { alarm: Alarm | null }) {
       {tones.length > 0 && (
         <PickerField label="Sound" value={sound} stayOpen placeholder="Phone’s alarm sound"
           onChange={(v) => { setSound(v); Phone?.previewTone?.(v) }}
-          options={[{ value: '', title: 'Phone’s alarm sound' }, ...tones.map((t) => ({ value: t.uri, title: t.title }))]} />
+          options={[{ value: '', title: 'Phone’s alarm sound', group: 'Alarm sounds' }, ...tones.map((t) => ({ value: t.uri, title: t.title.replace(/_/g, ' '), group: t.kind === 'alarm' ? 'Alarm sounds' : 'Ringtones' }))]} />
       )}
       <Field label={`Ringing screen · ${LOOKS[look].label}`}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           {(Object.keys(LOOKS) as Look[]).map((k) => {
             const on = k === look
             return (
               <Pressable key={k} onPress={() => { haptic.tap(); setLook(k) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={LOOKS[k].label}
-                style={{ width: 48, height: 48, borderRadius: 24, padding: 3, borderWidth: 2, borderColor: on ? c.ink : 'transparent' }}>
-                <LinearGradient colors={[...LOOKS[k].a]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, borderRadius: 20 }} />
+                style={{ width: 52, height: 52, borderRadius: 26, padding: 3, borderWidth: 2, borderColor: on ? c.ink : 'transparent' }}>
+                <LinearGradient colors={[...LOOKS[k].a]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, borderRadius: 22 }} />
               </Pressable>
             )
           })}
-          <View style={{ flex: 1 }} />
-          <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() || 'Alarm', colors: lookColors(look) })) }}
-            accessibilityRole="button" style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, justifyContent: 'center', backgroundColor: c.panel2 }}>
-            <Text variant="label" color="ink2">Preview</Text>
-          </Pressable>
         </View>
+        <Pressable onPress={() => { haptic.tap(); Phone?.previewAlarm?.(JSON.stringify({ id: '', title: label.trim() || 'Alarm', colors: lookColors(look) })) }}
+          accessibilityRole="button" style={{ height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.panel2, marginTop: 4 }}>
+          <Text variant="label" color="ink2">Preview the ringing screen</Text>
+        </Pressable>
       </Field>
     </EditorShell>
   )

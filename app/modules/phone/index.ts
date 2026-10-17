@@ -62,7 +62,7 @@ interface PhoneModule {
   /** Reminders marked Done from their notification since the last call. */
   takeClockDone?(): string[]
   canExactAlarm?(): boolean
-  alarmTones?(): Promise<{ title: string; uri: string }[]>
+  alarmTones?(): Promise<{ title: string; uri: string; kind: 'alarm' | 'ringtone' }[]>
   previewTone?(uri: string): void
   stopTone?(): void
   /** The ringing screen for an alarm (JSON ClockItem), as a preview that only closes. */
