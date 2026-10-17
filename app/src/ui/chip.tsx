@@ -41,9 +41,9 @@ const colors: Record<ChipColor, ColorDef> = {
     outlineBorder: ['#bbf7d0', a('#166534', 0.6)], dot: ['#22c55e', '#22c55e'],
   },
   info: {
-    text: ['#0284c7', '#0ea5e9'], soft: ['#f0f9ff', a('#0ea5e9', 0.07)], softBorder: [a('#0ea5e9', 0.1), a('#38bdf8', 0.1)],
-    solid: ['#0ea5e9', '#0284c7'], solidText: white, solidBorder: [a('#0284c7', 0.4), a('#0284c7', 0.4)],
-    outlineBorder: ['#bae6fd', a('#0369a1', 0.6)], dot: ['#0ea5e9', '#0ea5e9'],
+    text: ['#3f3f46', '#e4e4e7'], soft: ['#f4f4f5', a('#fafafa', 0.08)], softBorder: [a('#18181b', 0.08), a('#fafafa', 0.1)],
+    solid: ['#27272a', '#e4e4e7'], solidText: ['#ffffff', '#18181b'], solidBorder: [a('#18181b', 0.4), a('#fafafa', 0.2)],
+    outlineBorder: ['#d4d4d8', a('#a1a1aa', 0.5)], dot: ['#71717a', '#d4d4d8'],
   },
   magical: {
     text: ['#4f46e5', '#818cf8'], soft: ['#eef2ff', a('#6366f1', 0.09)], softBorder: [a('#6366f1', 0.1), a('#818cf8', 0.1)],

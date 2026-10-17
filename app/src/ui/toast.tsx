@@ -53,7 +53,7 @@ const TONES: Record<ToastTone, { tint: string; color: string; glyph: typeof Tick
   success: { tint: '#4ade80', color: '#22c55e', glyph: Tick02Icon },
   warning: { tint: '#fbbf24', color: '#f59e0b', glyph: '!', square: true },
   error: { tint: '#f87171', color: '#f43f5e', glyph: Cancel01Icon },
-  info: { tint: '#38bdf8', color: '#0ea5e9', glyph: 'i' },
+  info: { tint: '#a1a1aa', color: '#71717a', glyph: 'i' },
 }
 const toneOf = (t: ToastOpts['tone']): ToastTone => (t && t !== 'neutral' ? t : 'info')
 

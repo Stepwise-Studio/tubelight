@@ -10,7 +10,7 @@ import { AiArtIcon, InboxIcon, UserCircleIcon, VaultIcon, WorkHistoryIcon } from
 import { isUnread } from '@/lib/format'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Badge, Icon, Squircle, elevation, haptic } from '@/ui'
+import { Badge, Glass, Icon, elevation, haptic, wakeGlass } from '@/ui'
 
 type BottomTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0]
 
@@ -43,6 +43,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const badge = (name: string) => (name === 'activity' ? waiting : 0)
   const dot = (name: string) => name === 'index' && unread
 
+  // Page or workspace changed behind the glass (a new message, a tab switch): let it blur once more.
+  useEffect(() => { wakeGlass() }, [current, ws.previews, ws.threads])
+
   const slot = (screen - 32 - 12) / PLACES.length
   const at = Math.max(0, PLACES.findIndex((p) => p.name === current))
 
@@ -59,9 +62,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }))
 
   // Every tab mounts once the app has settled, so the first visit slides in a ready page instead of building one.
+  // One at a time: mounting all five in a single frame froze the first seconds after launch.
   useEffect(() => {
-    const t = setTimeout(() => PLACES.forEach((p) => p.name !== current && navigation.preload(p.name)), 1500)
-    return () => clearTimeout(t)
+    const timers = PLACES.filter((p) => p.name !== current).map((p, i) => setTimeout(() => navigation.preload(p.name), 1500 + i * 700))
+    return () => timers.forEach(clearTimeout)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (name: string) => {
@@ -77,9 +81,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: Math.max(insets.bottom, 12), zIndex: 2 }}>
-      <View style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
-        <Squircle style={{ height: BAR, borderRadius: BAR / 2, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 }}
-          accessibilityRole="tablist">
+      <View accessibilityRole="tablist" style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
+        <Glass over={current} radius={BAR / 2} style={{ height: BAR, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 }}>
           <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, top: 6, bottom: 6, width: slot, borderRadius: 26, backgroundColor: c.tubeSoft }, pill]} />
           {PLACES.map((p) => {
             const on = current === p.name
@@ -93,7 +96,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
               </Pressable>
             )
           })}
-        </Squircle>
+        </Glass>
       </View>
     </View>
   )

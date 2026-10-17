@@ -4,6 +4,7 @@ import { Easing, useWindowDimensions } from 'react-native'
 import { EdgeScreen } from '@/components/bottom-edge'
 import { TabBar, useTabBarInset } from '@/components/tab-bar'
 import { useTheme } from '@/theme'
+import { SceneTarget } from '@/ui'
 
 export default function TabsLayout() {
   const { c } = useTheme()
@@ -12,8 +13,8 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <TabBar {...props} />}
-      // Content fades and blurs under the floating capsule (the capsule itself stays sharp above it).
-      screenLayout={({ children }) => <EdgeScreen height={inset}>{children}</EdgeScreen>}
+      // Content fades under the floating capsule, which is frosted glass over the page's own (unfaded) picture.
+      screenLayout={({ children, route }) => <EdgeScreen height={inset}><SceneTarget name={route.name}>{children}</SceneTarget></EdgeScreen>}
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: c.canvas },

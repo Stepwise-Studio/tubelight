@@ -42,7 +42,7 @@ export async function setupNotifications() {
       ...(s.id === 'classic' ? {} : { sound: silent ? null : s.id }),
       enableVibrate: !silent,
       vibrationPattern: silent ? null : [0, 140, 90, 140],
-      lightColor: '#0EA5E9',
+      lightColor: '#FAFAFA',
     })
   }
   await Notifications.setNotificationCategoryAsync('approval', [

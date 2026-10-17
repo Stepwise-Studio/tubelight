@@ -255,7 +255,7 @@ const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, pick
         {/* Mounted only for today: a fill switched on later on an existing view lost its roundness on Android. */}
         {today && <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: c.tube }} />}
         <View style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}>
-          <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
+          <Text variant="caption" tabular style={{ color: today ? c.onTube : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
         </View>
       </View>
       {/* One line per event, reminder and to-do due (the day's list below has the words). */}

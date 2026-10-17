@@ -291,7 +291,7 @@ function ScheduleFields({ schedule, onChange, upcoming }: { schedule: Schedule; 
                   onChange({ ...schedule, days: on ? schedule.days.filter((x) => x !== d) : [...schedule.days, d].sort() })
                 }}
                 style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.tube : c.panel2 }}>
-                <Text variant="label" style={{ color: on ? '#ffffff' : c.ink3 }}>{DAY_SHORT[d].slice(0, 1)}</Text>
+                <Text variant="label" style={{ color: on ? c.onTube : c.ink3 }}>{DAY_SHORT[d].slice(0, 1)}</Text>
               </Press>
             )
           })}

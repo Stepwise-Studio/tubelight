@@ -56,12 +56,13 @@ bring the personality (their animated 3D bot faces); the chrome stays quiet.
     `composing`, waiting for approval → `breathing`.
   - `border-beam-native`: at most one or two places (e.g. the composer while a run is live, a
     pending approval card). Subtle, tube-coloured. Never decorative.
-- **Colour.** Zinc neutrals (Tailwind zinc values) + one accent, **tube**: the cool white-cyan of a
-  lit fluorescent tube. Tokens (define once in `src/theme/`, light + dark):
+- **Colour.** Zinc neutrals (Tailwind zinc values) + one accent, **tube**: zinc-50 on dark (zinc-900 on light, where
+  zinc-50 would vanish; `onTube` flips with it). Frosted glass (`ui/glass.tsx`: `SceneTarget` + `Glass`) is for the tab
+  capsule, sheets and menus only; the blur is mounted only while something can move behind it (a live BlurView makes
+  Android redraw every frame). Tokens (define once in `src/theme/`, light + dark):
   `canvas` (zinc-50 / zinc-950), `panel` (white / ~#18181b), `panel2` (zinc-100 / ~#222226),
   `line` (black 7% / white 7%), `ink` (zinc-900 / zinc-100), `ink2` (zinc-600 / zinc-400),
-  `ink3` (zinc-500), `tube` (oklch(0.56 0.12 225) ≈ #1f7ea8 light / oklch(0.87 0.08 208) ≈ #9fe3f0
-  dark), `tubeSoft` (tube at 10%), `danger`, `success`, `warning` (muted, not neon).
+  `ink3` (zinc-500), `tube` (#18181b light / #fafafa dark), `tubeSoft` (tube at 10%), `danger`, `success`, `warning` (muted, not neon).
   `tube` is only for focus, the active item, live/working, links. A teammate's own `color` appears
   only in its avatar and at most a 10% tint behind its name. Dark is the default; both themes
   must look deliberate. Follow the system setting with an in-app override (System/Light/Dark).

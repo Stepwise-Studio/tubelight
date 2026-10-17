@@ -1,6 +1,6 @@
 import { Platform } from 'react-native'
 
-// Tubelight design tokens. Neutrals are Tailwind zinc (as in Stepwise UI); `tube` is the one accent.
+// Tubelight design tokens. Neutrals are Tailwind zinc (as in Stepwise UI); `tube` is the one accent: zinc-50 on dark, its zinc-900 counterpart on light (zinc-50 vanishes on white).
 // `tube` is only for focus, the active item, live/working states and links.
 
 export type ColorScheme = 'light' | 'dark'
@@ -17,10 +17,10 @@ const light = {
   ink2: '#52525b', // zinc-600
   ink3: '#71717a', // zinc-500
   ink4: '#a1a1aa', // zinc-400, placeholders
-  tube: '#0284c7', // sky-600: sky-500 is under 3:1 as text on white, so light mode steps down one
-  tubeSoft: 'rgba(14,165,233,0.12)',
-  tubeGlow: 'rgba(56,189,248,0.45)',
-  onTube: '#ffffff',
+  tube: '#18181b', // zinc-900
+  tubeSoft: 'rgba(24,24,27,0.07)',
+  tubeGlow: 'rgba(24,24,27,0.30)',
+  onTube: '#fafafa',
   danger: '#d02f4b',
   dangerSoft: 'rgba(208,47,75,0.08)',
   success: '#1f8a4c',
@@ -58,10 +58,10 @@ const dark: Palette = {
   ink2: '#a1a1aa', // zinc-400
   ink3: '#71717a', // zinc-500
   ink4: '#52525b',
-  tube: '#0ea5e9', // sky-500
-  tubeSoft: 'rgba(14,165,233,0.14)',
-  tubeGlow: 'rgba(56,189,248,0.40)',
-  onTube: '#ffffff',
+  tube: '#fafafa', // zinc-50
+  tubeSoft: 'rgba(250,250,250,0.10)',
+  tubeGlow: 'rgba(250,250,250,0.30)',
+  onTube: '#18181b',
   danger: '#f27a8c',
   dangerSoft: 'rgba(242,122,140,0.10)',
   success: '#74d19a',

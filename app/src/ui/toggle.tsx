@@ -61,7 +61,7 @@ export function Toggle({ value, onChange, label, accessibilityLabel, description
   }), [value, travel, flipped])
   const sw = (
     <Animated.View style={[{ width: w, height: h, borderRadius: h / 2, opacity: disabled ? 0.4 : 1, overflow: 'hidden' }, track]}>
-      <Animated.View style={[{ position: 'absolute', top: gap, left: gap, width: knob, height: knob, borderRadius: knob / 2, backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }, knobStyle]} />
+      <Animated.View style={[{ position: 'absolute', top: gap, left: gap, width: knob, height: knob, borderRadius: knob / 2, backgroundColor: value ? c.onTube : '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.12)' }, knobStyle]} />
     </Animated.View>
   )
   return (

@@ -14,7 +14,7 @@ import { setPortal } from './portal'
 import { Press } from './press'
 import { Radio } from './radio'
 import type { MenuItem } from './sheet'
-import { Squircle } from './squircle'
+import { Glass } from './glass'
 import { elevation } from './surface'
 import { Text } from './text'
 
@@ -54,7 +54,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
     const sub = BackHandler.addEventListener('hardwareBackPress', () => { shut(); return true })
     return () => sub.remove()
   })
-  const { c, scheme } = useTheme()
+  const { scheme } = useTheme()
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
   const menuH = items.length * ROW + 12
@@ -82,7 +82,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
       </View>
       {!closing && <Animated.View entering={grow} exiting={FadeOut.duration(120)}
         style={[{ position: 'absolute', left, top, width: MENU_W, borderRadius: 20, transformOrigin: origin }, elevation(scheme)]}>
-        <Squircle style={{ borderRadius: 20, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 6 }}>
+        <Glass over="app" always radius={20} veil={0.5} style={{ padding: 6 }}>
           {items.map((it) => (
             <Press key={it.label} radius={14} onPress={() => pick(it)} accessibilityLabel={it.label}
               style={{ height: ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12 }}>
@@ -91,7 +91,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
               {it.checked !== undefined && <Radio checked={it.checked} />}
             </Press>
           ))}
-        </Squircle>
+        </Glass>
       </Animated.View>}
     </View>
   )
