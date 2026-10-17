@@ -10,7 +10,7 @@ import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-f
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
 import type { Project, Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
-import { Icon, IconSwap, Text, TeammateAvatar, haptic, showContextMenu, toast, type MenuItem } from '@/ui'
+import { Icon, IconSwap, Text, TeammateAvatar, confirm, haptic, showContextMenu, toast, type MenuItem } from '@/ui'
 
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 
@@ -120,7 +120,8 @@ const TodoRow = memo(function TodoRow({ todo: t, labels: all, group, who, projec
     else haptic.tap()
     updateTodo(t.id, { status }).catch(fail)
   }
-  const remove = () => {
+  const remove = async () => {
+    if (!await confirm({ title: 'Delete this to-do?', body: t.title, confirmLabel: 'Delete to-do', destructive: true })) return
     haptic.warning()
     deleteTodo(t.id).then(() => toast({ title: 'To-do deleted', body: t.title }), fail)
   }

@@ -3,15 +3,15 @@
 // the to-dos due. Tap an event to edit it, + (or hold a day) to add one. Events are the phone's own calendars
 // (lib/calendar.ts), so Samsung and Google Calendar show the same.
 import { router } from 'expo-router'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeIn, FadeInLeft, FadeInRight } from 'react-native-reanimated'
+import Animated, { Easing, FadeIn, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { Add01Icon, ArrowLeft01Icon, ArrowRight01Icon, Calendar03Icon, Location01Icon, Notification03Icon } from '@hugeicons/core-free-icons'
 
 import { useTabBarInset } from '@/components/tab-bar'
 import { calendarAccess, eventDays, useEvents, type PhoneEvent } from '@/lib/calendar'
-import { reminderNext, useMinute, useReminders } from '@/lib/clock'
+import { reminderNext, useMinute, useReminders, type Reminder } from '@/lib/clock'
 import { isoDay, useTodos } from '@/lib/tasks'
 import { motion, useTheme } from '@/theme'
 import { Button, EmptyState, Icon, IconButton, Text, haptic } from '@/ui'
@@ -32,7 +32,6 @@ export function CalendarView() {
   const [access, setAccess] = useState<'ok' | 'no' | 'missing' | null>(null)
   const [month, setMonth] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1))
   const [picked, setPicked] = useState(today)
-  const [dir, setDir] = useState(0)
   useEffect(() => { calendarAccess(true).then(setAccess) }, [])
 
   // Six weeks from the Monday on or before the 1st.
@@ -46,14 +45,48 @@ export function CalendarView() {
   const events = useEvents(from, to, access === 'ok')
   const byDay = useMemo(() => {
     const m = new Map<number, PhoneEvent[]>()
-    for (const e of events ?? []) for (const d of eventDays(e)) m.set(d, [...(m.get(d) ?? []), e])
+    // The same event in several calendars (a holiday in "Holidays in India" on two accounts and in "Hindu holidays")
+    // shows once.
+    const seen = new Set<string>()
+    for (const e of events ?? []) {
+      const key = `${e.title.trim().toLowerCase()}|${e.start}|${e.end}|${e.allDay}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      for (const d of eventDays(e)) m.set(d, [...(m.get(d) ?? []), e])
+    }
     for (const l of m.values()) l.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start - b.start)
     return m
   }, [events])
+  // Each day's lines: its events in their colours, then reminders (amber) and to-dos due (grey).
+  const { todos } = useTodos()
+  const reminders = useReminders().rows
+  const lines = useMemo(() => {
+    const m = new Map<number, string[]>()
+    const push = (d: number, color: string) => m.set(d, [...(m.get(d) ?? []), color])
+    for (const [d, l] of byDay) for (const e of l) push(d, e.color)
+    for (const r of reminders ?? []) for (const d of reminderDays(r, from, to)) push(d, c.warning)
+    for (const t of todos ?? []) {
+      if (!t.due || t.status === 'done' || t.status === 'canceled') continue
+      const [y, mo, dd] = t.due.split('-').map(Number)
+      push(new Date(y, mo - 1, dd).getTime(), c.ink3)
+    }
+    return m
+  }, [byDay, reminders, todos, from, to, c])
 
+  // Month changes slide: the grid follows the finger, leaves to its side and the next month comes in from the other.
+  const { width } = useWindowDimensions()
+  const tx = useSharedValue(0)
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }], opacity: 1 - Math.min(1, Math.abs(tx.get()) / width) * 0.7 }))
+  const incoming = useRef(0)
+  useLayoutEffect(() => {
+    if (!incoming.current) return
+    tx.set(incoming.current * width * 0.35)
+    tx.set(withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) }))
+    incoming.current = 0
+  }, [month, tx, width])
   const shift = useCallback((n: number) => {
     haptic.tap()
-    setDir(n)
+    incoming.current = n
     setMonth((m) => {
       const next = new Date(m.getFullYear(), m.getMonth() + n, 1)
       // The picked day follows: today in this month, else the 1st.
@@ -62,9 +95,20 @@ export function CalendarView() {
       return next
     })
   }, [])
-  const swipe = useMemo(() => Gesture.Pan().runOnJS(true).activeOffsetX([-24, 24]).failOffsetY([-14, 14])
-    .onEnd((e) => { if (Math.abs(e.translationX) > 50 || Math.abs(e.velocityX) > 500) shift(e.translationX < 0 ? 1 : -1) }), [shift])
-  const goToday = () => { haptic.tap(); setDir(0); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setPicked(today) }
+  const go = useCallback((n: number) => {
+    tx.set(withTiming(-n * width * 0.35, { duration: 160, easing: Easing.in(Easing.quad) }, (done) => { if (done) runOnJS(shift)(n) }))
+  }, [shift, tx, width])
+  const swipe = useMemo(() => Gesture.Pan().activeOffsetX([-24, 24]).failOffsetY([-14, 14])
+    .onUpdate((e) => { tx.set(e.translationX * 0.6) })
+    // `shift` writes a ref only when the swipe ends, never while rendering.
+    // eslint-disable-next-line react-hooks/refs
+    .onEnd((e) => {
+      if (Math.abs(e.translationX) > 50 || Math.abs(e.velocityX) > 500) {
+        const n = e.translationX < 0 ? 1 : -1
+        tx.set(withTiming(-n * width * 0.35, { duration: 140, easing: Easing.out(Easing.quad) }, (done) => { if (done) runOnJS(shift)(n) }))
+      } else tx.set(withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) }))
+    }), [shift, tx, width])
+  const goToday = () => { haptic.tap(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setPicked(today) }
   const add = useCallback((day: number) => { haptic.tap(); router.push({ pathname: '/event/[id]', params: { id: 'new', day: isoDay(new Date(day)) } }) }, [])
   const onPick = useCallback((day: number) => { haptic.tap(); setPicked(day) }, [])
 
@@ -92,22 +136,21 @@ export function CalendarView() {
             <Text variant="label" color="ink2">Today</Text>
           </Pressable>
         )}
-        <IconButton icon={ArrowLeft01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Last month" onPress={() => shift(-1)} />
-        <IconButton icon={ArrowRight01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Next month" onPress={() => shift(1)} />
+        <IconButton icon={ArrowLeft01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Last month" onPress={() => go(-1)} />
+        <IconButton icon={ArrowRight01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Next month" onPress={() => go(1)} />
       </View>
       <View style={{ flexDirection: 'row', paddingHorizontal: 8 }}>
         {WEEK.map((d, i) => <Text key={i} variant="caption" color={i > 4 ? 'danger' : 'ink3'} style={{ flex: 1, textAlign: 'center', paddingVertical: 6 }}>{d}</Text>)}
       </View>
       <GestureDetector gesture={swipe}>
-        <Animated.View key={month.getTime()} entering={(dir > 0 ? FadeInRight : dir < 0 ? FadeInLeft : FadeIn).duration(motion.duration.fast)}
-          style={{ paddingHorizontal: 8 }}>
+        <Animated.View style={[{ paddingHorizontal: 8 }, slide]}>
           {[0, 1, 2, 3, 4, 5].map((w) => (
             <View key={w} style={{ flexDirection: 'row', borderTopWidth: 0.5, borderColor: c.line }}>
               {[0, 1, 2, 3, 4, 5, 6].map((i) => {
                 const d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + w * 7 + i)
                 const t = d.getTime()
                 return <DayCell key={i} day={t} date={d.getDate()} inMonth={d.getMonth() === month.getMonth()} weekend={i > 4}
-                  today={t === today} picked={t === picked} events={byDay.get(t)} onPick={onPick} onHold={add} />
+                  today={t === today} picked={t === picked} lines={lines.get(t)} count={byDay.get(t)?.length ?? 0} onPick={onPick} onHold={add} />
               })}
             </View>
           ))}
@@ -118,26 +161,47 @@ export function CalendarView() {
   )
 }
 
-const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, picked, events, onPick, onHold }: {
-  day: number; date: number; inMonth: boolean; weekend: boolean; today: boolean; picked: boolean; events?: PhoneEvent[]
+const DayCell = memo(function DayCell({ day, date, inMonth, weekend, today, picked, lines, count, onPick, onHold }: {
+  day: number; date: number; inMonth: boolean; weekend: boolean; today: boolean; picked: boolean; lines?: string[]; count: number
   onPick: (d: number) => void; onHold: (d: number) => void
 }) {
   const { c } = useTheme()
+  // Today: a solid circle in the tube's colour. The picked day: a ring (around today's circle too, when it's today).
   return (
     <Pressable onPress={() => onPick(day)} onLongPress={() => onHold(day)} delayLongPress={320}
       accessibilityRole="button" accessibilityState={{ selected: picked }}
-      accessibilityLabel={`${new Date(day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${events?.length ? `, ${events.length} events` : ''}`}
-      style={{ flex: 1, height: CELL_H, paddingTop: 4, paddingHorizontal: 2, gap: 2, borderRadius: 12, backgroundColor: picked && !today ? c.panel2 : undefined, opacity: inMonth ? 1 : 0.35 }}>
-      <View style={{ alignSelf: 'center', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : undefined }}>
-        <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
+      accessibilityLabel={`${new Date(day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${count ? `, ${count} events` : ''}`}
+      style={{ flex: 1, height: CELL_H, paddingTop: 4, gap: 2, opacity: inMonth ? 1 : 0.35 }}>
+      <View style={{ alignSelf: 'center', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+        borderWidth: picked ? 1.5 : 0, borderColor: today ? c.tube : c.ink2 }}>
+        <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: today ? c.tube : undefined }}>
+          <Text variant="caption" tabular style={{ color: today ? '#fff' : weekend ? c.danger : c.ink, fontWeight: today || picked ? '600' : '400' }}>{date}</Text>
+        </View>
       </View>
-      {/* One coloured line per event (the day's list below has the words). */}
-      <View style={{ gap: 3, paddingHorizontal: 6, paddingTop: 3 }}>
-        {events?.slice(0, LINES).map((e) => <View key={`${e.id}:${e.start}`} style={{ height: 3, borderRadius: 1.5, backgroundColor: e.color }} />)}
+      {/* One line per event, reminder and to-do due (the day's list below has the words). */}
+      <View style={{ gap: 3, paddingHorizontal: 8, paddingTop: 2 }}>
+        {lines?.slice(0, LINES).map((color, i) => <View key={i} style={{ height: 3, borderRadius: 1.5, backgroundColor: color }} />)}
       </View>
     </Pressable>
   )
 })
+
+/** Every local day (midnight ms) in [from, to) a reminder rings on, repeats included. */
+function reminderDays(r: Reminder, from: number, to: number): number[] {
+  if (r.done) return []
+  const out: number[] = []
+  const d = new Date(r.at)
+  for (let i = 0; i < 400 && d.getTime() < to; i++) {
+    if (d.getTime() >= from) out.push(midnight(d))
+    if (!r.repeat) break
+    if (r.repeat === 'daily') d.setDate(d.getDate() + 1)
+    else if (r.repeat === 'weekdays') do d.setDate(d.getDate() + 1); while (d.getDay() === 0 || d.getDay() === 6)
+    else if (r.repeat === 'weekly') d.setDate(d.getDate() + 7)
+    else if (r.repeat === 'monthly') d.setMonth(d.getMonth() + 1)
+    else d.setFullYear(d.getFullYear() + 1)
+  }
+  return out
+}
 
 /** The picked day: all-day events, then events and reminders by time, then the to-dos due that day. */
 function Agenda({ day, events, now, onAdd }: { day: number; events: PhoneEvent[]; now: Date; onAdd: () => void }) {
