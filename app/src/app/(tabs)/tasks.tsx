@@ -6,7 +6,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { Add01Icon, AlarmClockIcon, ArrowDown01Icon, Calendar03Icon, CheckListIcon, Tag01Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, AlarmClockIcon, ArrowDown01Icon, Calendar03Icon, CheckListIcon, CircleCheckIcon, Tag01Icon } from '@hugeicons/core-free-icons'
 
 import { TabHeader } from '@/components/screen-header'
 import { useTabBarInset } from '@/components/tab-bar'
@@ -51,7 +51,7 @@ export default function Tasks() {
     const back = mode === m
     return (
       <IconButton variant="soft" round accessibilityLabel={back ? 'To-dos' : label} onPress={() => open(back ? 'todos' : m)}
-        icon={back ? CheckListIcon : icon} />
+        icon={back ? CircleCheckIcon : icon} />
     )
   }
 

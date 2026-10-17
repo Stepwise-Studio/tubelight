@@ -3,18 +3,19 @@
 // the to-dos due. Tap an event to edit it, + (or hold a day) to add one. Events are the phone's own calendars
 // (lib/calendar.ts), so Samsung and Google Calendar show the same.
 import { router } from 'expo-router'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { Easing, FadeIn, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { Add01Icon, ArrowLeft01Icon, ArrowRight01Icon, Calendar03Icon, Location01Icon, Notification03Icon } from '@hugeicons/core-free-icons'
+import { Add01Icon, ArrowLeft01Icon, ArrowRight01Icon, Calendar03Icon, Layers01Icon, Location01Icon, Notification03Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { useTabBarInset } from '@/components/tab-bar'
-import { calendarAccess, eventDays, useEvents, type PhoneEvent } from '@/lib/calendar'
+import { calendarAccess, eventDays, useCalendars, useEvents, type PhoneEvent } from '@/lib/calendar'
 import { reminderNext, useMinute, useReminders, type Reminder } from '@/lib/clock'
 import { isoDay, useTodos } from '@/lib/tasks'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, IconButton, Text, haptic } from '@/ui'
+import { Button, EmptyState, Icon, IconButton, Sheet, Text, haptic } from '@/ui'
 
 import { StatusGlyph } from './glyphs'
 
@@ -32,23 +33,23 @@ export function CalendarView() {
   const [access, setAccess] = useState<'ok' | 'no' | 'missing' | null>(null)
   const [month, setMonth] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1))
   const [picked, setPicked] = useState(today)
+  const [pickCals, setPickCals] = useState(false)
+  const hidden = useHiddenCalendars()
   useEffect(() => { calendarAccess(true).then(setAccess) }, [])
 
-  // Six weeks from the Monday on or before the 1st.
-  const first = useMemo(() => {
-    const d = new Date(month)
-    d.setDate(1 - ((d.getDay() + 6) % 7))
-    return d
-  }, [month])
-  const from = first.getTime()
-  const to = new Date(first.getFullYear(), first.getMonth(), first.getDate() + 42).getTime()
+  // Three months are drawn side by side (last, this, next) so a swipe shows the next one already there; events are
+  // read for all three at once.
+  const months = useMemo(() => [-1, 0, 1].map((n) => new Date(month.getFullYear(), month.getMonth() + n, 1)), [month])
+  const from = gridStart(months[0]).getTime()
+  const to = new Date(gridStart(months[2]).getTime() + 42 * DAY).getTime()
   const events = useEvents(from, to, access === 'ok')
   const byDay = useMemo(() => {
     const m = new Map<number, PhoneEvent[]>()
-    // The same event in several calendars (a holiday in "Holidays in India" on two accounts and in "Hindu holidays")
-    // shows once.
+    // Calendars switched off here are left out; the same event in several calendars (a holiday in two accounts'
+    // "Holidays in India" and in "Hindu holidays") shows once.
     const seen = new Set<string>()
     for (const e of events ?? []) {
+      if (hidden.has(e.calendar)) continue
       const key = `${e.title.trim().toLowerCase()}|${e.start}|${e.end}|${e.allDay}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -56,7 +57,7 @@ export function CalendarView() {
     }
     for (const l of m.values()) l.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start - b.start)
     return m
-  }, [events])
+  }, [events, hidden])
   // Each day's lines: its events in their colours, then reminders (amber) and to-dos due (grey).
   const { todos } = useTodos()
   const reminders = useReminders().rows
@@ -73,20 +74,14 @@ export function CalendarView() {
     return m
   }, [byDay, reminders, todos, from, to, c])
 
-  // Month changes slide: the grid follows the finger, leaves to its side and the next month comes in from the other.
-  const { width } = useWindowDimensions()
-  const tx = useSharedValue(0)
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }], opacity: 1 - Math.min(1, Math.abs(tx.get()) / width) * 0.7 }))
-  const incoming = useRef(0)
-  useLayoutEffect(() => {
-    if (!incoming.current) return
-    tx.set(incoming.current * width * 0.35)
-    tx.set(withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) }))
-    incoming.current = 0
-  }, [month, tx, width])
+  // The pager: the strip rests on the middle month (-W); a swipe drags it, settles on a neighbour, and the months move
+  // along by one under it (the strip goes back to the middle in the same frame, so nothing jumps).
+  const { width: W } = useWindowDimensions()
+  const tx = useSharedValue(-W)
+  const strip = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }] }))
+  useLayoutEffect(() => { tx.set(-W) }, [month, tx, W])
   const shift = useCallback((n: number) => {
     haptic.tap()
-    incoming.current = n
     setMonth((m) => {
       const next = new Date(m.getFullYear(), m.getMonth() + n, 1)
       // The picked day follows: today in this month, else the 1st.
@@ -95,19 +90,16 @@ export function CalendarView() {
       return next
     })
   }, [])
-  const go = useCallback((n: number) => {
-    tx.set(withTiming(-n * width * 0.35, { duration: 160, easing: Easing.in(Easing.quad) }, (done) => { if (done) runOnJS(shift)(n) }))
-  }, [shift, tx, width])
-  const swipe = useMemo(() => Gesture.Pan().activeOffsetX([-24, 24]).failOffsetY([-14, 14])
-    .onUpdate((e) => { tx.set(e.translationX * 0.6) })
-    // `shift` writes a ref only when the swipe ends, never while rendering.
-    // eslint-disable-next-line react-hooks/refs
+  const settle = { duration: 280, easing: Easing.out(Easing.cubic) }
+  const go = (n: number) => tx.set(withTiming(-W - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
+  const swipe = Gesture.Pan().activeOffsetX([-20, 20]).failOffsetY([-14, 14])
+    .onUpdate((e) => { tx.set(-W + e.translationX) })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > 50 || Math.abs(e.velocityX) > 500) {
+      if (Math.abs(e.translationX) > W * 0.2 || Math.abs(e.velocityX) > 500) {
         const n = e.translationX < 0 ? 1 : -1
-        tx.set(withTiming(-n * width * 0.35, { duration: 140, easing: Easing.out(Easing.quad) }, (done) => { if (done) runOnJS(shift)(n) }))
-      } else tx.set(withTiming(0, { duration: 200, easing: Easing.out(Easing.cubic) }))
-    }), [shift, tx, width])
+        tx.set(withTiming(-W - n * W, settle, (done) => { if (done) runOnJS(shift)(n) }))
+      } else tx.set(withTiming(-W, settle))
+    })
   const goToday = () => { haptic.tap(); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setPicked(today) }
   const add = useCallback((day: number) => { haptic.tap(); router.push({ pathname: '/event/[id]', params: { id: 'new', day: isoDay(new Date(day)) } }) }, [])
   const onPick = useCallback((day: number) => { haptic.tap(); setPicked(day) }, [])
@@ -117,7 +109,7 @@ export function CalendarView() {
       <EmptyState
         art={<View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={Calendar03Icon} size={26} color="tube" /></View>}
         title={access === 'missing' ? 'Update Tubelight for the calendar' : 'Your calendar, here'}
-        body={access === 'missing' ? 'This version can’t read the phone’s calendars yet.' : 'Tubelight shows and edits the calendars on this phone, the same ones Samsung and Google Calendar show.'}
+        body={access === 'missing' ? 'This version can’t read the phone’s calendars yet.' : 'Tubelight shows and edits the calendars on this phone, the same ones Google Calendar syncs.'}
         action={access === 'no' ? <Button label="Allow calendar access" onPress={() => calendarAccess(true).then(setAccess)} /> : undefined}
       />
     )
@@ -136,6 +128,7 @@ export function CalendarView() {
             <Text variant="label" color="ink2">Today</Text>
           </Pressable>
         )}
+        <IconButton icon={Layers01Icon} size={36} iconSize={17} color={c.ink3} accessibilityLabel="Calendars to show" onPress={() => { haptic.tap(); setPickCals(true) }} />
         <IconButton icon={ArrowLeft01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Last month" onPress={() => go(-1)} />
         <IconButton icon={ArrowRight01Icon} size={36} iconSize={18} color={c.ink3} accessibilityLabel="Next month" onPress={() => go(1)} />
       </View>
@@ -143,21 +136,89 @@ export function CalendarView() {
         {WEEK.map((d, i) => <Text key={i} variant="caption" color={i > 4 ? 'danger' : 'ink3'} style={{ flex: 1, textAlign: 'center', paddingVertical: 6 }}>{d}</Text>)}
       </View>
       <GestureDetector gesture={swipe}>
-        <Animated.View style={[{ paddingHorizontal: 8 }, slide]}>
-          {[0, 1, 2, 3, 4, 5].map((w) => (
-            <View key={w} style={{ flexDirection: 'row', borderTopWidth: 0.5, borderColor: c.line }}>
-              {[0, 1, 2, 3, 4, 5, 6].map((i) => {
-                const d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + w * 7 + i)
-                const t = d.getTime()
-                return <DayCell key={i} day={t} date={d.getDate()} inMonth={d.getMonth() === month.getMonth()} weekend={i > 4}
-                  today={t === today} picked={t === picked} lines={lines.get(t)} count={byDay.get(t)?.length ?? 0} onPick={onPick} onHold={add} />
-              })}
-            </View>
-          ))}
-        </Animated.View>
+        <View style={{ overflow: 'hidden' }}>
+          <Animated.View style={[{ flexDirection: 'row', width: W * 3 }, strip]}>
+            {months.map((m, i) => (
+              <MonthGrid key={i} month={m} width={W} today={today} picked={i === 1 ? picked : -1} lines={lines} byDay={byDay} onPick={onPick} onHold={add} />
+            ))}
+          </Animated.View>
+        </View>
       </GestureDetector>
       <Agenda day={picked} events={byDay.get(picked) ?? []} now={now} onAdd={() => add(picked)} />
+      <CalendarsSheet open={pickCals} hidden={hidden} onClose={() => setPickCals(false)} />
     </ScrollView>
+  )
+}
+
+const DAY = 86_400_000
+/** The Monday on or before the 1st (six weeks are shown from there). */
+function gridStart(month: Date) {
+  const d = new Date(month)
+  d.setDate(1 - ((d.getDay() + 6) % 7))
+  return d
+}
+
+const MonthGrid = memo(function MonthGrid({ month, width, today, picked, lines, byDay, onPick, onHold }: {
+  month: Date; width: number; today: number; picked: number; lines: Map<number, string[]>; byDay: Map<number, PhoneEvent[]>
+  onPick: (d: number) => void; onHold: (d: number) => void
+}) {
+  const { c } = useTheme()
+  const first = gridStart(month)
+  return (
+    <View style={{ width, paddingHorizontal: 8 }}>
+      {[0, 1, 2, 3, 4, 5].map((w) => (
+        <View key={w} style={{ flexDirection: 'row', borderTopWidth: 0.5, borderColor: c.line }}>
+          {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+            const d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + w * 7 + i)
+            const t = d.getTime()
+            return <DayCell key={i} day={t} date={d.getDate()} inMonth={d.getMonth() === month.getMonth()} weekend={i > 4}
+              today={t === today} picked={t === picked} lines={lines.get(t)} count={byDay.get(t)?.length ?? 0} onPick={onPick} onHold={onHold} />
+          })}
+        </View>
+      ))}
+    </View>
+  )
+})
+
+// Which of the phone's calendars to show here (kept on the phone; Google Calendar's own choice doesn't come through).
+const HIDDEN_KEY = 'tl.calendar.hidden'
+let hiddenNow = new Set<string>()
+const hiddenSubs = new Set<() => void>()
+AsyncStorage.getItem(HIDDEN_KEY).then((v) => { if (v) { hiddenNow = new Set(JSON.parse(v)); hiddenSubs.forEach((f) => f()) } }, () => {})
+function setHidden(next: Set<string>) {
+  hiddenNow = next
+  hiddenSubs.forEach((f) => f())
+  AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])).catch(() => {})
+}
+const useHiddenCalendars = () => useSyncExternalStore((f) => { hiddenSubs.add(f); return () => { hiddenSubs.delete(f) } }, () => hiddenNow)
+
+function CalendarsSheet({ open, hidden, onClose }: { open: boolean; hidden: Set<string>; onClose: () => void }) {
+  const { c } = useTheme()
+  const cals = useCalendars(open).filter((x) => x.visible)
+  const accounts = [...new Set(cals.map((x) => x.account))]
+  return (
+    <Sheet open={open} onClose={onClose} title="Calendars">
+      <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 16 }}>
+        {accounts.map((a) => (
+          <View key={a}>
+            <Text variant="overline" color="ink3" numberOfLines={1} style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 }}>{a === 'local account' ? 'On this phone' : a}</Text>
+            {cals.filter((x) => x.account === a).map((x) => {
+              const on = !hidden.has(x.id)
+              return (
+                <Pressable key={x.id} onPress={() => { haptic.tap(); const n = new Set(hidden); if (on) n.add(x.id); else n.delete(x.id); setHidden(n) }}
+                  android_ripple={{ color: c.wash }} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={x.name}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, paddingHorizontal: 12 }}>
+                  <View style={{ width: 22, height: 22, borderRadius: 7, backgroundColor: on ? x.color : undefined, borderWidth: on ? 0 : 1.5, borderColor: c.edge, alignItems: 'center', justifyContent: 'center' }}>
+                    {on && <Icon icon={Tick02Icon} size={14} color="#fff" strokeWidth={2.4} />}
+                  </View>
+                  <Text variant="body" numberOfLines={1} style={{ flex: 1, color: on ? c.ink : c.ink3 }}>{x.name === a ? 'Main calendar' : x.name}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        ))}
+      </ScrollView>
+    </Sheet>
   )
 }
 
