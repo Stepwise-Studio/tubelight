@@ -76,7 +76,7 @@ async def run(name: str) -> None:
     decisions, stage0, calls = [], 0, 0
     while batches := await mem._batches(owner, force=True):
         for batch in batches:
-            for attempt in range(4):
+            for attempt in range(8):
                 try:
                     res = await mem.extract(owner, user, batch)
                     break
