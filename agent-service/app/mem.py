@@ -643,6 +643,37 @@ async def consolidate(owner: str, user_name: str, limit: int = 8) -> int:
     return len(stale)
 
 
+# ------------------------------------------------------------------ linking
+LINK = """Below are facts from {user}'s memory. List the people, organisations, projects, places and named things they
+mention, other than {user} themself and their AI teammates ({roster}): each once, with its kind. JSON only:
+{{"entities": [{{"name": "as written in the facts", "kind": "person|org|project|place|thing", "aka": ["other names used"]}}]}}"""
+
+
+async def link(owner: str, user_name: str, since: datetime | None = None) -> int:
+    """Make an entity for everything the facts name. The extractor often files "Akhil started Stepwise Studio" under the
+    user without listing Stepwise Studio, so it never reached the map or recall by name. A name must appear in a fact
+    as written (no invented entities); one that does stays, as cleanup keeps entities a live fact names."""
+    facts = await _q("select text from mem_facts where owner = %s and status in ('current', 'tentative') "
+                     + ("and learned_at >= %s " if since else "") + "order by learned_at desc limit 200",
+                     *([owner, since] if since else [owner]))
+    if not facts:
+        return 0
+    text = "\n".join(f"- {f['text']}" for f in facts)
+    res = await _model().ainvoke([SystemMessage(LINK.format(user=user_name, roster=", ".join(await _roster(owner)) or "none")),
+                                  HumanMessage(text)])
+    made = 0
+    for e in _parse(res.text).get("entities") or []:
+        name = str((e or {}).get("name") or "").strip()
+        if len(name) < 3 or not re.search(rf"\b{re.escape(name)}\b", text, re.I) or name.lower() in user_name.lower():
+            continue
+        e["kind"] = e.get("kind") if e.get("kind") in ENTITY_KINDS else "thing"
+        e["aka"] = [a for a in e.get("aka") or [] if isinstance(a, str) and re.search(rf"\b{re.escape(a)}\b", text, re.I)]
+        before = await _q("select count(*) as n from mem_entities where owner = %s", owner)
+        await _resolve(owner, e, {})
+        made += (await _q("select count(*) as n from mem_entities where owner = %s", owner))[0]["n"] - before[0]["n"]
+    return made
+
+
 # ------------------------------------------------------------------ worker
 async def _batches(owner: str | None = None, force: bool = False) -> list[list[dict[str, Any]]]:
     """Waiting episodes grouped by conversation, only once it's been quiet for QUIET (or force)."""
@@ -717,6 +748,10 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
     # tentative facts nobody came back to fade (hidden from recall, kept on record); each restatement buys more time
     await _q("update mem_facts set status = 'faded' where status = 'tentative' and learned_at < now() - %s * seen", FADE)
     for o in owners if len(batches) <= max_batches else ():  # profiles once the backlog is through
+        try:
+            await link(o, names[o], since=datetime.now(UTC) - timedelta(minutes=15))
+        except Exception as e:
+            log.warning("memory: linking failed (%s)", str(e)[:200])
         try:
             await consolidate(o, names[o])
         except Exception as e:

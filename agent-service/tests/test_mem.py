@@ -159,8 +159,12 @@ async def test_done_commitments_and_forgetting(m):
     assert await facts(owner) == []  # b only marked it done; a was its only source
 
 
-async def test_extract_end_to_end_and_worker_waits_for_quiet(m):
+async def test_extract_end_to_end_and_worker_waits_for_quiet(m, monkeypatch):
     fake, owner = m
+
+    async def no_link(*_a, **_k):  # the scripted model answers extraction and profiles only (link has its own test)
+        return 0
+    monkeypatch.setattr(mem, "link", no_link)
     await mem.log_episode(owner, "chat", "Saqlain from Razorpay is our partner engineer", trust=2, ref="t9",
                           speaker="Jayanth")
     assert await mem.tick(owner) == 0  # still fresh: the conversation may go on
@@ -368,3 +372,23 @@ async def test_an_entity_a_fact_names_stays_even_when_the_fact_is_filed_under_th
     assert names == {"Stepwise Studio", "Dev.to"}  # named in a fact: kept; named nowhere: gone
     g = await mem.graph(owner)
     assert {x["name"] for x in g["nodes"]} == {"Stepwise Studio", "Dev.to"} and g["edges"][0]["n"] == 1
+
+
+async def test_link_makes_entities_only_for_names_the_facts_really_use(m, monkeypatch):
+    _, owner = m
+    a = await episode(owner, "I started Stepwise Studio and I'm building Tubelight")
+    await run(owner, [a], {"facts": [{"about": "user", "text": "Jayanth started Stepwise Studio and is building Tubelight", "episode": 1,
+                                      "quote": "I started Stepwise Studio", "importance": "important", "lasts": "years"}]})
+
+    class Reply:
+        text = json.dumps({"entities": [{"name": "Stepwise Studio", "kind": "org"}, {"name": "Tubelight", "kind": "project"},
+                                        {"name": "Invented Corp", "kind": "org"}, {"name": "Jayanth", "kind": "person"}]})
+
+    class Model:
+        async def ainvoke(self, _msgs):
+            return Reply()
+    monkeypatch.setattr(mem, "_model", lambda: Model())
+    assert await mem.link(owner, "Jayanth") == 2
+    names = {r["name"]: r["kind"] for r in await mem._q("select name, kind from mem_entities where owner = %s and kind <> 'user'", owner)}
+    assert names == {"Stepwise Studio": "org", "Tubelight": "project"}
+    assert await mem.link(owner, "Jayanth") == 0  # already there: nothing new
