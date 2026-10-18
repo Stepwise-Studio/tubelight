@@ -329,7 +329,10 @@ Reply with JSON only:
 def _model():
     """MEM_MODEL alone, no fallback chain: a weaker fallback quietly answers 'nothing to record' and the moment is lost
     for good, while a rate limit just means trying again on a later tick."""
-    return llm._one(config.MEM_MODEL, retries=1).bind(response_format={"type": "json_object"}, temperature=0)  # same input, same memory
+    # gpt-oss thinks before it answers: at its default effort the thinking used the whole reply budget and no JSON came
+    extra = {"reasoning_effort": "low", "max_tokens": 4096} if "gpt-oss" in config.MEM_MODEL else {}
+    return llm._one(config.MEM_MODEL, retries=1).bind(response_format={"type": "json_object"}, temperature=0,  # same input, same memory
+                                                      **extra)
 
 
 def _parse(text: str) -> dict[str, Any]:
