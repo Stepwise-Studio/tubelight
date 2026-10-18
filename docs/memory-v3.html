@@ -430,11 +430,26 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     </tbody>
   </table></div>
 
+  <p><b>Status (built and measured).</b> All six phases are implemented in the case-study system. Results:</p>
+  <ul>
+    <li><b>Write path:</b> on a held-out synthetic user with realistic junk (device commands with results, roasts, test automations), 91% of important moments kept and no junk stored.</li>
+    <li><b>Calibration:</b> fitted weights cut calibration error on the held-out user from 0.11 to 0.02.</li>
+    <li><b>Answers:</b> the scenario suite scores 20/20, including the new multi-step association case.</li>
+    <li><b>Deliberate sharing:</b> a 5,000-character life story went from 10 facts to 23 with paragraph-at-a-time reading and the second look.</li>
+  </ul>
+  <p>Three additions came from deployment rather than design:</p>
+  <ul>
+    <li>gleaning and read-back for deliberate sharing;</li>
+    <li>a linking pass that creates an entity for every name a fact uses, because the extractor often files "the user started Stepwise Studio" under the user;</li>
+    <li>keeping an entity alive while any live fact names it.</li>
+  </ul>
+
   <h2>10. Limits</h2>
   <ul>
     <li>Novelty from embeddings is a proxy, not true Bayesian surprise. A hosted model API doesn't expose the model's own probabilities for this.</li>
     <li>The gate is only as good as its labels. Until there are about 100, it runs on its starting weights and should be read as a sensible default, not as calibrated.</li>
-    <li>PPMI is noisy for rare entities: a single co-occurrence between two rarely seen entities looks strong. An edge is drawn only when the pair co-occurs at least twice.</li>
+    <li>PPMI is noisy for rare entities: a single co-occurrence between two rarely seen entities looks strong. With little history the map and recall still use single co-occurrences; the "at least twice" rule should switch on once there are a few hundred episodes.</li>
+    <li>PPMI is zero for an entity that comes up in nearly everything, such as the user's main project. That's correct, since such an entity carries no information about what goes with what, but it means recall reaches it through name match and similarity rather than through links.</li>
     <li>Stress majorization costs O(n²) per step. That is fine on a phone up to a few hundred entities. Beyond that, sparse stress [25] or a subset of landmark nodes is needed.</li>
   </ul>
 
