@@ -191,7 +191,9 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           keyboardAppearance={scheme}
           multiline
           accessibilityLabel={placeholder}
-          style={[typeScale.body, { flex: 1, color: c.ink, minHeight: 36, maxHeight: 140, paddingTop: 8, paddingBottom: 8, paddingHorizontal: 6, textAlignVertical: 'center' }]}
+          // One line is exactly the buttons' 36 (22 + 7 + 7, no Android font padding), so + and the mic sit centred
+          // beside it; a longer message grows upward and they stay at the bottom.
+          style={[typeScale.body, { flex: 1, color: c.ink, minHeight: 36, maxHeight: 140, paddingTop: 7, paddingBottom: 7, paddingHorizontal: 6, textAlignVertical: 'center', includeFontPadding: false }]}
           maxFontSizeMultiplier={1.3}
         >
           {/* Finished @mentions tint as you type (the text itself stays plain: this only styles it). Styled pieces make

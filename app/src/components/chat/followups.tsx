@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { whenLabel } from '@/lib/format'
 import type { Teammate } from '@/lib/types'
 import { motion, useTheme } from '@/theme'
-import { Badge, Icon, IconButton, Press, Sheet, Text, confirm, haptic, toast } from '@/ui'
+import { Icon, IconButton, Press, Sheet, Text, confirm, haptic, toast } from '@/ui'
 
 /** A pending follow-up (GET /threads/:id/followups): a time (`at`) or a condition (`until`). */
 export interface Followup {
@@ -52,17 +52,15 @@ export function useFollowups(threadId: string, stamp: unknown) {
 /** The header button: a clock with how many follow-ups are pending here. */
 export function FollowupsButton({ count, onPress }: { count: number; onPress: () => void }) {
   const { c } = useTheme()
+  // No counter (the user's call): the icon is just brighter while something is pending.
   return (
-    <View>
-      <IconButton
-        icon={Clock01Icon}
-        round
-        color={count ? c.ink : c.ink3}
-        accessibilityLabel={count ? `${count} pending follow-up${count > 1 ? 's' : ''}` : 'Follow-ups'}
-        onPress={() => { haptic.tap(); onPress() }}
-      />
-      <View style={{ position: 'absolute', top: 6, right: 4 }}><Badge count={count} /></View>
-    </View>
+    <IconButton
+      icon={Clock01Icon}
+      round
+      color={count ? c.ink : c.ink3}
+      accessibilityLabel={count ? `${count} pending follow-up${count > 1 ? 's' : ''}` : 'Follow-ups'}
+      onPress={() => { haptic.tap(); onPress() }}
+    />
   )
 }
 
