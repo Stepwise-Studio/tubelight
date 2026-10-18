@@ -99,7 +99,7 @@ function SheetBody({ open, onClose, onGone, title, children, accessibilityLabel 
           accessibilityLabel={accessibilityLabel ?? title}
           style={[{ position: 'absolute', left: 8, right: 8, bottom: Math.max(insets.bottom, 8), borderRadius: radius.sheet, maxHeight: screenH - insets.top - 24 }, elevation(scheme, 2), panel]}
         >
-          <Glass over="app" always radius={radius.sheet} veil={0.72} style={{ paddingBottom: 12 }}>
+          <Glass radius={radius.sheet} veil={0.92} style={{ paddingBottom: 12 }}>
             <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: title ? 4 : 8 }}>
               <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: c.lineStrong }} />
             </View>

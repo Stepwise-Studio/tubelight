@@ -82,7 +82,7 @@ function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: n
       </View>
       {!closing && <Animated.View entering={grow} exiting={FadeOut.duration(120)}
         style={[{ position: 'absolute', left, top, width: MENU_W, borderRadius: 20, transformOrigin: origin }, elevation(scheme)]}>
-        <Glass over="app" always radius={20} veil={0.5} style={{ padding: 6 }}>
+        <Glass radius={20} veil={0.9} style={{ padding: 6 }}>
           {items.map((it) => (
             <Press key={it.label} radius={14} onPress={() => pick(it)} accessibilityLabel={it.label}
               style={{ height: ROW, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12 }}>

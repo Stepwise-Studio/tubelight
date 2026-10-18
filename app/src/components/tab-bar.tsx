@@ -10,10 +10,11 @@ import { AiArtIcon, InboxIcon, UserCircleIcon, VaultIcon, WorkHistoryIcon } from
 import { isUnread } from '@/lib/format'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Badge, Glass, Icon, elevation, haptic, wakeGlass } from '@/ui'
+import { Badge, Glass, Icon, elevation, haptic } from '@/ui'
 
 type BottomTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0]
 
+const dark = (s: string) => s === 'dark'
 const BAR = 64
 const GAP = 10
 
@@ -42,9 +43,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const waiting = ws.pendingApprovals.length
   const badge = (name: string) => (name === 'activity' ? waiting : 0)
   const dot = (name: string) => name === 'index' && unread
-
-  // A tab switch moves the page behind the glass: blur once more. (Workspace updates are left out: a live run keeps them coming and would hold the blur on.)
-  useEffect(() => { wakeGlass() }, [current])
 
   const slot = (screen - 32 - 12) / PLACES.length
   const at = Math.max(0, PLACES.findIndex((p) => p.name === current))
@@ -82,7 +80,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 16, right: 16, bottom: Math.max(insets.bottom, 12), zIndex: 2 }}>
       <View accessibilityRole="tablist" style={[{ borderRadius: BAR / 2 }, elevation(scheme)]}>
-        <Glass over={current} radius={BAR / 2} style={{ height: BAR, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 }}>
+        <Glass over={current} radius={BAR / 2} veil={dark(scheme) ? 0.35 : 0.3} style={{ height: BAR, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 }}>
           <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, top: 6, bottom: 6, width: slot, borderRadius: 26, backgroundColor: c.tubeSoft }, pill]} />
           {PLACES.map((p) => {
             const on = current === p.name

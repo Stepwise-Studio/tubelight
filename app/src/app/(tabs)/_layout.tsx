@@ -13,7 +13,7 @@ export default function TabsLayout() {
   return (
     <Tabs
       tabBar={(props) => <TabBar {...props} />}
-      // Content fades under the floating capsule, which is frosted glass over the page's own (unfaded) picture.
+      // Content fades under the floating capsule, which is frosted glass.
       screenLayout={({ children, route }) => <EdgeScreen height={inset}><SceneTarget name={route.name}>{children}</SceneTarget></EdgeScreen>}
       screenOptions={{
         headerShown: false,

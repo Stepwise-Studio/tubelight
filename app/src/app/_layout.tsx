@@ -16,7 +16,7 @@ import { registerPhone, useNotificationSync, usePhoneActions } from '@/lib/phone
 import { useThread } from '@/lib/use-thread'
 import { WorkspaceProvider, isPhone, useWorkspace } from '@/lib/workspace'
 import { ThemeProvider, useTheme } from '@/theme'
-import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, SceneTarget, ToastHost, touchGlass } from '@/ui'
+import { ConfirmHost, EmojiPickerHost, MenuHost, PortalHost, ToastHost } from '@/ui'
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
 const hideSplash = () => { SplashScreen.hideAsync().catch(() => {}) }
@@ -62,8 +62,7 @@ function Root() {
   return (
     <NavThemeProvider value={navTheme}>
       <WorkspaceProvider key={session?.user.id ?? 'signed-out'} userId={session?.user.id ?? null}>
-        <View style={{ flex: 1, backgroundColor: c.canvas }} onTouchStart={() => touchGlass(true)} onTouchEnd={() => touchGlass(false)} onTouchCancel={() => touchGlass(false)}>
-          <SceneTarget name="app">
+        <View style={{ flex: 1, backgroundColor: c.canvas }}>
           <Stack
             screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.canvas } }}
             // Every page's content fades and blurs under the bottom edge; tabs and chats do it under their own bars.
@@ -97,7 +96,6 @@ function Root() {
               <Stack.Screen name="open" options={{ animation: 'fade' }} />
             </Stack.Protected>
           </Stack>
-          </SceneTarget>
           {signedIn && <SplashGate />}
           {signedIn && <SheetsHost />}
           {signedIn && <VaultSheetsHost />}
