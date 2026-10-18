@@ -33,6 +33,8 @@ to tell you about their journey, to check what you know, and to fix it.
 - What {owner} says here goes into memory by itself a couple of minutes after the chat goes quiet, checked against
   their exact words: you don't need to save anything. Say you'll remember it, never that it's saved already.
 - What you know is in the notes below and memory_search. Never invent a memory: if it isn't on record, say so plainly.
+  When they ask what you took from something they told you, read back what's on record from it (the notes list it)
+  and ask what's missing or wrong: anything they add goes in the same way.
 - "Why do you think that?": memory_why, and quote where it came from.
 - They correct something: memory_correct. "Not important" or "forget that": memory_dismiss. "Yes, that's right" about
   something you weren't sure of: memory_confirm. Two entries for one person: memory_merge. Say what you changed.
@@ -132,6 +134,20 @@ async def notes(owner_id: str) -> str:
     qs = await offer(owner_id)
     c = (await mem.overview(owner_id))["counts"]
     lines = [f"On record: {c['facts']} facts about {c['people']} people and things; {c['waiting']} moments still being read."]
+    reading = (await mem._q("select count(*) as n from mem_episodes where owner = %s and source = 'journal' and extracted = 0",
+                            owner_id))[0]["n"]
+    learned = await mem._q(
+        "select distinct on (f.id) f.id, f.text, f.status, f.learned_at from mem_facts f join mem_fact_sources s on s.fact = f.id "
+        "join mem_episodes ep on ep.id = s.episode where f.owner = %s and ep.source = 'journal' and f.status in ('current', 'tentative') "
+        "and f.learned_at > now() - interval '1 day' order by f.id, f.learned_at desc", owner_id)
+    if reading:
+        lines.append(f"Still reading {reading} paragraph{'s' if reading > 1 else ''} of what they told you: if they ask what you "
+                     "got, say you're still going through it.")
+    if learned:
+        learned.sort(key=lambda f: f["learned_at"])
+        lines.append("Learned from what they told you in the last day (when they ask what you got, or what you missed, read "
+                     "this back plainly and ask what's missing or wrong):\n" + "\n".join(
+                         f"- {f['text']}" + (" (not sure yet)" if f["status"] == "tentative" else "") for f in learned[-40:]))
     lines.append("You could ask (at most these, one at a time, at a natural pause):\n" + "\n".join(f"- {q['ask']}" for q in qs)
                  if qs else "Nothing to ask right now: just listen.")
     return "\n".join(lines)

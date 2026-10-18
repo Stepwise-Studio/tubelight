@@ -63,3 +63,16 @@ async def test_confirm_dismiss_merge(m, monkeypatch):
     assert "Merged Kish into Kishore." == await tools["memory_merge"].ainvoke({"keep": "Kishore", "other": "Kish"})
     rows = await mem._q("select name, aliases from mem_entities where owner = %s and kind = 'person'", owner)
     assert rows == [{"name": "Kishore", "aliases": ["Kish"]}]
+
+
+async def test_it_can_read_back_what_it_learned_from_what_you_told_it(m, monkeypatch):
+    monkeypatch.setattr(mem, "GATE", PRIOR)
+    _, owner = m
+    await mem.log_episode(owner, "journal", "I'm a designer at heart", trust=2, ref="dm:mem", speaker="Jayanth")
+    a = (await mem._q("select * from mem_episodes where owner = %s", owner))[0]
+    assert "Still reading 1 paragraph" in await mind.notes(owner)
+    await run(owner, [a], {"facts": [{"about": "user", "text": "Jayanth is a designer at heart", "episode": 1, "quote": "designer at heart",
+                                      "importance": "important", "lasts": "years"}]})
+    await mem._q("update mem_episodes set extracted = 5 where owner = %s", owner)
+    notes = await mind.notes(owner)
+    assert "Learned from what they told you" in notes and "designer at heart" in notes and "Still reading" not in notes

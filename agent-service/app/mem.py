@@ -435,9 +435,10 @@ async def _roster(owner: str) -> list[str]:
         return []
 
 
-async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) -> dict[str, int]:
+async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]], glean: bool = False) -> dict[str, Any]:
     """One model call over a batch of episodes (one conversation, oldest first): entities, facts, completions.
-    Episodes stage 0 rules out aren't sent; a batch with nothing left costs no call."""
+    Episodes stage 0 rules out aren't sent; a batch with nothing left costs no call. What the user tells their memory
+    (journal) gets a second look for what the first missed (`glean`, GraphRAG's gleaning)."""
     said = " ".join(e["text"] for e in episodes if e["trust"] == 2)
     project = await _project(episodes[0]["ref"])
     skipped = len(episodes)
@@ -450,7 +451,7 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
     cands = await _candidates(owner, text)
     known = {f"E{i + 1}": str(r["id"]) for i, r in enumerate(cands)}
     known["user"] = me
-    ids = [v for k, v in known.items() if k != "user"]
+    ids = list(known.values())  # the user's own facts too: what's on record about them shouldn't be restated
     cur = await _q("select f.id, f.subject, f.text, f.trust, f.valid_from, f.kind, f.due from mem_facts f "
                    "where f.owner = %s and f.status = 'current' and f.subject = any(%s::uuid[]) "
                    "and (f.kind <> 'commitment' or f.done is not true) order by f.learned_at desc limit 60", owner, ids)
@@ -470,10 +471,20 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
         eps = (f"These episodes are from the group chat of {user_name}'s project \"{project['name']}\""
                + (f" ({project['description'][:300]})" if project.get("description") else "")
                + ". Facts about the work there belong to that project (a project entity under that name).\n\n" + eps)
+    if glean:
+        eps = ("A first pass already recorded what it found in these episodes (they're in the current facts). Facts are "
+               "often missed: read again and record only what is still missing, or return empty lists.\n\n" + eps)
     res = await _model().ainvoke([SystemMessage(prompt), HumanMessage(eps)])
     plan = _parse(res.text)
     log.debug("memory plan: %s", plan)
-    return {**await apply(owner, plan, episodes, known, fids), "stage0": skipped}
+    out = {**await apply(owner, plan, episodes, known, fids), "stage0": skipped}
+    if not glean and all(e["source"] == "journal" for e in episodes):
+        more = await extract(owner, user_name, episodes, glean=True)
+        for k in ("facts", "tentative", "skipped", "same", "dropped", "closed"):
+            out[k] += more.get(k, 0)
+        out["decisions"] += more.get("decisions", [])
+        out["gleaned"] = more.get("facts", 0) + more.get("tentative", 0)
+    return out
 
 
 async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]], known: dict[str, str],
