@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Image, Pressable, View } from 'react-native'
-import { LaptopIcon, SmartPhone01Icon } from '@hugeicons/core-free-icons'
+import { AiBrain01Icon, LaptopIcon, SmartPhone01Icon } from '@hugeicons/core-free-icons'
 
 import type { Teammate } from '@/lib/types'
 import { useTheme } from '@/theme'
@@ -57,8 +57,10 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
   const { c } = useTheme()
   const working = state === 'working'
   // A linked computer's own chat (agent computers.py) or the phone's (agent phone.py): an icon, not a face.
+  // The memory agent (agent mind.py) too.
   const phone = teammate.avatar_shape === 'phone'
-  const device = phone || teammate.avatar_shape.startsWith('device:')
+  const brain = teammate.avatar_shape === 'memory'
+  const device = phone || brain || teammate.avatar_shape.startsWith('device:')
   const face = (
     <View
       style={{ width: size, height: size, opacity: state === 'sleeping' ? 0.5 : 1 }}
@@ -68,7 +70,7 @@ export const TeammateAvatar = memo(function TeammateAvatar({ teammate, size = 40
     >
       <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: teammate.color || '#64748b', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {device ? (
-          <Icon icon={phone ? SmartPhone01Icon : LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
+          <Icon icon={phone ? SmartPhone01Icon : brain ? AiBrain01Icon : LaptopIcon} size={Math.round(size * 0.5)} color="#ffffff" strokeWidth={1.75} />
         ) : (
           <Image source={FACES[faceSeed(teammate)]} style={{ width: size, height: size }} fadeDuration={0} />
         )}

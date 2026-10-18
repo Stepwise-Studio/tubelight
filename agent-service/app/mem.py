@@ -178,8 +178,9 @@ async def log_episode(owner: str, source: str, text: str, *, trust: int, ref: st
         log.exception("memory: logging an episode failed")
 
 
-async def log_run(owner: str, thread_id: str, user_name: str, msgs: list) -> None:
-    """A finished run's new turn: the user's message, what app tools returned, and the teammates' replies."""
+async def log_run(owner: str, thread_id: str, user_name: str, msgs: list, source: str = "chat") -> None:
+    """A finished run's new turn: the user's message, what app tools returned, and the teammates' replies. source:
+    "journal" when the user was talking to their memory agent (only their own words; the agent's stay "chat")."""
     from langchain_core.messages import AIMessage, ToolMessage  # noqa: PLC0415
 
     from .learn import exchange_start  # noqa: PLC0415
@@ -187,7 +188,7 @@ async def log_run(owner: str, thread_id: str, user_name: str, msgs: list) -> Non
     for i, m in enumerate(msgs[exchange_start(msgs):]):
         at = now - timedelta(milliseconds=(len(msgs) - i))  # keep the order inside the turn
         if isinstance(m, HumanMessage) and m.name != "summary":
-            await log_episode(owner, "chat", str(m.content), trust=2, ref=thread_id, speaker=user_name, at=at)
+            await log_episode(owner, source, str(m.content), trust=2, ref=thread_id, speaker=user_name, at=at)
         elif isinstance(m, ToolMessage) and (m.name or "").isupper():  # app results (Composio: GMAIL_FETCH_EMAILS...)
             await log_episode(owner, "chat", str(m.content)[:2500], trust=0, ref=thread_id, speaker=f"app {m.name}", at=at)
         elif isinstance(m, AIMessage) and m.text.strip():
@@ -312,6 +313,8 @@ Rules:
 - importance: how much having this later would matter to {user}: trivial (tests of the app, one-off device
   commands, "please ignore"), minor, useful, important (people, work, studies, money, health, plans), critical.
 - lasts: how long it stays true or relevant: hours, days, months, years.
+- journal episodes are {user} talking to their memory on purpose: what they say there about their life, work and
+  people is worth keeping unless it's trivial.
 - Small talk, tests of the app and device commands need nothing; skip them. But don't skip a real fact because the
   chat around it is casual: record every fact that passes the rules above.
 
@@ -494,7 +497,7 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
                             "and status in ('current', 'tentative')", _vec(vec), owner, subject)
         g = {"imp": IMPORTANCE.get(str(f.get("importance")), 0.5), "dur": LASTS.get(str(f.get("lasts")), 0.66),
              "nov": round(1 - max(0.0, near_any[0]["c"] or 0.0), 3), "tr": ep["trust"] / 2,
-             "ex": 1.0 if ep["source"] == "journal" or _EXPLICIT.search(ep["text"]) else 0.0}
+             "ex": 1.0 if (ep["source"] == "journal" and ep["trust"] == 2) or _EXPLICIT.search(ep["text"]) else 0.0}
         p = _salience(g)
         status = "current" if p >= SURE else "tentative" if p >= KEEP else None
         out["decisions"].append({"episode": str(ep["id"]), "text": text, "gate": g, "p": round(p, 3), "status": status})

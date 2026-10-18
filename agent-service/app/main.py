@@ -22,7 +22,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -505,6 +505,13 @@ def _mem_on() -> None:
 async def list_people(user: User = Depends(current_user)):
     _mem_on()
     return await mem.entities(user["id"])
+
+
+@app.post("/memory/agent")
+async def memory_agent(user: User = Depends(current_user)):
+    """The memory agent's chat (app/mind.py), made the first time it's opened."""
+    tm = await mind.ensure(user["id"])
+    return {"teammate_id": tm["id"], "thread_id": f"dm:{tm['id']}"}
 
 
 @app.get("/memory/overview")

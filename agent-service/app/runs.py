@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from . import automations, brief, computers, db, followups, graph, knowledge, learn, llm, mem, memory, phone, sandbox
+from . import automations, brief, computers, db, followups, graph, knowledge, learn, llm, mem, memory, mind, phone, sandbox
 
 log = logging.getLogger(__name__)
 tasks: dict[str, asyncio.Task] = {}
@@ -160,7 +160,8 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
                 tm = next((m for m in ctx.members if m["id"] == active), None) or (
                     ctx.members[0] if len(ctx.members) == 1 else None)
                 try:
-                    await mem.log_run(owner_id, thread_id, ctx.user_name, state.values.get("messages") or [])
+                    await mem.log_run(owner_id, thread_id, ctx.user_name, state.values.get("messages") or [],
+                                      source="journal" if tm and mind.is_memory(tm) else "chat")
                 except Exception:
                     log.exception("memory: logging the run failed")
                 if tm:

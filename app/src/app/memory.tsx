@@ -5,7 +5,7 @@ import { router } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { FlatList, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { CheckmarkCircle02Icon, Delete02Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
+import { AiBrain01Icon, CheckmarkCircle02Icon, Delete02Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 
 import { PeopleList, PersonMark, heardFrom } from '@/components/people'
 import { ScreenHeader } from '@/components/screen-header'
@@ -14,7 +14,7 @@ import { ago, shortDate } from '@/lib/format'
 import type { MemoryItem, MemoryOverview, OverviewFact } from '@/lib/types'
 import { useTheme } from '@/theme'
 import {
-  Button, Checkbox, Chip, type ChipColor, Dialog, EmptyState, Press, SearchField, SectionHeader, Segment, Skeleton, Squircle,
+  Button, Checkbox, Chip, type ChipColor, Dialog, EmptyState, Icon, ListRow, Press, SearchField, SectionHeader, Segment, Skeleton, Squircle,
   Surface, Text, TextField, haptic, showMenu, toast,
 } from '@/ui'
 
@@ -36,6 +36,7 @@ export default function MemoryScreen() {
   return (
     <View style={{ flex: 1 }}>
       <ScreenHeader title="Memory" subtitle="What your teammates know, and where they learned it" />
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}><TalkToMemory /></View>
       <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <Segment value={view} onChange={setView} accessibilityLabel="Show"
           options={[{ value: 'overview', label: 'Overview' }, { value: 'people', label: 'People' }, { value: 'lessons', label: 'Lessons' }]} />
@@ -44,6 +45,32 @@ export default function MemoryScreen() {
         : view === 'people' ? <PeopleList bottom={insets.bottom + 24} />
           : <Lessons bottom={insets.bottom + 24} />}
     </View>
+  )
+}
+
+/** Opens the memory agent's chat (agent app/mind.py), made the first time. */
+function TalkToMemory() {
+  const [opening, setOpening] = useState(false)
+  const open = async () => {
+    if (opening) return
+    setOpening(true)
+    try {
+      const { thread_id } = await api<{ thread_id: string }>('/memory/agent', { method: 'POST' })
+      router.push({ pathname: '/chat/[threadId]', params: { threadId: thread_id } })
+    } catch {
+      toast({ title: "Couldn't open your memory", body: 'Check your connection and try again.', tone: 'error' })
+    } finally {
+      setOpening(false)
+    }
+  }
+  return (
+    <Surface style={{ overflow: 'hidden' }}>
+      <ListRow
+        title="Talk to your memory" subtitle="Tell it your story, ask what it knows, fix what's wrong" chevron onPress={open}
+        leading={<View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#3f3f46', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon icon={AiBrain01Icon} size={18} color="#ffffff" strokeWidth={1.75} /></View>}
+      />
+    </Surface>
   )
 }
 

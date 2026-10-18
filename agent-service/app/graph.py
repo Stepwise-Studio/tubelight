@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, brief, computers, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, push, reactions, repo, tools as T
+from . import automations, brief, computers, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -410,7 +410,11 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append("Your relevant memories:\n" + "\n".join(f"- {t}" for t in own))
     if proj:
         lines.append("Project memories:\n" + "\n".join(f"- {t}" for t in proj))
-    return "\n\n".join(lines) + "\n\n## Your role\n" + tm["system_prompt"] + "\n\n" + VOICE
+    role = tm["system_prompt"]
+    if mind.is_memory(tm):  # its persona lives in code so it can change; its questions are picked per conversation
+        role = mind.PROMPT.format(owner=ctx.user_name)
+        lines.append(await mind.notes(ctx.owner_id))
+    return "\n\n".join(lines) + "\n\n## Your role\n" + role + "\n\n" + VOICE
 
 
 # ------------------------------------------------------------------ compaction

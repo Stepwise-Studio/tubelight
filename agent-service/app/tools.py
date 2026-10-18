@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -74,6 +74,8 @@ INTERNAL = {
     "web_search": "read", "read_page": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
+    "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
+    "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
     "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
@@ -489,6 +491,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 description="Add one short, lasting fact about the repo to its brief for every teammate (a gotcha, a "
                             "convention, where something lives). Not for chat or task status."),
         ]
+
+    if not helper and mind.is_memory(tm):  # the memory agent edits memory itself (app/mind.py)
+        tools += mind.build(ctx.owner_id)
 
     if not helper and phone.is_phone(tm):  # only the phone's own teammate touches the phone
         async def phone_action(action: str, when: str = "", end: str = "", seconds: int = 0, title: str = "",
