@@ -514,6 +514,14 @@ async def memory_agent(user: User = Depends(current_user)):
     return {"teammate_id": tm["id"], "thread_id": f"dm:{tm['id']}"}
 
 
+@app.get("/memory/graph")
+async def memory_graph(user: User = Depends(current_user)):
+    """The memory map (app Memory → Map): entities, co-occurrence counts and use times; the phone does the maths."""
+    if not mem.ready():
+        raise HTTPException(503, "Memory isn't available right now.")
+    return await mem.graph(user["id"])
+
+
 @app.get("/memory/overview")
 async def memory_overview(user: User = Depends(current_user)):
     _mem_on()

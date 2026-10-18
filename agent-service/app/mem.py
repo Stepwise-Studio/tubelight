@@ -120,6 +120,11 @@ create table if not exists mem_fact_sources (
 """
 
 
+# an entity also stays while a live fact names it ("Akhil started Stepwise Studio" is filed under Akhil)
+_NAMED = ("and not exists (select 1 from mem_facts f where f.owner = e.owner and f.status in ('current', 'tentative') "
+          "and f.text ~* ('\\m' || regexp_replace(e.name, '([.^$*+?()\\[\\]{}|\\\\])', '\\\\\\1', 'g') || '\\M')) ")
+
+
 async def setup(pool=None) -> None:
     """Create the tables (idempotent). Uses memory's Postgres pool unless one is given (tests, evals)."""
     global _pool
@@ -135,7 +140,7 @@ async def setup(pool=None) -> None:
                            (VERSION, -VERSION))
         # people with nothing on record and no number or email to recognise them by
         await conn.execute("delete from mem_entities e where kind <> 'user' and created_at < now() - interval '1 day' "
-                           "and not exists (select 1 from mem_facts f where f.subject = e.id) "
+                           "and not exists (select 1 from mem_facts f where f.subject = e.id) " + _NAMED +
                            "and not exists (select 1 from mem_entity_ids i where i.entity = e.id)")
 
 
@@ -596,7 +601,7 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
     named = [v for k, v in refs.items() if v and known.get(k) != v]  # entities this plan created or matched by name
     if named:  # keep someone only once a fact about them survived checking, or we can recognise them by a number
         await _q("delete from mem_entities e where owner = %s and id = any(%s::uuid[]) and kind <> 'user' "
-                 "and not exists (select 1 from mem_facts f where f.subject = e.id) "
+                 "and not exists (select 1 from mem_facts f where f.subject = e.id) " + _NAMED +
                  "and not exists (select 1 from mem_entity_ids i where i.entity = e.id)", owner, named)
     return out
 
@@ -900,6 +905,55 @@ async def backfill(owner: str) -> int:
                           at=datetime.fromisoformat(r["created_at"]))
         n += 1
     return n
+
+
+# ------------------------------------------------------------------ the memory map (the app)
+async def graph(owner: str, limit: int = 150) -> dict[str, Any]:
+    """The memory map's data (docs/memory-v3.html §6): each entity, which episodes it came up in (as a fact's subject or
+    named in one), how important its facts are and when they were used. The phone does the maths (PPMI edges, stress
+    layout, communities, activation, spreading recall) so it can play recall live. The user isn't a node: they're in
+    nearly every episode, so their PPMI with everything is ~0 (they're the field the map sits in)."""
+    ents = await _q("select id, kind, name, aliases from mem_entities where owner = %s and kind <> 'user'", owner)
+    facts = await _q("select id, subject, text, status, coalesce(importance, 0.5) as imp from mem_facts where owner = %s "
+                     "and status in ('current', 'tentative')", owner)
+    srcs = await _q("select s.fact, s.episode, ep.occurred_at from mem_fact_sources s join mem_episodes ep on ep.id = s.episode "
+                    "where ep.owner = %s and s.role = 'says'", owner)
+    pats = {str(e["id"]): re.compile("|".join(rf"\b{re.escape(n)}\b" for n in [e["name"], *e["aliases"]] if len(n) > 2) or r"$^", re.I)
+            for e in ents}
+    by_fact: dict[str, list] = {}
+    for s in srcs:
+        by_fact.setdefault(str(s["fact"]), []).append(s)
+    in_ep: dict[str, set] = {}
+    uses: dict[str, list] = {}
+    mass: dict[str, float] = {}
+    count: dict[str, list] = {}
+    for f in facts:
+        subject = str(f["subject"])
+        involved = {eid for eid, p in pats.items() if eid == subject or p.search(f["text"])}
+        if subject in pats:
+            mass[subject] = mass.get(subject, 0) + (f["imp"] if f["status"] == "current" else 0)
+            count.setdefault(subject, [0, 0])[f["status"] == "tentative"] += 1
+        for s in by_fact.get(str(f["id"]), []):
+            in_ep.setdefault(str(s["episode"]), set()).update(involved)
+            for eid in involved:
+                uses.setdefault(eid, []).append(s["occurred_at"])
+    n = {eid: sum(eid in es for es in in_ep.values()) for eid in pats}
+    keep = sorted((eid for eid in pats if n[eid]), key=lambda eid: -n[eid])[:limit]
+    pairs: dict[tuple, int] = {}
+    for es in in_ep.values():
+        es = sorted(e for e in es if e in keep)
+        for i, a in enumerate(es):
+            for b in es[i + 1:]:
+                pairs[(a, b)] = pairs.get((a, b), 0) + 1
+    now = datetime.now(UTC)
+    info = {str(e["id"]): e for e in ents}
+    return {
+        "episodes": len(in_ep),
+        "nodes": [{"id": eid, "name": info[eid]["name"], "kind": info[eid]["kind"], "n": n[eid], "mass": round(mass.get(eid, 0), 2),
+                   "facts": count.get(eid, [0, 0])[0], "unsure": count.get(eid, [0, 0])[1],
+                   "uses": sorted(round((now - t).total_seconds() / 86400, 3) for t in set(uses.get(eid, [])))[:30]} for eid in keep],
+        "edges": [{"a": a, "b": b, "n": c} for (a, b), c in pairs.items()],
+    }
 
 
 # ------------------------------------------------------------------ people pages (the app)

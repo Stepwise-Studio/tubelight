@@ -355,3 +355,16 @@ async def test_a_long_message_is_kept_whole_and_a_journal_is_read_a_paragraph_at
     assert len(journal) == 5 and journal[0].startswith("Paragraph 0")
     batches = [b for b in await mem._batches(owner, force=True) if b[0]["ref"] == "t-journal"]
     assert len(batches) == 5 and all(len(b) == 1 for b in batches)
+
+
+async def test_an_entity_a_fact_names_stays_even_when_the_fact_is_filed_under_the_user(m):
+    _, owner = m
+    a = await episode(owner, "I started Stepwise Studio after building a UI library, and Dev.to featured it")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Stepwise Studio", "kind": "org"}, {"ref": "n2", "name": "Dev.to", "kind": "org"},
+                                        {"ref": "n3", "name": "Nobody Named", "kind": "person"}],
+                           "facts": [{"about": "user", "text": "Jayanth started Stepwise Studio, and Dev.to featured it", "episode": 1,
+                                      "quote": "I started Stepwise Studio", "importance": "important", "lasts": "years"}]})
+    names = {r["name"] for r in await mem._q("select name from mem_entities where owner = %s and kind <> 'user'", owner)}
+    assert names == {"Stepwise Studio", "Dev.to"}  # named in a fact: kept; named nowhere: gone
+    g = await mem.graph(owner)
+    assert {x["name"] for x in g["nodes"]} == {"Stepwise Studio", "Dev.to"} and g["edges"][0]["n"] == 1
