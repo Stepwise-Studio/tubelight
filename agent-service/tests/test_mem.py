@@ -392,3 +392,71 @@ async def test_link_makes_entities_only_for_names_the_facts_really_use(m, monkey
     names = {r["name"]: r["kind"] for r in await mem._q("select name, kind from mem_entities where owner = %s and kind <> 'user'", owner)}
     assert names == {"Stepwise Studio": "org", "Tubelight": "project"}
     assert await mem.link(owner, "Jayanth") == 0  # already there: nothing new
+
+
+async def test_recall_brings_what_is_linked_to_what_the_moment_names(m):
+    _, owner = m
+    a = await episode(owner, "Ananya runs design at Freshworks")
+    b = await episode(owner, "The Freshworks pitch is on 2026-10-20 at their office", days=1, ref="t2")
+    c = await episode(owner, "Ananya and Freshworks again: she wants the deck early", days=2, ref="t3")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Ananya", "kind": "person"}, {"ref": "n2", "name": "Freshworks", "kind": "org"}],
+                           "facts": [{"about": "n1", "text": "Ananya runs design at Freshworks", "episode": 1, "quote": "runs design at Freshworks",
+                                      "importance": "important", "lasts": "years"}]})
+    await run(owner, [b], {"entities": [{"ref": "n2", "name": "Freshworks", "kind": "org"}],
+                           "facts": [{"about": "Freshworks", "text": "The Freshworks pitch is on 2026-10-20", "episode": 1,
+                                      "quote": "pitch is on 2026-10-20", "importance": "important", "lasts": "days"}]})
+    await run(owner, [c], {"facts": [{"about": "Ananya", "text": "Ananya wants the Freshworks deck early", "episode": 1,
+                                      "quote": "she wants the deck early", "importance": "useful", "lasts": "days"}]})
+    for i, who in enumerate(["Dev", "Meera", "Saqlain"]):  # other conversations: Freshworks isn't in everything
+        e = await episode(owner, f"{who} called about the launch", days=3 + i, ref=f"o{i}")
+        await run(owner, [e], {"entities": [{"ref": "n1", "name": who, "kind": "person"}],
+                               "facts": [{"about": "n1", "text": f"{who} called about the launch", "episode": 1, "quote": "called about the launch",
+                                          "importance": "useful", "lasts": "days"}]})
+    mem._LINKS.clear()
+    text = await mem.recall(owner, "What is Ananya up to?")
+    assert "Ananya (person)" in text and "pitch is on 2026-10-20" in text  # reached through Freshworks
+
+
+async def test_only_asking_on_purpose_counts_as_use(m):
+    _, owner = m
+    a = await episode(owner, "Meera works at Swiggy")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Meera", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Meera works at Swiggy", "episode": 1, "quote": "works at Swiggy"}]})
+    await mem.recall(owner, "Where does Meera work?", brief=True)  # a prompt's notes: not a use
+    hits = lambda: mem._q("select cardinality(hits) as n from mem_facts where owner = %s", owner)  # noqa: E731
+    assert (await hits())[0]["n"] == 0
+    await mem.recall(owner, "Where does Meera work?", used=True)  # the recall tool
+    assert (await hits())[0]["n"] == 1
+
+
+async def test_something_important_captures_what_was_unsure_about_it(m, monkeypatch):
+    monkeypatch.setattr(mem, "GATE", PRIOR)
+    _, owner = m
+    a = await episode(owner, "Kishore might be moving to Pune, not sure")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Kishore", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Kishore might move to Pune", "episode": 1, "quote": "moving to Pune",
+                                      "importance": "minor", "lasts": "hours"}]})
+    assert await facts(owner, "tentative") == ["Kishore might move to Pune"]
+    b = await episode(owner, "Kishore is my cofounder at Stepwise from today", days=1)
+    res = await run(owner, [b], {"facts": [{"about": "Kishore", "text": "Kishore is Jayanth's cofounder at Stepwise", "episode": 1,
+                                            "quote": "my cofounder at Stepwise", "importance": "critical", "lasts": "years"}]})
+    assert res["promoted"] == 1 and "Kishore might move to Pune" in await facts(owner)
+
+
+async def test_facts_know_every_entity_they_name(m, monkeypatch):
+    _, owner = m
+    a = await episode(owner, "I'm building Tubelight on my home server")
+    await run(owner, [a], {"facts": [{"about": "user", "text": "Jayanth is building Tubelight on a home server", "episode": 1,
+                                      "quote": "building Tubelight", "importance": "important", "lasts": "years"}]})
+    assert (await mem._q("select mentions from mem_facts where owner = %s", owner))[0]["mentions"] == []  # Tubelight isn't known yet
+
+    class Reply:
+        text = json.dumps({"entities": [{"name": "Tubelight", "kind": "project"}]})
+
+    class Model:
+        async def ainvoke(self, _msgs):
+            return Reply()
+    monkeypatch.setattr(mem, "_model", lambda: Model())
+    await mem.link(owner, "Jayanth")
+    tid = (await mem._q("select id from mem_entities where owner = %s and name = 'Tubelight'", owner))[0]["id"]
+    assert (await mem._q("select mentions from mem_facts where owner = %s", owner))[0]["mentions"] == [tid]

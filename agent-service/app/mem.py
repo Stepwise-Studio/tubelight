@@ -23,12 +23,13 @@ import json
 import logging
 import math
 import re
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from . import config, db, llm, memory
+from . import config, db, llm, memgraph, memory
 
 log = logging.getLogger(__name__)
 VERSION = 5  # extractor version: episodes processed by an older one can be re-run after a prompt change
@@ -37,15 +38,18 @@ BATCH_CHARS = 6000
 SAME = 0.92  # cosine similarity above which a new fact restates a known one
 TRUST = {2: "the user", 1: "a teammate", 0: "outside"}
 KINDS = ("trait", "relation", "event", "commitment", "preference")
-ENTITY_KINDS = ("person", "org", "project", "place", "thing")
+ENTITY_KINDS = ("person", "org", "project", "place", "period", "thing")  # period: a chapter of the user's life
 # The salience gate (docs/memory-v3.html §5.2): p = σ(b0 + Σ w·x), the chance a fact will be needed later.
-# Starting weights; refit with `python -m evals.gate` on labelled history. KEEP from a 1:3 cost of storing junk vs
-# missing something (θ = 1/(1+3)); between KEEP and SURE a fact is tentative: kept quietly, promoted if it comes up again.
-GATE = {"b0": -3.5, "imp": 3.0, "dur": 2.5, "nov": 1.5, "tr": 1.0, "ex": 2.0, "rep": 1.0}
+# Fitted on the synthetic training user (evals/gate.py fit, Flash-Lite's ratings; 2026-10-18): held-out calibration
+# error 0.11 -> 0.02, recall 91%, no junk. Refit as answers from the memory chat come in. KEEP from a 1:3 cost of
+# storing junk vs missing something (θ = 1/(1+3)); between KEEP and SURE a fact is tentative: kept quietly, promoted
+# if it comes up again. (Starting weights were b0 -3.5, imp 3, dur 2.5, nov 1.5, tr 1.)
+GATE = {"b0": -2.52, "imp": 3.62, "dur": 3.08, "nov": 1.87, "tr": 1.55, "ex": 2.0, "rep": 1.0}
 KEEP, SURE = 0.25, 0.5
-FADE = timedelta(days=30)  # ponytail: a tentative fact fades after 30 days unrestated; ACT-R activation replaces this (P3)
+REFLECT = 1.5  # a profile is rewritten when the facts learned since add up to this much salience
 IMPORTANCE = {"trivial": 0.1, "minor": 0.3, "useful": 0.5, "important": 0.7, "critical": 0.9}
 LASTS = {"hours": 0.0, "days": 0.33, "months": 0.66, "years": 1.0}
+_HIT = "hits = (array_append(hits, now()))[greatest(1, cardinality(hits) - 18):]"  # the last 20 uses
 _EXPLICIT = re.compile(r"\b(remember|don'?t forget|keep in mind|note (?:that|this))\b", re.I)
 
 _pool = None
@@ -109,6 +113,8 @@ alter table mem_facts add column if not exists importance real;
 alter table mem_facts add column if not exists salience real;  -- the gate's p when written
 alter table mem_facts add column if not exists gate jsonb;      -- its inputs, so a restatement can recompute p
 alter table mem_facts add column if not exists seen smallint not null default 1;  -- times stated
+alter table mem_facts add column if not exists hits timestamptz[] not null default '{}';  -- restated or recalled on request
+alter table mem_facts add column if not exists mentions uuid[] not null default '{}';  -- entities it names, subject included
 create index if not exists mem_facts_tsv on mem_facts using gin (tsv);
 create table if not exists mem_fact_sources (
   fact uuid not null references mem_facts(id) on delete cascade,
@@ -289,6 +295,34 @@ async def _resolve(owner: str, e: dict[str, Any], known: dict[str, str]) -> str 
     return eid
 
 
+# ------------------------------------------------------------------ mentions
+async def _namers(owner: str) -> list[tuple[str, re.Pattern]]:
+    """Every entity (but the user) with a pattern for its names."""
+    rows = await _q("select id, name, aliases from mem_entities where owner = %s and kind <> 'user'", owner)
+    out = []
+    for r in rows:
+        names = [n for n in [r["name"], *r["aliases"]] if len(n) > 2]
+        if names:
+            out.append((str(r["id"]), re.compile("|".join(rf"\b{re.escape(n)}\b" for n in names), re.I)))
+    return out
+
+
+def _mentioned(text: str, subject: str, namers: list[tuple[str, re.Pattern]], me: str = "") -> list[str]:
+    return sorted({subject} - {me} | {eid for eid, p in namers if p.search(text)})
+
+
+async def remention(owner: str) -> int:
+    """Recompute which entities each live fact names (after new entities, merges, renames)."""
+    namers, me = await _namers(owner), await user_entity(owner)
+    n = 0
+    for f in await _q("select id, subject, text, mentions from mem_facts where owner = %s and status in ('current', 'tentative')", owner):
+        m = _mentioned(f["text"], str(f["subject"]), namers, me)
+        if m != sorted(str(x) for x in f["mentions"]):
+            await _q("update mem_facts set mentions = %s::uuid[] where id = %s", m, f["id"])
+            n += 1
+    return n
+
+
 # ------------------------------------------------------------------ extraction
 EXTRACT = """You keep the long-term memory of {user}'s world for their AI teammates. Read the new episodes (things
 said in chats and calls, and app results the teammates read) and record what's worth knowing later. Today is {today}.
@@ -337,6 +371,9 @@ Rules:
 - Skip small talk, pleasantries, the teammates' own process ("I'll check"), promotions, and anything already in the
   current facts in other words. No secrets: passwords, codes, OTPs, card or account numbers.
 - sensitive: true for health, money, family matters and other private topics.
+- A period is a chapter of {user}'s life that episodes talk about as a stretch of time: a degree, a job, an internship,
+  a move, building something ("the IITM online degree", "the Megz internship, May to September 2026"). Make one when
+  it's talked about that way, and file facts that happened within it there or mention it.
 - Entities: list every person, organisation, project and place in {user}'s world that the episodes name, even when
   there's no new fact about it (a fact filed under {user} that names one links it). Reuse a known id ("same_as") when
   it's the same one, even under another name or nickname. New ones get a ref like "n1". Add phone numbers, emails and
@@ -350,7 +387,7 @@ Rules:
   chat around it is casual: record every fact that passes the rules above.
 
 Reply with JSON only:
-{{"entities": [{{"ref": "n1", "name": "full name", "kind": "person|org|project|place|thing", "aka": ["other names"],
+{{"entities": [{{"ref": "n1", "name": "full name", "kind": "person|org|project|place|period|thing", "aka": ["other names"],
   "same_as": "known id or null", "ids": [{{"type": "phone|email|handle", "value": "..."}}]}}],
  "facts": [{{"about": "known id | n1 | user", "kind": "trait|relation|event|commitment|preference", "text": "...",
   "since": "YYYY-MM-DD or null", "due": "YYYY-MM-DD or null", "episode": 1, "quote": "...", "replaces": ["F1"],
@@ -507,6 +544,8 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
         if eid:
             refs[str(e.get("ref") or e.get("name"))] = eid
 
+    namers = await _namers(owner)  # after the plan's entities exist, so new ones count as mentioned
+
     def episode(n: Any) -> dict[str, Any] | None:
         try:
             return episodes[int(n) - 1] if int(n) >= 1 else None
@@ -542,7 +581,7 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
                 p = _salience(g, old["seen"] + 1) if old["gate"] else 1.0
                 up = old["status"] == "tentative" and p >= SURE  # it came up again: a tentative fact is promoted
                 await _q("update mem_facts set confidence = least(1, confidence + 0.05), trust = greatest(trust, %s), "
-                         "seen = seen + 1, gate = %s, salience = %s, status = %s where id = %s", ep["trust"],
+                         f"seen = seen + 1, {_HIT}, gate = %s, salience = %s, status = %s where id = %s", ep["trust"],
                          json.dumps(g) if old["gate"] else None, p, "current" if up else old["status"], old["id"])
                 await _source(old["id"], ep, f.get("quote"))
                 out["promoted"] += up
@@ -568,12 +607,19 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
             conf = 0.8
         conf = min(conf, 0.6) if ep["trust"] == 0 else conf
         row = await _q("insert into mem_facts (owner, subject, kind, text, valid_from, confidence, trust, due, done, "
-                       "sensitive, embedding, status, importance, salience, gate) values (%s, %s, %s, %s, %s, %s, %s, %s, "
-                       "%s, %s, %s::vector, %s, %s, %s, %s) returning id",
+                       "sensitive, embedding, status, importance, salience, gate, mentions) values (%s, %s, %s, %s, %s, %s, %s, "
+                       "%s, %s, %s, %s::vector, %s, %s, %s, %s, %s::uuid[]) returning id",
                        owner, subject, kind, text, since, conf, ep["trust"], _day(f.get("due")),
                        False if kind == "commitment" else None, bool(f.get("sensitive")), _vec(vec), status, g["imp"], p,
-                       json.dumps(g))
+                       json.dumps(g), _mentioned(text, subject, namers, known.get("user", "")))
         fid = row[0]["id"]
+        if status == "current" and p >= 0.8:  # capture: something important about it boosts what was unsure about it
+            for t in await _q("select id, gate, seen from mem_facts where subject = %s and status = 'tentative' and gate is not null "
+                              "and learned_at > now() - interval '7 days'", subject):
+                q = _salience(t["gate"], t["seen"] + 1)
+                await _q("update mem_facts set seen = seen + 1, salience = %s, status = %s where id = %s", q,
+                         "current" if q >= SURE else "tentative", t["id"])
+                out["promoted"] += q >= SURE
         await _source(fid, ep, f.get("quote"))
         await _q("update mem_entities set touched_at = now() where id = %s", subject)
         out["facts" if status == "current" else "tentative"] += 1
@@ -621,9 +667,13 @@ filler, skip sensitive details unless they define the relationship. Reply with J
 
 async def consolidate(owner: str, user_name: str, limit: int = 8) -> int:
     """Rebuild profiles of entities whose facts changed since their profile was written."""
+    # rewritten once enough has changed that matters (summed salience of facts learned since, as Generative Agents'
+    # reflection), not on every change; the first one once there are two facts
     stale = await _q("select e.id, e.kind, e.name, e.aliases from mem_entities e where e.owner = %s "
-                     "and (e.profile_at is null or e.profile_at < e.touched_at) and (select count(*) from mem_facts f "
-                     "where f.subject = e.id and f.status = 'current') >= 2 order by e.touched_at limit %s", owner, limit)
+                     "and (select count(*) from mem_facts f where f.subject = e.id and f.status = 'current') >= 2 "
+                     "and (e.profile_at is null or (select coalesce(sum(coalesce(f.salience, 0.8)), 0) from mem_facts f "
+                     "where f.subject = e.id and f.status in ('current', 'closed', 'retracted') and f.learned_at > e.profile_at) >= %s) "
+                     "order by e.touched_at limit %s", owner, REFLECT, limit)
     if not stale:
         return 0
     blocks = []
@@ -646,7 +696,8 @@ async def consolidate(owner: str, user_name: str, limit: int = 8) -> int:
 # ------------------------------------------------------------------ linking
 LINK = """Below are facts from {user}'s memory. List the people, organisations, projects, places and named things they
 mention, other than {user} themself and their AI teammates ({roster}): each once, with its kind. JSON only:
-{{"entities": [{{"name": "as written in the facts", "kind": "person|org|project|place|thing", "aka": ["other names used"]}}]}}"""
+{{"entities": [{{"name": "as written in the facts", "kind": "person|org|project|place|period|thing", "aka": ["other names used"]}}]}}
+A period is a chapter of {user}'s life the facts describe as a stretch of time (a degree, a job, an internship)."""
 
 
 async def link(owner: str, user_name: str, since: datetime | None = None) -> int:
@@ -671,6 +722,8 @@ async def link(owner: str, user_name: str, since: datetime | None = None) -> int
         before = await _q("select count(*) as n from mem_entities where owner = %s", owner)
         await _resolve(owner, e, {})
         made += (await _q("select count(*) as n from mem_entities where owner = %s", owner))[0]["n"] - before[0]["n"]
+    if made:
+        await remention(owner)
     return made
 
 
@@ -721,6 +774,21 @@ async def _user_name(owner: str) -> str:
     return name
 
 
+_MENTIONED: set[str] = set()
+
+
+async def fade(owner: str | None = None) -> int:
+    """Tentative facts nobody came back to fade (hidden from recall, kept on record) once their strength (ACT-R, the
+    gate's p as prior) drops under FADE_BELOW: a trivial one in about two weeks, each use buys more time."""
+    now, n = datetime.now(UTC), 0
+    for f in await _q("select id, learned_at, hits, salience from mem_facts where status = 'tentative'"
+                      + (" and owner = %s" if owner else ""), *([owner] if owner else [])):
+        if memgraph.strength([f["learned_at"], *f["hits"]], now, f["salience"]) < memgraph.FADE_BELOW:
+            await _q("update mem_facts set status = 'faded' where id = %s and status = 'tentative'", f["id"])
+            n += 1
+    return n
+
+
 async def tick(owner: str | None = None, force: bool = False, max_batches: int = 3, names: dict | None = None) -> int:
     """Extract a few quiet conversations, then refresh stale profiles. Paced so backfills trickle within free limits."""
     if not ready():
@@ -745,8 +813,10 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
                 await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then %s "
                          "else extracted end where id = any(%s)", -VERSION, ids)
             break  # try again next tick
-    # tentative facts nobody came back to fade (hidden from recall, kept on record); each restatement buys more time
-    await _q("update mem_facts set status = 'faded' where status = 'tentative' and learned_at < now() - %s * seen", FADE)
+    await fade(owner)
+    for o in owners - _MENTIONED:  # facts stored before mentions existed get theirs, once per process
+        await remention(o)
+        _MENTIONED.add(o)
     for o in owners if len(batches) <= max_batches else ():  # profiles once the backlog is through
         try:
             await link(o, names[o], since=datetime.now(UTC) - timedelta(minutes=15))
@@ -818,10 +888,13 @@ def _fit(blocks: list[tuple[str, list[str]]], budget: int) -> str:
 
 
 async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, ...] = (), brief: bool = False,
-                 budget: int = 3500) -> str:
-    """What memory holds for this moment, as notes for a prompt. brief: also the user's preferences and open
-    commitments (a teammate's turn). Empty when nothing is on record. Only for the user's own teammates: someone
-    outside (a caller) gets `about_caller`."""
+                 budget: int = 3500, used: bool = False) -> str:
+    """What memory holds for this moment, as notes for a prompt: the entities it names, what's linked to them
+    (spreading activation over PPMI links), and related facts ranked by similarity, link and strength
+    (app/memgraph.py). brief: also the user's preferences and open commitments (a teammate's turn). used: a teammate
+    asked on purpose (the recall tool): what comes back counts as used and strengthens; facts put in a prompt
+    automatically don't, or whatever is strong would grow stronger by being shown. Empty when nothing is on record.
+    Only for the user's own teammates: someone outside (a caller) gets `about_caller`."""
     if not ready():
         return ""
     words = {w for w in _norm(" ".join([query, *names])).split() if len(w) > 2}
@@ -857,19 +930,36 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         head = f"{e['name']} ({e['kind']}" + (f", also called {', '.join(e['aliases'][:4])}" if e["aliases"] else "") + ")"
         blocks.append(((f"People and things this is about:\n" if not blocks else "") + head + ":",
                        ([f"  {e['profile']}"] if e["profile"] else []) + [f"  {_line(f)}" for f in cur + old] or ["  (nothing more on record)"]))
+    # spreading activation from what the moment names: what's linked to it comes along
+    pi = memgraph.spread(await links(owner), {str(e["id"]) for e in hit}) if hit else {}
+    named, byid = {str(e["id"]) for e in hit}, {str(e["id"]): e for e in ents}
+    linked: list[str] = []
+    for v, eid in sorted(((v, k) for k, v in pi.items() if k not in named and k in byid and v >= 0.05), reverse=True)[:3]:
+        fs = await _q(f"select {_COLS} from mem_facts where owner = %s and status = 'current' and %s::uuid = any(mentions) "
+                      "order by subject = %s desc, learned_at desc limit 4", owner, eid, eid)
+        fs = [f for f in fs if f["id"] not in seen]
+        seen |= {f["id"] for f in fs}
+        linked += [f"  {byid[eid]['name']}: {_line(f)[2:]}" for f in fs]
+    blocks.append(("Linked to that (comes up with it):", linked))
     found = []
     if query.strip():
         vec = _vec((await memory.embed([query[:500]]))[0])
         # bge-small puts unrelated facts at ~0.5 cosine and related ones at 0.6+; words that match count too
         found = await _q(
             f"select * from (select {_COLS}, 1 - (embedding <=> %s::vector) as cos, ts_rank(tsv, q) as tr, "
-            "learned_at, confidence from mem_facts, plainto_tsquery('english', %s) q where owner = %s "
+            "learned_at, confidence, mentions, hits, salience from mem_facts, plainto_tsquery('english', %s) q where owner = %s "
             "and status in ('current', 'tentative')) x where (status = 'current' or cos >= 0.7) "  # unsure: only if close
             "and (cos >= 0.6 or tr > 0) order by 0.6 * cos + 0.25 * least(1, tr * 10) "
-            "+ 0.1 * exp(-extract(epoch from now() - learned_at) / 86400 / 60) + 0.05 * confidence desc limit 10",
+            "+ 0.1 * exp(-extract(epoch from now() - learned_at) / 86400 / 60) + 0.05 * confidence desc limit 20",
             vec, query[:500], owner)
         top = max((f["cos"] for f in found), default=0)  # the floor moves with the query: keep the near-best only
         found = [f for f in found if f["id"] not in seen and (f["cos"] >= top - 0.08 or f["tr"] > 0)]
+        now = datetime.now(UTC)
+        for f in found:  # R = 0.5 similarity + 0.25 link + 0.25 strength
+            sim = max(min(1.0, max(0.0, (f["cos"] - 0.5) / 0.4)), min(1.0, f["tr"] * 10))
+            link = min(1.0, 2 * max((pi.get(str(m), 0.0) for m in f["mentions"]), default=0.0))
+            f["r"] = memgraph.rank(sim, link, memgraph.strength([f["learned_at"], *f["hits"]], now, f["salience"]))
+        found = sorted(found, key=lambda f: -f["r"])[:10]
         seen |= {f["id"] for f in found}
     blocks.append(("Related facts:", [_line(f) for f in found]))
     if brief:
@@ -880,6 +970,8 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
                         "and done is not true order by due nulls last, learned_at desc limit 10", owner)
         blocks.append(("How the user likes things:", [_line(f) for f in prefs if f["id"] not in seen]))
         blocks.append(("Open commitments:", [_line(f) for f in owed if f["id"] not in seen]))
+    if used and seen:
+        await _q(f"update mem_facts set {_HIT} where id = any(%s::uuid[])", [str(x) for x in seen])
     return _fit(blocks, budget)
 
 
@@ -945,51 +1037,67 @@ async def backfill(owner: str) -> int:
 
 
 # ------------------------------------------------------------------ the memory map (the app)
+_LINKS: dict[str, tuple[float, dict[str, dict[str, float]]]] = {}  # owner -> (when, PPMI adjacency)
+
+
+async def _episode_sets(owner: str) -> dict[str, set[str]]:
+    """Which entities came up in each episode: those the facts it supports mention."""
+    rows = await _q("select s.episode, f.mentions from mem_fact_sources s join mem_facts f on f.id = s.fact where f.owner = %s "
+                    "and f.status in ('current', 'tentative') and s.role = 'says'", owner)
+    by: dict[str, set[str]] = {}
+    for r in rows:
+        by.setdefault(str(r["episode"]), set()).update(str(m) for m in r["mentions"])
+    return by
+
+
+async def links(owner: str) -> dict[str, dict[str, float]]:
+    """PPMI links between entities, for recall; recomputed at most every two minutes per user."""
+    at, adj = _LINKS.get(owner, (0.0, {}))
+    if time.time() - at > 120:
+        adj = memgraph.links(list((await _episode_sets(owner)).values()))
+        _LINKS[owner] = (time.time(), adj)
+    return adj
+
+
 async def graph(owner: str, limit: int = 150) -> dict[str, Any]:
-    """The memory map's data (docs/memory-v3.html §6): each entity, which episodes it came up in (as a fact's subject or
-    named in one), how important its facts are and when they were used. The phone does the maths (PPMI edges, stress
-    layout, communities, activation, spreading recall) so it can play recall live. The user isn't a node: they're in
-    nearly every episode, so their PPMI with everything is ~0 (they're the field the map sits in)."""
-    ents = await _q("select id, kind, name, aliases from mem_entities where owner = %s and kind <> 'user'", owner)
-    facts = await _q("select id, subject, text, status, coalesce(importance, 0.5) as imp from mem_facts where owner = %s "
+    """The memory map's data (docs/memory-v3.html §6): each entity, which episodes it came up in, how important its
+    facts are and when they were used. The phone does the maths (PPMI edges, stress layout, communities, activation,
+    spreading recall) so it can play recall live; it's the same maths recall uses (app/memgraph.py). The user isn't a
+    node: they're in nearly every episode, so their PPMI with everything is ~0 (they're the field the map sits in)."""
+    ents = {str(e["id"]): e for e in await _q("select id, kind, name from mem_entities where owner = %s and kind <> 'user'", owner)}
+    facts = await _q("select id, subject, status, coalesce(importance, 0.5) as imp, mentions, hits from mem_facts where owner = %s "
                      "and status in ('current', 'tentative')", owner)
-    srcs = await _q("select s.fact, s.episode, ep.occurred_at from mem_fact_sources s join mem_episodes ep on ep.id = s.episode "
+    srcs = await _q("select s.fact, ep.occurred_at from mem_fact_sources s join mem_episodes ep on ep.id = s.episode "
                     "where ep.owner = %s and s.role = 'says'", owner)
-    pats = {str(e["id"]): re.compile("|".join(rf"\b{re.escape(n)}\b" for n in [e["name"], *e["aliases"]] if len(n) > 2) or r"$^", re.I)
-            for e in ents}
-    by_fact: dict[str, list] = {}
-    for s in srcs:
-        by_fact.setdefault(str(s["fact"]), []).append(s)
-    in_ep: dict[str, set] = {}
-    uses: dict[str, list] = {}
+    when: dict[str, list] = {}
+    for x in srcs:
+        when.setdefault(str(x["fact"]), []).append(x["occurred_at"])
+    sets = await _episode_sets(owner)
+    uses: dict[str, set] = {}
     mass: dict[str, float] = {}
-    count: dict[str, list] = {}
+    count: dict[str, list[int]] = {}
     for f in facts:
         subject = str(f["subject"])
-        involved = {eid for eid, p in pats.items() if eid == subject or p.search(f["text"])}
-        if subject in pats:
+        if subject in ents:
             mass[subject] = mass.get(subject, 0) + (f["imp"] if f["status"] == "current" else 0)
             count.setdefault(subject, [0, 0])[f["status"] == "tentative"] += 1
-        for s in by_fact.get(str(f["id"]), []):
-            in_ep.setdefault(str(s["episode"]), set()).update(involved)
-            for eid in involved:
-                uses.setdefault(eid, []).append(s["occurred_at"])
-    n = {eid: sum(eid in es for es in in_ep.values()) for eid in pats}
-    keep = sorted((eid for eid in pats if n[eid]), key=lambda eid: -n[eid])[:limit]
+        for eid in (str(m) for m in f["mentions"]):
+            uses.setdefault(eid, set()).update([*when.get(str(f["id"]), []), *f["hits"]])
+    n = {eid: sum(eid in es for es in sets.values()) for eid in ents}
+    keep = sorted((eid for eid in ents if n[eid]), key=lambda eid: -n[eid])[:limit]
     pairs: dict[tuple, int] = {}
-    for es in in_ep.values():
+    for es in sets.values():
         es = sorted(e for e in es if e in keep)
-        for i, a in enumerate(es):
-            for b in es[i + 1:]:
-                pairs[(a, b)] = pairs.get((a, b), 0) + 1
+        for i, x in enumerate(es):
+            for y in es[i + 1:]:
+                pairs[(x, y)] = pairs.get((x, y), 0) + 1
     now = datetime.now(UTC)
-    info = {str(e["id"]): e for e in ents}
     return {
-        "episodes": len(in_ep),
-        "nodes": [{"id": eid, "name": info[eid]["name"], "kind": info[eid]["kind"], "n": n[eid], "mass": round(mass.get(eid, 0), 2),
+        "episodes": len([s for s in sets.values() if s]),
+        "nodes": [{"id": eid, "name": ents[eid]["name"], "kind": ents[eid]["kind"], "n": n[eid], "mass": round(mass.get(eid, 0), 2),
                    "facts": count.get(eid, [0, 0])[0], "unsure": count.get(eid, [0, 0])[1],
-                   "uses": sorted(round((now - t).total_seconds() / 86400, 3) for t in set(uses.get(eid, [])))[:30]} for eid in keep],
-        "edges": [{"a": a, "b": b, "n": c} for (a, b), c in pairs.items()],
+                   "uses": sorted(round((now - t).total_seconds() / 86400, 3) for t in uses.get(eid, set()))[:30]} for eid in keep],
+        "edges": [{"a": x, "b": y, "n": c} for (x, y), c in pairs.items()],
     }
 
 

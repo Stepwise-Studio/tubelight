@@ -214,7 +214,7 @@ export interface MemoryItem {
 /** Memory v2: someone or something the teammates know about (agent-service mem.py). */
 export interface Person {
   id: string
-  kind: 'user' | 'person' | 'org' | 'project' | 'place' | 'thing'
+  kind: 'user' | 'person' | 'org' | 'project' | 'place' | 'period' | 'thing'
   name: string
   aliases: string[]
   profile: string

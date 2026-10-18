@@ -124,6 +124,14 @@ CASES = [
         ("2026-10-10", "call", [("Saqlain", "Tell Jayanth the API keys were rotated, he needs to update staging today."),
                                 ("assistant", "I'll make sure he gets that.")]),
     ], [("What did Saqlain call about?", [["key"], ["staging"]], [], False)]),
+
+    ("association: reached through what two facts share", [
+        ("2026-09-20", "chat", [("user", "Ananya runs design at Freshworks, she's our main contact there"),
+                                ("Shelby", "Noted, Ananya at Freshworks.")]),
+        ("2026-09-24", "chat", [("user", "Dev finished the onboarding screens for Tubelight"), ("Shelby", "Nice.")]),
+        ("2026-10-02", "chat", [("user", "The Freshworks pitch is on 2026-10-20 at their Chennai office"),
+                                ("Shelby", "Got it, 20 October in Chennai.")]),
+    ], [("When is the pitch for Ananya's company?", [["20", "twentieth"]], [], False)]),
 ]
 
 ANSWER = """You answer questions for {user} using only the memory notes below. Today is {today}.

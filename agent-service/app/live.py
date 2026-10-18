@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from . import brief, config, connectors, db, graph, mem, memory
+from . import brief, config, connectors, db, graph, mem, memory, mind
 
 VOICES = ["Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr"]
 
@@ -73,8 +73,10 @@ async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
         f"You are {tm['name']}, {ctx.user_name}'s {tm['role']} teammate in the Tubelight app, talking with them by voice. "
         f"It is {now:%A, %B %d, %I:%M %p} where they are. Say times in their local time.",
         f"Apps you can use through run_task: {apps}.",
-        "## Your role\n" + (tm.get("system_prompt") or "")[:2500],
+        "## Your role\n" + (mind.PROMPT.format(owner=ctx.user_name) if mind.is_memory(tm) else (tm.get("system_prompt") or "")[:2500]),
     ]
+    if mind.is_memory(tm):  # by voice too: what it learned, what it's still reading, and what it may ask
+        lines.append(await mind.notes(ctx.owner_id))
     if known:
         lines.append("What you know (memory; anything marked no longer true isn't current):\n" + known)
     if prefs:

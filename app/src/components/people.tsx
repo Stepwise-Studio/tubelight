@@ -3,7 +3,7 @@
 import { router } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { FlatList, View } from 'react-native'
-import { Building03Icon, CubeIcon, Folder01Icon, Location01Icon } from '@hugeicons/core-free-icons'
+import { Building03Icon, Calendar03Icon, CubeIcon, Folder01Icon, Location01Icon } from '@hugeicons/core-free-icons'
 
 import { api } from '@/lib/api'
 import { ago } from '@/lib/format'
@@ -11,9 +11,9 @@ import type { Person } from '@/lib/types'
 import { useTheme } from '@/theme'
 import { EmptyState, Icon, ListRow, SearchField, Skeleton, Text, toast } from '@/ui'
 
-const KIND_ICON = { org: Building03Icon, project: Folder01Icon, place: Location01Icon, thing: CubeIcon } as const
+const KIND_ICON = { org: Building03Icon, project: Folder01Icon, place: Location01Icon, period: Calendar03Icon, thing: CubeIcon } as const
 export const KIND_LABEL: Record<Person['kind'], string> = {
-  user: 'You', person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', thing: 'Thing',
+  user: 'You', person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', period: 'Chapter of your life', thing: 'Thing',
 }
 
 export function PersonMark({ person, size = 40 }: { person: Pick<Person, 'kind' | 'name'>; size?: number }) {

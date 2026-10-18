@@ -280,7 +280,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         if mem.ready():
             spaces.remove(memory.ns("user", ctx.owner_id))
         found = [t for ns in spaces for t in await memory.search(ns, query, limit=5)]
-        world = await mem.recall(ctx.owner_id, query) if mem.ready() else ""
+        world = await mem.recall(ctx.owner_id, query, used=True) if mem.ready() else ""
         return "\n".join([world, *(f"- {t}" for t in found)]).strip() or "Nothing relevant in memory."
 
     try:

@@ -13,6 +13,9 @@ depend on the weights, so `fit` can try weights without calling the model. (Appr
 against what the run's own weights had stored.)
 Metrics: recall = keep moments with a fact kept (or restated); held = also counting tentative; noise = kept facts from
 moments labelled skip; maybe = unsure moments held or kept.
+Your own answers count too: what you confirm (keep) or dismiss (skip) in the memory chat is stored with the gate's
+inputs (store namespace mem_labels, app/mind.py) and joins the training rows when SUPABASE_DB_URL is set.
+Calibration: expected calibration error (ECE) over 10 bins, the gap between the gate's p and how often it was right.
 Needs TL_TEST_PG (see tests/test_mem.py).
 """
 import asyncio
@@ -134,6 +137,32 @@ def score(decisions: list[dict], labels: list[dict], w: dict) -> dict:
             "missed": sorted(keep - held), "proposed": {d["i"] for d in decisions}, "noisy": noise}
 
 
+def answers() -> list[dict]:
+    """The user's own verdicts from the memory chat (keep / skip), as decisions with the gate's inputs."""
+    url = os.environ.get("SUPABASE_DB_URL")
+    if not url:
+        return []
+    import psycopg
+    from psycopg.rows import dict_row
+    with psycopg.connect(url, row_factory=dict_row, prepare_threshold=None) as c:
+        rows = c.execute("select value from langgraph.store where prefix like 'mem_labels%%'").fetchall()
+    return [{"gate": r["value"]["gate"], "label": r["value"]["label"], "status": "answer", "i": -1}
+            for r in rows if r["value"].get("gate") and r["value"].get("label") in ("keep", "skip")]
+
+
+def ece(decisions: list[dict], w: dict, bins: int = 10) -> float:
+    """Expected calibration error of the gate's p against keep (1) / skip (0) labels."""
+    pts = [(p_of(w, d["gate"]), 1.0 if d["label"] == "keep" else 0.0) for d in decisions if d.get("gate") and d["label"] != "maybe"]
+    if not pts:
+        return 0.0
+    err = 0.0
+    for b in range(bins):
+        inb = [(p, y) for p, y in pts if b / bins <= p < (b + 1) / bins or (b == bins - 1 and p == 1.0)]
+        if inb:
+            err += len(inb) / len(pts) * abs(sum(y for _, y in inb) / len(inb) - sum(p for p, _ in inb) / len(inb))
+    return err
+
+
 def fit(decisions: list[dict], w0: dict, steps: int = 3000, lr: float = 0.3, l2: float = 0.05) -> dict:
     """Logistic regression, keep = 1 vs skip = 0 (maybe left out), from the starting weights with a pull back toward
     them (L2) so a few labels can't swing a weight wildly. A missed keep costs 3x a kept skip, the same 1:3 the
@@ -163,15 +192,16 @@ def report() -> None:
             sets[name] = (labels, credit(run_, labels), run_)
     if "train" not in sets:
         raise SystemExit("run the train set first")
-    fitted = fit(sets["train"][1], mem.GATE)
-    print(f"starting weights {mem.GATE}\nfitted on train  {fitted}")
+    yours = answers()
+    fitted = fit(sets["train"][1] + yours, mem.GATE)
+    print(f"starting weights {mem.GATE}\nfitted on train + {len(yours)} of your answers  {fitted}")
     for name, (labels, decisions, run_) in sets.items():
         print(f"\n{name}: {run_['episodes']} episodes, {run_['stage0']} ruled out by stage 0, {run_['calls']} model calls, "
               f"{len(decisions)} proposals")
         for wname, w in (("start", mem.GATE), ("fitted", fitted)):
             s = score(decisions, labels, w)
             print(f"  {wname:6s} recall {s['recall']:.0%} (held {s['held']:.0%}) · noise {s['noise']:.0%} of "
-                  f"{s['kept facts']} kept · maybe held {s['maybe']:.0%}")
+                  f"{s['kept facts']} kept · maybe held {s['maybe']:.0%} · calibration error {ece(decisions, w):.2f}")
         s = score(decisions, labels, fitted)
         for i in s["missed"]:
             print(f"    missed #{i}: {labels[i]['fact'][:100]}" + (" (gate)" if i in s["proposed"] else ""))

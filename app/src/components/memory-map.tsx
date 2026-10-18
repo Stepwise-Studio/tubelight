@@ -18,7 +18,7 @@ const HUES = {
   dark: ['#93c5fd', '#5eead4', '#c4b5fd', '#fdba74', '#bef264', '#f9a8d4'],
   light: ['#2563eb', '#0d9488', '#7c3aed', '#c2410c', '#4d7c0f', '#be185d'],
 }
-const KIND: Record<string, string> = { person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', thing: 'Thing' }
+const KIND: Record<string, string> = { person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', period: 'A chapter of your life', thing: 'Thing' }
 const PAD = 40
 const MAX_ZOOM = 5
 
@@ -156,10 +156,19 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
                     )
                   })}
                   {map.nodes.map((n, i) => {
-                    const [x, y] = at(n.x, n.y), v = fr ? fr[i] / top : null
-                    return <Circle key={`c${i}`} cx={x} cy={y} r={n.r * Math.sqrt(view.k)} color={dim(i) ? c.ink4 : hues[n.community % hues.length]}
-                      opacity={v === null ? 0.4 + 0.6 * n.recall : 0.35 + 0.65 * Math.sqrt(v)} />
+                    const [x, y] = at(n.x, n.y), v = fr ? fr[i] / top : null, r = n.r * Math.sqrt(view.k)
+                    const color = dim(i) ? c.ink4 : hues[n.community % hues.length]
+                    const o = v === null ? 0.4 + 0.6 * n.recall : 0.35 + 0.65 * Math.sqrt(v)
+                    // a chapter of your life is a ring: the people and things in it sit around it
+                    return n.kind === 'period'
+                      ? <Circle key={`c${i}`} cx={x} cy={y} r={r} color={color} opacity={o} style="stroke" strokeWidth={3} />
+                      : <Circle key={`c${i}`} cx={x} cy={y} r={r} color={color} opacity={o} />
                   })}
+                  {/* what memory isn't sure of yet: faint satellites around their entry (agent mem.py tentative facts) */}
+                  {map.nodes.flatMap((n, i) => Array.from({ length: Math.min(n.unsure, 6) }, (_, j) => {
+                    const [x, y] = at(n.x, n.y), r = n.r * Math.sqrt(view.k) + 7, a = -Math.PI / 2 + (j * 2 * Math.PI) / Math.min(n.unsure, 6)
+                    return <Circle key={`u${i}-${j}`} cx={x + r * Math.cos(a)} cy={y + r * Math.sin(a)} r={2.5} color={c.ink2} opacity={dim(i) ? 0.2 : 0.55} />
+                  }))}
                   {sel && (() => { const [x, y] = at(sel.x, sel.y); return <Circle cx={x} cy={y} r={sel.r * Math.sqrt(view.k) + 4} color={c.tube} style="stroke" strokeWidth={1.5} /> })()}
                 </Canvas>
                 {map.nodes.map((n, i) => {
@@ -226,7 +235,7 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
         </Surface>
       ) : (
         <Surface style={{ padding: 14, gap: 6 }}>
-          <Text variant="caption" color="ink2">{"Size is how much its facts matter; brightness, how readily it comes to mind now. A line: two that come up together more than chance. Nearer means more related; colours are groups. You're not a dot: you're in almost everything."}</Text>
+          <Text variant="caption" color="ink2">{"Size is how much its facts matter; brightness, how readily it comes to mind now. A line: two that come up together more than chance. Nearer means more related; colours are groups. Rings are chapters of your life; small dots, what memory isn't sure of yet. You're not a dot: you're in almost everything."}</Text>
           <Text variant="caption" color="ink3" tabular>{`${map.nodes.length} people and things · ${map.edges.length} links · ${map.communities} groups · pinch to zoom, tap one to explore`}</Text>
         </Surface>
       )}
