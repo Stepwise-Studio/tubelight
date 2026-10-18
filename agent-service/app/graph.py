@@ -233,7 +233,8 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
     shelf = memory.ns("user", ctx.owner_id)
     known, owed, prefs, profile = "", [], [], []
     if mem.ready():
-        known = await mem.recall(ctx.owner_id, query, brief=True)
+        # a project's group chat brings its project's memory even when the message doesn't name it
+        known = await mem.recall(ctx.owner_id, query, brief=True, names=(ctx.project["name"],) if ctx.project else ())
     else:
         owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
         prefs = await memory.listing(shelf, limit=12, kind="preference")

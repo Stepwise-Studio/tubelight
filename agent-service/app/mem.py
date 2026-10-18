@@ -394,6 +394,16 @@ def _day(v: Any) -> date | None:
         return None
 
 
+async def _project(ref: str) -> dict[str, Any]:
+    """The project whose group chat this is (proj:<id>), else {}."""
+    if not ref.startswith("proj:"):
+        return {}
+    try:
+        return await db.one("projects", {"id": f"eq.{ref[5:].split(':')[0]}", "select": "name,description"}) or {}
+    except Exception:
+        return {}
+
+
 async def _roster(owner: str) -> list[str]:
     try:
         return [t["name"] for t in await db.select("teammates", {"owner_id": f"eq.{owner}", "select": "name"})]
@@ -405,12 +415,13 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
     """One model call over a batch of episodes (one conversation, oldest first): entities, facts, completions.
     Episodes stage 0 rules out aren't sent; a batch with nothing left costs no call."""
     said = " ".join(e["text"] for e in episodes if e["trust"] == 2)
+    project = await _project(episodes[0]["ref"])
     skipped = len(episodes)
     episodes = [e for e in episodes if _worth_reading(e, said)]
     skipped -= len(episodes)
     if not episodes:
         return {"facts": 0, "stage0": skipped}
-    text = "\n".join(e["text"] for e in episodes)
+    text = "\n".join([*(e["text"] for e in episodes), project.get("name", "")])  # the project is a candidate entity
     me = await user_entity(owner, user_name)
     cands = await _candidates(owner, text)
     known = {f"E{i + 1}": str(r["id"]) for i, r in enumerate(cands)}
@@ -431,6 +442,10 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
                       for i, e in enumerate(episodes))
     prompt = EXTRACT.format(user=user_name, roster=", ".join(await _roster(owner)) or "(none)", today=f"{datetime.now(UTC):%Y-%m-%d}", entities=ent_lines or "(none yet)",
                             facts=fact_lines)
+    if project:  # what's said in a project's group is usually about that project: say which one it is
+        eps = (f"These episodes are from the group chat of {user_name}'s project \"{project['name']}\""
+               + (f" ({project['description'][:300]})" if project.get("description") else "")
+               + ". Facts about the work there belong to that project (a project entity under that name).\n\n" + eps)
     res = await _model().ainvoke([SystemMessage(prompt), HumanMessage(eps)])
     plan = _parse(res.text)
     log.debug("memory plan: %s", plan)

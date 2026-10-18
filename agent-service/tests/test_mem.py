@@ -330,3 +330,14 @@ async def test_unsure_facts_nobody_returns_to_fade(m, monkeypatch):
     await mem.tick(owner)
     assert await facts(owner, "faded") == ["Kishore chats with Jayanth on WhatsApp"]
     assert "WhatsApp" not in await mem.recall(owner, "Who is Kishore?")
+
+
+async def test_a_project_group_recalls_its_project_without_naming_it(m):
+    _, owner = m
+    a = await episode(owner, "Tubelight runs on my home server now, we moved off Vercel")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Tubelight", "kind": "project"}],
+                           "facts": [{"about": "n1", "text": "Tubelight runs on Akhil's home server", "episode": 1,
+                                      "quote": "runs on my home server", "importance": "important", "lasts": "months"}]})
+    assert "Tubelight (project)" not in await mem.recall(owner, "how's the launch prep going?")
+    text = await mem.recall(owner, "how's the launch prep going?", names=("Tubelight",))
+    assert "Tubelight (project):\n  - " in text and "home server" in text
