@@ -155,7 +155,7 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
       : { icon: ArrowUp02Icon, key: 'send', label: 'Send', variant: canSend ? 'tube' as const : 'soft' as const }
 
   const field = (
-    <Squircle cornerSmoothing={0} style={{ borderRadius: PILL, backgroundColor: c.panel2, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
+    <Squircle cornerSmoothing={0} style={{ borderRadius: PILL, backgroundColor: c.input, borderWidth: 1, borderColor: c.line, overflow: 'hidden' }}>
       {replyTo && <ReplyStrip m={replyTo} onCancel={onCancelReply} />}
       {files.length > 0 && (
         <Animated.View entering={FadeIn.duration(motion.duration.fast)} exiting={FadeOut.duration(motion.duration.quick)}>

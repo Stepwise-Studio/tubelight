@@ -10,6 +10,8 @@ const light = {
   panel: '#ffffff',
   panel2: '#f4f4f5', // zinc-100
   panel3: '#e4e4e7', // zinc-200, pressed wells
+  input: '#f4f4f5', // chat input pill
+  mine: '#f4f4f5', // your message bubbles
   line: 'rgba(0,0,0,0.07)',
   lineStrong: 'rgba(0,0,0,0.12)',
   edge: 'rgba(138,138,141,0.23)', // Stepwise --ui-border, control outlines
@@ -51,6 +53,8 @@ const dark: Palette = {
   panel: '#18181b',
   panel2: '#222226',
   panel3: '#2e2e33',
+  input: '#1a1a1e',
+  mine: '#232327',
   line: 'rgba(255,255,255,0.07)',
   lineStrong: 'rgba(255,255,255,0.12)',
   edge: 'rgba(255,255,255,0.10)',

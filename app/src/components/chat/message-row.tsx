@@ -257,7 +257,7 @@ function Bubble({ side, first, last, tone = 'panel', highlighted, style, childre
     ? { borderTopLeftRadius: top, borderBottomLeftRadius: bottom, borderTopRightRadius: R, borderBottomRightRadius: R }
     : { borderTopRightRadius: top, borderBottomRightRadius: bottom, borderTopLeftRadius: R, borderBottomLeftRadius: R }
   // Yours: zinc-100 in light, one step above the teammate's bubble in dark.
-  const bg = tone === 'panel' ? c.panel : scheme === 'dark' ? c.panel3 : c.panel2
+  const bg = tone === 'panel' ? c.panel : c.mine
   const bordered = tone === 'panel' && scheme === 'light'
   return (
     <Squircle style={[{

@@ -4,10 +4,10 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { Cancel01Icon, Search01Icon } from '@hugeicons/core-free-icons'
 
 import { motion, type as typeScale, useTheme } from '@/theme'
-import { Icon, IconButton, Logo, haptic } from '@/ui'
+import { Icon, IconButton, Text, haptic } from '@/ui'
 
 /**
- * Logo (or `children`) left, a search button right that morphs into the full search bar: the capsule grows leftward over
+ * Title (or `children`) left, a search button right that morphs into the full search bar: the capsule grows leftward over
  * the logo (250 ms open / 150 ms close, smooth-out), the field fades in and takes focus. Back or ✕ closes
  * and clears it.
  */
@@ -34,7 +34,7 @@ export function HeaderSearch({ value, onChange, placeholder, children }: { value
 
   return (
     <View style={{ height: 44, justifyContent: 'center' }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      <Animated.View style={logo} pointerEvents={open ? 'none' : 'auto'}>{children ?? <Logo scale={1.2} />}</Animated.View>
+      <Animated.View style={logo} pointerEvents={open ? 'none' : 'auto'}>{children ?? <Text variant="heading">Tubelight</Text>}</Animated.View>
       <Animated.View style={[{ position: 'absolute', right: 0, height: 40, borderRadius: 20, overflow: 'hidden', backgroundColor: c.panel2, flexDirection: 'row', alignItems: 'center' }, capsule]}>
         <Pressable
           onPress={() => { if (!open) { haptic.tap(); setOpen(true) } }}
