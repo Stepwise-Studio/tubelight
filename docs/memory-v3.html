@@ -1,0 +1,486 @@
+<title>Engram: Tubelight Memory v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column like a paper, figures break out a little wider; zinc neutrals, one cool accent. */
+:root {
+  --bg: #fafafa; --paper: #ffffff; --fg: #18181b; --muted: #52525b; --faint: #a1a1aa; --line: #e4e4e7;
+  --accent: #2563eb; --accent-soft: #dbeafe; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+  --c1: #2563eb; --c2: #0d9488; --c3: #9333ea; --c4: #c2410c; --c5: #4d7c0f;
+  --display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #09090b; --paper: #111113; --fg: #f4f4f5; --muted: #a1a1aa; --faint: #71717a; --line: #27272a;
+  --accent: #60a5fa; --accent-soft: #172554; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  --c1: #60a5fa; --c2: #2dd4bf; --c3: #c084fc; --c4: #fb923c; --c5: #a3e635; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #09090b; --paper: #111113; --fg: #f4f4f5; --muted: #a1a1aa; --faint: #71717a; --line: #27272a;
+  --accent: #60a5fa; --accent-soft: #172554; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  --c1: #60a5fa; --c2: #2dd4bf; --c3: #c084fc; --c4: #fb923c; --c5: #a3e635; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 16px/1.65 var(--body); padding-inline: 16px; padding-block: 40px 80px; }
+main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2.4rem, 7vw, 3.4rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.9rem; margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.35rem; margin-top: 14px; }
+p, li { margin: 0; max-width: 68ch; }
+ul, ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--line); padding: 1px 5px; border-radius: 5px; }
+.eyebrow { font: 500 12px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.byline { color: var(--muted); font-size: 14px; }
+.abstract { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
+.abstract p { font-size: 15px; }
+.lede { font-family: var(--display); font-size: 1.35rem; line-height: 1.4; color: var(--fg); }
+math[display="block"] { margin: 6px 0; font-size: 1.12em; overflow-x: auto; max-width: 100%; }
+.eq { display: flex; align-items: center; gap: 12px; }
+.eq math { flex: 1; min-width: 0; }
+.eq .n { color: var(--faint); font-family: var(--mono); font-size: 13px; }
+figure { margin: 8px 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+figure .scroll { overflow-x: auto; }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 72ch; }
+figcaption b { color: var(--fg); font-weight: 600; }
+svg text { font-family: var(--body); fill: var(--fg); }
+svg .sub { fill: var(--muted); font-size: 11px; }
+svg .box { fill: var(--paper); stroke: var(--line); stroke-width: 1.2; }
+svg .boxa { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+svg .arr { stroke: var(--muted); stroke-width: 1.3; fill: none; marker-end: url(#ah); }
+svg .arrd { stroke: var(--muted); stroke-width: 1.3; fill: none; stroke-dasharray: 4 3; marker-end: url(#ah); }
+svg .axis { stroke: var(--faint); stroke-width: 1; }
+svg .grid { stroke: var(--line); stroke-width: 1; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font: 600 12px/1.3 var(--body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+.pill { display: inline-block; font: 600 11px/1 var(--body); padding: 4px 7px; border-radius: 99px; letter-spacing: 0.03em; white-space: nowrap; }
+.high { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.med { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.low { color: var(--muted); background: var(--line); }
+.good { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.stat b { display: block; font: 400 2rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13px; color: var(--muted); }
+.note { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; color: var(--fg); }
+button { font: 500 13px var(--body); color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 99px; padding: 7px 14px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.readout { font-family: var(--mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+dl { margin: 0; display: grid; grid-template-columns: minmax(120px, 190px) 1fr; gap: 10px 16px; }
+dt { font-weight: 600; }
+dd { margin: 0; color: var(--muted); min-width: 0; }
+@media (max-width: 520px) { dl { grid-template-columns: 1fr; gap: 2px 0; } dd { margin-bottom: 10px; } }
+ol.refs { font-size: 14px; gap: 8px; }
+ol.refs li { color: var(--muted); }
+ol.refs li b { color: var(--fg); font-weight: 500; }
+</style>
+
+<main>
+  <div class="eyebrow">Tubelight · design paper · 18 October 2026</div>
+  <h1>Engram: a memory that knows what matters</h1>
+  <p class="byline">Memory v3 for Tubelight, the successor to Memory v2 (<code>agent-service/app/mem.py</code>). Written after an audit of the code and of the live memory on the home server.</p>
+
+  <section class="abstract">
+    <div class="eyebrow">Abstract</div>
+    <p>Tubelight's Memory v2 is careful about <i>truth</i>. Every fact quotes its evidence, outside content can't give orders, and changed facts are closed rather than overwritten. It has no model of <i>importance</i>. The live store holds 8 facts from 662 episodes. Two of those 8 are test noise. Meanwhile, the user's coursework deadlines, which they mentioned in chat, were never stored. Facts never strengthen with use or fade with disuse. There are no links between entities, so memory can't be drawn as a graph or searched by association.</p>
+    <p>Engram adds three things on top of v2's verified core. The first is a <b>salience gate</b>: a calibrated probability that a candidate memory will be needed later, with three outcomes (keep, hold tentatively, skip). The second is <b>activation</b>: each fact gets a strength from the ACT-R memory equations that rises with use and fades as a power law of time. The third is an <b>association graph</b> whose edges are statistical co-occurrence (PPMI). Recall spreads activation across it with Personalized PageRank. The same quantities drive a "neural" visualisation in which every visual property is a number the system computes. A conversational <b>memory agent</b> lets the user tell their story, and it asks only the questions whose answers reduce its uncertainty most. Those answers become training labels for the gate.</p>
+  </section>
+
+  <h2>1. The problem in one sentence</h2>
+  <p class="lede">Memory fails in two directions: it fills with trivia ("set a 2-minute timer"), or it misses the thing that mattered ("my MLP project deadline is Friday"). One mechanism has to handle both.</p>
+  <p>Storing everything makes recall noisy and expensive, because every prompt carries irrelevant facts and the model attends to the wrong ones. Storing too little makes the teammates feel like strangers. People solve this with attention and consolidation. Most of a day is never encoded. What surprises us, what we act on, and what we repeat gets stabilised. What we never return to fades. Engram copies that behaviour with explicit, measurable quantities instead of one prompt line that says "skip small talk".</p>
+
+  <h2>2. Audit of Memory v2</h2>
+  <p>We read <code>mem.py</code> (805 lines), its callers (<code>graph.preamble</code>, <code>tools.recall</code>, <code>calls.context</code>, <code>live.py</code>) and the eval suite, then queried the production tables on 18 October 2026.</p>
+  <div class="stats">
+    <div class="stat"><b>662</b><span>episodes logged (Oct 11–14)</span></div>
+    <div class="stat"><b>8</b><span>facts stored (1.2% yield)</span></div>
+    <div class="stat"><b>2 / 8</b><span>facts that are test noise</span></div>
+    <div class="stat"><b>57%</b><span>of episodes are teammate replies</span></div>
+  </div>
+  <p>A low yield isn't wrong in itself. Much of this history is the user testing features ("Hey there", "Start a 2 minute timer"). The problem is what got through and what didn't. Stored: <i>"Saqlain was sent an SMS from Akhil on 2026-10-11 saying: Test from Tubelight, please ignore."</i> Not stored: the user's message <i>"Can u see the deadlines i set for mlp and mlp project?"</i>, which names two ongoing courses. The extractor has one instruction about importance and no way to weigh it.</p>
+
+  <h3>What works and should stay</h3>
+  <ul>
+    <li><b>Episodes are append-only.</b> Raw input is never edited, so any later extractor can re-read history. This is the same episode layer Zep uses [3].</li>
+    <li><b>Verified evidence.</b> The server drops any fact whose quote is not found verbatim in its episode. This is stronger than Mem0's or Zep's published pipelines, and it is the reason poisoning evals pass.</li>
+    <li><b>Trust levels.</b> The user (2) outranks teammates (1), who outrank outside content (0). Outside content can't set preferences or override better-trusted facts.</li>
+    <li><b>Bi-temporal facts.</b> <code>valid_from</code> / <code>valid_to</code> plus <code>learned_at</code>. Replaced facts close and corrections retract for good.</li>
+    <li><b>Evals first.</b> 13 LongMemEval-style cases [9]. v2 scores 18/18 four times in a row; v1 scored 14–15.</li>
+  </ul>
+
+  <h3>Findings</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Severity</th><th>Finding</th><th>Evidence</th><th>Fix in v3</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill high">High</span></td><td>The call stand-in can tell a caller things unrelated to them.</td><td><code>calls.context</code> calls <code>recall(owner, name, …)</code>. That adds a "Related facts" vector search over <i>all</i> facts, and <code>sensitive</code> is never filtered. Only a prompt line stands in the way.</td><td>A caller scope: only the caller's entity and facts that name them. Never sensitive, never closed.</td></tr>
+      <tr><td><span class="pill high">High</span></td><td>No importance model on the way in.</td><td>2 of 8 stored facts are tests. Coursework deadlines are missing. The only filter is the prompt line "skip small talk".</td><td>Salience gate (§4.2).</td></tr>
+      <tr><td><span class="pill high">High</span></td><td>Nothing strengthens with use or fades with disuse.</td><td>The only dynamics are +0.05 confidence on a restatement and a 60-day exponential on <code>learned_at</code> during ranking.</td><td>ACT-R activation (§4.4).</td></tr>
+      <tr><td><span class="pill high">High</span></td><td>No graph. "Relations" are sentences attached to one entity.</td><td>No entity-to-entity table. Recall finds other entities by regex over fact text.</td><td>A <code>mentions</code> column on facts, PPMI edges and PPR recall (§4.5).</td></tr>
+      <tr><td><span class="pill med">Medium</span></td><td>Raising the extractor <code>VERSION</code> does nothing.</td><td><code>_batches</code> only selects <code>extracted = 0</code>. Episodes marked <code>-1</code> (gave up) are never retried, even after a fix.</td><td>Re-queue on version bump. Retry give-ups once per version.</td></tr>
+      <tr><td><span class="pill med">Medium</span></td><td>Orphan entities.</td><td>"Kishore" exists with 0 facts. Entities are created before their facts pass verification.</td><td>Create entities only when a fact about them survives.</td></tr>
+      <tr><td><span class="pill med">Medium</span></td><td>Extraction quota spent on teammate prose.</td><td>375 of 662 episodes are teammate replies, about 3× longer than the user's turns. They rarely hold facts.</td><td>Stage 0 filter (§4.2).</td></tr>
+      <tr><td><span class="pill med">Medium</span></td><td>Recall truncates by character count.</td><td><code>[:budget]</code> can cut mid-line and drop the preferences and open commitments, which come last.</td><td>Budget by score. Drop whole lines, lowest score first.</td></tr>
+      <tr><td><span class="pill low">Low</span></td><td>"About the other person" rule not enforced.</td><td>"Akhil called Saqlain on 2026-10-11" is filed under the user, not Saqlain.</td><td>The <code>mentions</code> column makes this harmless: both are linked.</td></tr>
+      <tr><td><span class="pill low">Low</span></td><td>Recall scans every entity in Python on each turn. Facts have no vector index.</td><td>Fine at 8 facts. Linear cost at 10k.</td><td>An HNSW index once there are more than about 5k facts. Not needed now.</td></tr>
+      <tr><td><span class="pill low">Low</span></td><td>Evals measure answers, not what gets stored.</td><td>No metric for noise or misses on the write path.</td><td>Gate precision, recall and calibration on labelled real history (§7).</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>3. What others have built, and what we take</h2>
+  <p>The short answer to "do we need to invent a new architecture?" is <b>mostly no</b>. Each piece has a published, tested basis. What's new is how they fit together: a calibrated three-band gate, trained by the user through conversation, sitting on a memory whose evidence is verified.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Work</th><th>Core idea</th><th>What Engram takes</th></tr></thead>
+    <tbody>
+      <tr><td>Generative Agents [1]</td><td>The LLM rates each memory's importance from 1 to 10. Retrieval = recency + importance + relevance. Reflection fires when accumulated importance crosses a threshold.</td><td>Importance as an explicit field from the extractor. Profiles rebuilt when enough salient change accumulates.</td></tr>
+      <tr><td>Mem0 [2]</td><td>Extract candidate memories, then decide ADD / UPDATE / DELETE / NOOP against similar ones. A graph variant adds relations.</td><td>v2 already does this (replaces, done, wrong). We keep it.</td></tr>
+      <tr><td>Zep / Graphiti [3]</td><td>A temporal knowledge graph with three tiers: episodes, entities with bi-temporal edges, communities.</td><td>v2 has the first two. v3 adds communities as graph clusters.</td></tr>
+      <tr><td>MemGPT / Letta [4]</td><td>The agent manages its own memory with tools, the way an OS pages memory.</td><td>The memory agent edits memory through tools, under the same verification.</td></tr>
+      <tr><td>A-MEM [5]</td><td>Zettelkasten-style notes that link to each other and evolve as new notes arrive.</td><td>Links between facts through the entities they mention.</td></tr>
+      <tr><td>HippoRAG [6]</td><td>Modelled on hippocampal indexing. Personalized PageRank over a knowledge graph finds multi-hop associations in one step.</td><td>Spreading activation for recall, and the "firing" animation.</td></tr>
+      <tr><td>Titans [7]</td><td>Surprise (the gradient of a memory loss) decides what a neural memory writes. An adaptive decay forgets.</td><td>Novelty as a write signal. We can't take gradients through an API model, so we use embedding distance as a cheap proxy.</td></tr>
+      <tr><td>EM-LLM [8]</td><td>Bayesian surprise cuts a token stream into episodic events.</td><td>Conversations as natural event boundaries (v2 already waits for a chat to go quiet).</td></tr>
+      <tr><td>Memory-R1 [10]</td><td>Reinforcement learning trains the memory manager's operations from answer correctness. 152 QA pairs are enough.</td><td>Evidence that the write policy is learnable from little data. We fit a 7-weight logistic gate instead of fine-tuning a model, which is free.</td></tr>
+      <tr><td>MemoryBank [11]</td><td>Ebbinghaus-style forgetting, reinforced by recall.</td><td>Forgetting, but with ACT-R's power law, which fits human data better than an exponential [13, 14].</td></tr>
+      <tr><td>Supermemory [12]</td><td>Atomic memories, relational versioning, temporal metadata, source chunks, automatic forgetting. Self-reported LongMemEval-S scores.</td><td>Confirms the same direction: versioned atomic facts with sources, plus forgetting.</td></tr>
+    </tbody>
+  </table></div>
+  <p>From cognitive science: <b>ACT-R base-level learning</b> [13, 14] gives a strength for each memory from how often and how recently it was used. Its premise is rational analysis: memory strength tracks the probability that a memory will be needed. <b>Synaptic tagging and capture</b> [15] explains how a weak trace survives if something important touches it soon after. That is our tentative tier. <b>Emotional arousal modulates consolidation</b> [16], which matches the "importance" feature. <b>Spreading activation</b> [17] and <b>complementary learning systems</b> [18] (a fast episodic store feeding a slow structured one) frame the whole design.</p>
+
+  <h2>4. Architecture</h2>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 770 520" width="770" role="img" aria-label="Engram architecture: sources feed an episode log, a filter, an extractor and a salience gate; kept facts form the memory graph; recall serves teammates; the memory agent talks with the user and its answers train the gate.">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" style="fill: var(--muted)"/></marker></defs>
+      <rect class="box" x="20" y="20" width="150" height="70" rx="14"/><text x="34" y="46" font-size="13" font-weight="600">Sources</text><text class="sub" x="34" y="64">chats, calls, voice,</text><text class="sub" x="34" y="78">notes, app results</text>
+      <rect class="box" x="210" y="20" width="150" height="70" rx="14"/><text x="224" y="46" font-size="13" font-weight="600">Episode log</text><text class="sub" x="224" y="64">raw, append-only,</text><text class="sub" x="224" y="78">never edited</text>
+      <rect class="boxa" x="400" y="20" width="150" height="70" rx="14"/><text x="414" y="46" font-size="13" font-weight="600">Stage 0 filter</text><text class="sub" x="414" y="64">no model: drops chatter,</text><text class="sub" x="414" y="78">device commands, tests</text>
+      <rect class="box" x="590" y="20" width="160" height="70" rx="14"/><text x="604" y="46" font-size="13" font-weight="600">Extractor</text><text class="sub" x="604" y="64">1 model call per quiet chat:</text><text class="sub" x="604" y="78">facts + importance, durability</text>
+      <path class="arr" d="M170 55 H206"/><path class="arr" d="M360 55 H396"/><path class="arr" d="M550 55 H586"/>
+      <rect class="boxa" x="590" y="118" width="160" height="124" rx="14"/><text x="604" y="144" font-size="13" font-weight="600">Salience gate</text><text class="sub" x="604" y="162">p = σ(β₀ + β·x)</text><text class="sub" x="604" y="178">novelty, importance,</text><text class="sub" x="604" y="194">durability, trust, recurrence,</text><text class="sub" x="604" y="210">"remember this"</text><text class="sub" x="604" y="228">server-side, fitted weights</text>
+      <path class="arr" d="M670 90 V114"/>
+      <rect class="box" x="400" y="118" width="150" height="36" rx="10"/><text x="412" y="140" font-size="12">Long-term · p ≥ 0.5</text>
+      <rect class="box" x="400" y="162" width="150" height="36" rx="10" style="stroke-dasharray: 4 3"/><text x="412" y="184" font-size="12">Tentative · 0.25–0.5</text>
+      <rect class="box" x="400" y="206" width="150" height="36" rx="10" style="opacity:.75"/><text x="412" y="228" font-size="12" class="sub">Skipped · &lt; 0.25</text>
+      <path class="arr" d="M590 136 H554"/><path class="arr" d="M590 180 H554"/><path class="arr" d="M590 224 H554"/>
+      <path class="arr" d="M475 162 V158"/><text class="sub" x="482" y="160" font-size="10">promote</text>
+      <rect class="box" x="20" y="118" width="340" height="124" rx="14"/><text x="34" y="144" font-size="13" font-weight="600">Memory graph</text>
+      <text class="sub" x="34" y="164">entities with names, numbers, emails</text><text class="sub" x="34" y="180">facts: bi-temporal, quoted evidence, trust,</text><text class="sub" x="34" y="196">importance, activation, mentions</text><text class="sub" x="34" y="212">edges: PPMI co-occurrence · life periods</text><text class="sub" x="34" y="228">communities (Louvain) · profiles</text>
+      <path class="arr" d="M400 136 H364"/><path class="arrd" d="M400 180 H364"/>
+      <rect class="box" x="20" y="290" width="340" height="80" rx="14"/><text x="34" y="316" font-size="13" font-weight="600">Recall</text><text class="sub" x="34" y="334">hybrid search (vector + words)</text><text class="sub" x="34" y="350">+ spreading activation (PPR) + ACT-R strength</text>
+      <path class="arr" d="M190 242 V286"/>
+      <rect class="box" x="400" y="290" width="350" height="80" rx="14"/><text x="414" y="316" font-size="13" font-weight="600">Teammates · Voice · Call stand-in</text><text class="sub" x="414" y="334">a scored, line-budgeted brief per turn;</text><text class="sub" x="414" y="350">callers get their own scope only</text>
+      <path class="arr" d="M360 330 H396"/>
+      <rect class="boxa" x="20" y="420" width="340" height="80" rx="14"/><text x="34" y="446" font-size="13" font-weight="600">Memory agent</text><text class="sub" x="34" y="464">talks with you, by text or voice; asks only</text><text class="sub" x="34" y="480">what it is least sure of (curiosity queue)</text>
+      <rect class="box" x="400" y="420" width="350" height="80" rx="14"/><text x="414" y="446" font-size="13" font-weight="600">You</text><text class="sub" x="414" y="464">tell your story, correct it,</text><text class="sub" x="414" y="480">answer a question or skip it</text>
+      <path class="arr" d="M360 450 H396"/><path class="arr" d="M400 472 H364"/>
+      <path class="arr" d="M190 420 V374"/>
+      <path class="arrd" d="M20 460 H8 V104 H285 V94"/><text class="sub" x="14" y="400" transform="rotate(-90 14 400)" font-size="10">your words → episodes (trust 2)</text>
+      <path class="arrd" d="M750 460 H762 V200 H754"/><text class="sub" x="758" y="390" transform="rotate(-90 758 390)" font-size="10">answers → labels → refit β</text>
+    </svg>
+    </div>
+    <figcaption><b>Figure 1.</b> The Engram pipeline. Highlighted boxes are new in v3. Dashed arrows carry tentative or learning signals. The episode log, verification, trust levels and bi-temporal facts are v2's, unchanged.</figcaption>
+  </figure>
+
+  <h3>4.1 Layers</h3>
+  <p>v2's four layers stay: <b>episodes → entities → facts → profiles</b>. v3 adds three things. Facts gain <code>importance</code>, <code>salience</code> (the gate's p), <code>hits</code> (timestamps of use) and <code>mentions</code> (every entity the sentence names). A new entity kind, <code>period</code>, holds life chapters such as "IITM online degree" or "Building Tubelight". This follows the Self-Memory System model of autobiographical memory [19]: lifetime periods contain general events, which contain specific moments. Edges between entities are not stored. They are computed from <code>mentions</code>, so they can't drift out of sync with the facts.</p>
+
+  <h3>4.2 Writing: the salience gate</h3>
+  <p><b>Stage 0 (free, no model).</b> Before any model call, drop episodes that can't hold a lasting fact. That means greetings and acknowledgements with no names, numbers or dates; device commands answered entirely by phone or clock tools (alarms, timers, flashlight); and teammate replies, unless they contain a name, number or date that isn't in the user's turn. This saves extraction quota. It never deletes anything: the episode stays in the log.</p>
+  <p><b>Stage 1 (the extractor, same single call as today).</b> For each candidate fact, the model also answers two categorical questions. LLMs are more consistent with a fixed scale than with a free number. <i>Importance</i>: trivial, minor, useful, important or critical (0.1 to 0.9). <i>Durability</i>, how long it will stay true: hours, days, months or years (0 to 1).</p>
+  <p><b>Stage 2 (on the server, no model).</b> The server combines those answers with signals it measures itself into one probability that the fact will be needed later:</p>
+  <div class="eq"><math display="block"><mi>p</mi><mo>=</mo><mi>σ</mi><mo>(</mo><msub><mi>β</mi><mn>0</mn></msub><mo>+</mo><msub><mi>β</mi><mtext>imp</mtext></msub><mi>i</mi><mo>+</mo><msub><mi>β</mi><mtext>dur</mtext></msub><mi>u</mi><mo>+</mo><msub><mi>β</mi><mtext>nov</mtext></msub><mi>ν</mi><mo>+</mo><msub><mi>β</mi><mtext>tr</mtext></msub><mi>τ</mi><mo>+</mo><msub><mi>β</mi><mtext>ex</mtext></msub><mi>e</mi><mo>+</mo><msub><mi>β</mi><mtext>rep</mtext></msub><mi>ln</mi><mo>(</mo><mn>1</mn><mo>+</mo><mi>r</mi><mo>)</mo><mo>)</mo></math><span class="n">(1)</span></div>
+  <p>Here <i>i</i> is importance, <i>u</i> durability, <i>τ</i> trust ÷ 2, <i>e</i> whether the user asked to remember it ("remember this", or anything said to the memory agent), and <i>r</i> how many earlier episodes restated it. <i>ν</i> is novelty, a cheap stand-in for surprise [7, 8, 20]:</p>
+  <div class="eq"><math display="block"><mi>ν</mi><mo>=</mo><mn>1</mn><mo>−</mo><munder><mi>max</mi><mrow><mi>f</mi><mo>∈</mo><msub><mi>F</mi><mi>s</mi></msub></mrow></munder><mi>cos</mi><mo>(</mo><mi mathvariant="bold">e</mi><mo>,</mo><msub><mi mathvariant="bold">e</mi><mi>f</mi></msub><mo>)</mo></math><span class="n">(2)</span></div>
+  <p>Here <i>F<sub>s</sub></i> is what memory already holds about the same subject. A fact that adds nothing has ν near 0. A fact about a new subject has ν = 1.</p>
+  <p><b>Where the thresholds come from.</b> If p is calibrated, decision theory gives the threshold directly. Missing an important fact costs more than storing a trivial one. With a miss costing 3× a false keep, the expected cost is minimised by keeping anything above</p>
+  <div class="eq"><math display="block"><msub><mi>θ</mi><mtext>lo</mtext></msub><mo>=</mo><mfrac><msub><mi>c</mi><mtext>FP</mtext></msub><mrow><msub><mi>c</mi><mtext>FP</mtext></msub><mo>+</mo><msub><mi>c</mi><mtext>FN</mtext></msub></mrow></mfrac><mo>=</mo><mfrac><mn>1</mn><mrow><mn>1</mn><mo>+</mo><mn>3</mn></mrow></mfrac><mo>=</mo><mn>0.25</mn></math><span class="n">(3)</span></div>
+  <p>Between 0.25 and θ<sub>hi</sub> = 0.5 (more likely needed than not), a fact is <b>tentative</b>. It is stored but not trusted: it shows up in recall only when strongly matched, it is drawn faintly, and it fades unless something reinforces it. This is the answer to "no tiny details, but nothing big missed". Uncertain items are neither thrown away nor allowed to clutter every prompt.</p>
+  <p><b>Fitting β.</b> We start from hand-set priors. We then fit them by logistic regression on labels from three places: hand-labelled real history (§7), the memory agent's questions (§6), and the user's own actions ("that's wrong" and "not important" are labels too). Seven weights need roughly 70–100 labels to fit stably, using the rule of thumb of ten events per variable. The fit runs offline, needs no numpy, and is checked against calibration error (§7) before it ships.</p>
+  <figure>
+    <div class="scroll"><svg id="gate" viewBox="0 0 680 300" width="680" role="img" aria-label="Sigmoid of the gate score with three bands and example facts placed by their computed probability."></svg></div>
+    <figcaption><b>Figure 2.</b> The gate's output against its score z, with the three bands. The points are computed by equation (1) with the prior weights from feature values for real moments in the user's history. The test SMS is skipped. The "Hey there" test to Kishore lands tentative and fades within weeks unless it comes up again. Coursework deadlines and the degree are kept.</figcaption>
+  </figure>
+  <div class="tablewrap"><table id="gatetab"><thead><tr><th>Moment</th><th>imp</th><th>dur</th><th>ν</th><th>trust</th><th>z</th><th>p</th><th>Outcome</th></tr></thead><tbody></tbody></table></div>
+
+  <h3>4.3 Tentative memories and consolidation</h3>
+  <p>A tentative fact is like a synaptic tag [15]: a weak trace that something stronger can capture later. When a later episode restates or extends it, <i>r</i> increases in (1), p is recomputed, and the fact may become long-term. When a long-term fact about the same entity arrives within the tag window, the tentative one gets a smaller boost. If its activation (§4.4) falls below the retrieval threshold with no reinforcement, it becomes <code>faded</code>. A faded fact is hidden from recall but never deleted, so the memory agent can still ask about it, and the user can still find it.</p>
+  <p>v2's profile rebuild becomes salience-triggered, following [1]: an entity's profile is rewritten when the summed salience of its changed facts crosses a threshold, not on every change. Fewer model calls, and better profiles.</p>
+
+  <h3>4.4 Strength: activation that rises with use and fades with time</h3>
+  <p>Every fact keeps a short list of times it was encoded, restated, or used in a recall a teammate asked for. Its strength is ACT-R's base-level activation [13, 14]:</p>
+  <div class="eq"><math display="block"><msub><mi>B</mi><mi>i</mi></msub><mo>(</mo><mi>t</mi><mo>)</mo><mo>=</mo><mi>ln</mi><munder><mo>∑</mo><mi>j</mi></munder><msup><mrow><mo>(</mo><mi>t</mi><mo>−</mo><msub><mi>t</mi><mi>j</mi></msub><mo>)</mo></mrow><mrow><mo>−</mo><mi>d</mi></mrow></msup><mo>,</mo><mspace width="1em"/><mi>d</mi><mo>=</mo><mn>0.5</mn></math><span class="n">(4)</span></div>
+  <p>Time is measured in days, floored at one hour. The decay d = 0.5 is ACT-R's standard value. Anderson and Schooler showed that this power law tracks how likely information is to be needed again in real environments [13]. The chance that a fact can be recalled is then a logistic of activation, with threshold τ and noise s:</p>
+  <div class="eq"><math display="block"><msub><mi>P</mi><mi>i</mi></msub><mo>=</mo><mfrac><mn>1</mn><mrow><mn>1</mn><mo>+</mo><msup><mi>e</mi><mrow><mo>−</mo><mo>(</mo><msub><mi>A</mi><mi>i</mi></msub><mo>−</mo><mi>τ</mi><mo>)</mo><mo>/</mo><mi>s</mi></mrow></msup></mrow></mfrac><mo>,</mo><mspace width="1em"/><msub><mi>A</mi><mi>i</mi></msub><mo>=</mo><msub><mi>B</mi><mi>i</mi></msub><mo>+</mo><mi>γ</mi><mo>·</mo><mtext>logit</mtext><mo>(</mo><msub><mi>p</mi><mi>i</mi></msub><mo>)</mo></math><span class="n">(5)</span></div>
+  <p>The gate's p acts as a prior: an important fact starts stronger. One guard matters. Facts that appear in a turn's preamble are <i>not</i> counted as uses. If they were, whatever is already strong would be shown more, used more and grow stronger, a rich-get-richer loop. Only explicit <code>recall</code> tool hits and restatements by people count.</p>
+  <p>Identity facts (a name, a phone number, a relationship) and open commitments never fade, whatever their activation. Forgetting applies to how prominent a fact is, not to whether it's on record.</p>
+  <figure>
+    <div class="scroll"><svg id="act" viewBox="0 0 680 280" width="680" role="img" aria-label="Recall probability over 60 days for a fact used three times versus once."></svg></div>
+    <figcaption><b>Figure 3.</b> Recall probability P from equations (4) and (5), with τ = −1 and s = 0.4. The solid line is a fact learned on day 0, restated on day 5 and used on day 12. The dashed line is a fact seen once. Each use resets the curve higher, and decay after each use is slower than the last. This is the spacing effect, and it comes out of the equation without a separate rule.</figcaption>
+  </figure>
+
+  <h3>4.5 Reading: association by spreading activation</h3>
+  <p><b>Edges.</b> Two entities are linked by how much more often they appear together than chance would predict. This is positive pointwise mutual information over episodes [21], a statistical form of Hebb's rule [22]:</p>
+  <div class="eq"><math display="block"><msub><mi>w</mi><mrow><mi>a</mi><mi>b</mi></mrow></msub><mo>=</mo><mi>max</mi><mrow><mo>(</mo><mn>0</mn><mo>,</mo><mspace width="0.2em"/><mi>ln</mi><mfrac><mrow><msub><mi>n</mi><mrow><mi>a</mi><mi>b</mi></mrow></msub><mspace width="0.2em"/><mi>N</mi></mrow><mrow><msub><mi>n</mi><mi>a</mi></msub><mspace width="0.2em"/><msub><mi>n</mi><mi>b</mi></msub></mrow></mfrac><mo>)</mo></mrow></math><span class="n">(6)</span></div>
+  <p>One consequence: the user appears in nearly every episode, so their PPMI with everyone is about zero. Mathematically, the user is the context, not a node. The visualisation draws them as the field everything sits in rather than as a hub with a line to everything.</p>
+  <p><b>Spreading activation.</b> The entities a moment mentions become seeds <b>s</b>. Activation spreads by Personalized PageRank [6, 23], with W the column-normalised edge weights and restart α = 0.15:</p>
+  <div class="eq"><math display="block"><msup><mi mathvariant="bold">π</mi><mrow><mo>(</mo><mi>k</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow></msup><mo>=</mo><mi>α</mi><mspace width="0.15em"/><mi mathvariant="bold">s</mi><mo>+</mo><mo>(</mo><mn>1</mn><mo>−</mo><mi>α</mi><mo>)</mo><mspace width="0.15em"/><mi>W</mi><msup><mi mathvariant="bold">π</mi><mrow><mo>(</mo><mi>k</mi><mo>)</mo></mrow></msup></math><span class="n">(7)</span></div>
+  <p>Twenty iterations leave an error below 0.85<sup>20</sup> ≈ 4%. This is plain Python over a sparse dictionary, which matters because NumPy can't load on the home server's CPU. A question about "the demo" then reaches Priya, who asked for it, and the project it's for, even when neither is named.</p>
+  <p><b>Ranking.</b> Each candidate fact gets one score from semantic similarity, the graph mass on the entities it mentions, and its recall probability:</p>
+  <div class="eq"><math display="block"><msub><mi>R</mi><mi>i</mi></msub><mo>=</mo><msub><mi>w</mi><mi>s</mi></msub><mspace width="0.1em"/><msub><mtext>sim</mtext><mi>i</mi></msub><mo>+</mo><msub><mi>w</mi><mi>g</mi></msub><munder><mi>max</mi><mrow><mi>a</mi><mo>∈</mo><mtext>mentions</mtext><mo>(</mo><mi>i</mi><mo>)</mo></mrow></munder><msub><mi>π</mi><mi>a</mi></msub><mo>+</mo><msub><mi>w</mi><mi>a</mi></msub><msub><mi>P</mi><mi>i</mi></msub></math><span class="n">(8)</span></div>
+  <p>The weights are fitted by grid search on the eval questions, starting from 0.5 / 0.25 / 0.25. This replaces v2's hand-tuned 0.6 / 0.25 / 0.1 / 0.05 blend. The brief is then filled by whole lines in score order until the budget runs out, so nothing is cut mid-sentence.</p>
+
+  <h2>5. Seeing memory: the neural map</h2>
+  <p>The goal is a picture that looks like neurons and is accurate. Every visual property is a quantity from §4, and you can tap anything to see the facts and quoted evidence behind it.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>What you see</th><th>What it is</th><th>Basis</th></tr></thead>
+    <tbody>
+      <tr><td>A cell (node)</td><td>An entity: a person, project, place, or a life period</td><td>§4.1</td></tr>
+      <tr><td>Cell size</td><td>Area ∝ total importance of its current facts, so the radius is √ of it</td><td>Area is perceived more accurately than radius [24]</td></tr>
+      <tr><td>Glow</td><td>Recall probability P, computed live, so idle memories dim on the power law</td><td>Eq. (4–5)</td></tr>
+      <tr><td>Fibre (edge) and its thickness</td><td>PPMI association between two entities</td><td>Eq. (6)</td></tr>
+      <tr><td>Distance between cells</td><td>Graph distance with edge length ½ + 1/(½ + PPMI), laid out by stress majorization [25]. The remaining stress is shown, so the reader can tell how faithful the picture is.</td><td>Eq. (9)</td></tr>
+      <tr><td>Colour regions</td><td>Communities found by modularity optimisation (Louvain [26]; Leiden [27] as an upgrade)</td><td>Q is shown</td></tr>
+      <tr><td>Faint satellites</td><td>Tentative facts orbiting their entity</td><td>§4.3</td></tr>
+      <tr><td>Firing</td><td>A real recall replayed: the iterations of eq. (7) from the moment's seeds, pulse brightness = π</td><td>Eq. (7)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="eq"><math display="block"><mtext>stress</mtext><mo>(</mo><mi>X</mi><mo>)</mo><mo>=</mo><munder><mo>∑</mo><mrow><mi>i</mi><mo>&lt;</mo><mi>j</mi></mrow></munder><msub><mi>w</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><msup><mrow><mo>(</mo><mo>‖</mo><msub><mi mathvariant="bold">x</mi><mi>i</mi></msub><mo>−</mo><msub><mi mathvariant="bold">x</mi><mi>j</mi></msub><mo>‖</mo><mo>−</mo><msub><mi>d</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>)</mo></mrow><mn>2</mn></msup><mo>,</mo><mspace width="1em"/><msub><mi>w</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><msubsup><mi>d</mi><mrow><mi>i</mi><mi>j</mi></mrow><mrow><mo>−</mo><mn>2</mn></mrow></msubsup></math><span class="n">(9)</span></div>
+  <p>Force-directed layouts such as Fruchterman–Reingold [28] look organic, but their distances mean nothing. Stress majorization places cells so that on-screen distance approximates association distance, and the leftover error is a number you can report. The animation that makes it feel alive is not decorative. The layout settles by real majorization steps, and firing replays the actual PageRank iterations.</p>
+  <figure>
+    <div class="scroll"><svg id="graph" viewBox="0 0 680 420" width="680" role="img" aria-label="Sample memory graph laid out by stress majorization, coloured by community."></svg></div>
+    <div class="row"><button id="fire" type="button">Recall "MLP" and watch it spread</button><button id="fire2" type="button">Recall "Priya"</button><span class="readout" id="graphstats"></span></div>
+    <figcaption><b>Figure 4.</b> A working sample on illustrative data, not your memory. Everything here is computed in the page from equations (4)–(9): PPMI edges from co-occurrence counts, Louvain communities, stress-majorization layout, glow from activation, and the recall buttons running eq. (7) step by step. The phone version draws the same numbers with Skia.</figcaption>
+  </figure>
+
+  <h2>6. Talking to memory</h2>
+  <p>The memory agent is a chat of its own, by text or voice, where you speak to your memory directly. You tell it about your life, your work and the people around you. It shows what it believes and where that came from, takes corrections, and sometimes asks something. Under the hood:</p>
+  <ul>
+    <li><b>Your words are evidence.</b> Everything you say there is logged as a trust-2 episode with <i>e</i> = 1 in eq. (1): you are deliberately telling it something, which is the strongest signal of importance there is. It still goes through extraction and quote verification. The agent can't invent memories, even when it's the one talking.</li>
+    <li><b>Tools:</b> recall, a timeline by person or period, why it believes something (the evidence quotes), correct, retract, "not important" (a negative label), merge two people, and propose a fact. A proposed fact is written only after you confirm it.</li>
+    <li><b>A curiosity queue.</b> It asks the questions it learns the most from. Candidates are tentative facts near the threshold, two current facts that disagree, strongly active people with thin profiles, and open commitments past their due date. Uncertain facts are ranked by uncertainty sampling [29], using binary entropy weighted by importance:</li>
+  </ul>
+  <div class="eq"><math display="block"><mi>q</mi><mo>=</mo><mi>H</mi><mo>(</mo><mi>p</mi><mo>)</mo><mo>·</mo><mi>i</mi><mo>,</mo><mspace width="1em"/><mi>H</mi><mo>(</mo><mi>p</mi><mo>)</mo><mo>=</mo><mo>−</mo><mi>p</mi><msub><mi>log</mi><mn>2</mn></msub><mi>p</mi><mo>−</mo><mo>(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo>)</mo><msub><mi>log</mi><mn>2</mn></msub><mo>(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo>)</mo></math><span class="n">(10)</span></div>
+  <p>A fact at p = 0.5 is the one the system knows least about, so H = 1 bit. It asks at most two questions per conversation, never in other chats, and never twice within 14 days. A skipped question becomes a weak "not important" label. Each answer is a training example for β, so the gate learns <i>your</i> sense of what matters. This is active learning. It is also what makes the agent feel curious rather than nosy: it only asks where the answer changes something.</p>
+  <p class="note">Voice works the same way. Gemini Live gets the memory tools, and what you say becomes episodes when the call ends, just as call transcripts already do.</p>
+
+  <h2>7. How we'll know it works</h2>
+  <dl>
+    <dt>Write precision and recall</dt><dd>On about 150 real episodes from your history, hand-labelled keep / tentative / skip. Target: no "keep" item skipped (recall ≥ 0.95 on important items) and noise among long-term facts under 10%. v2 today: 25% noise (2 of 8), at least 2 clear misses.</dd>
+    <dt>Calibration</dt><dd>Expected calibration error of p against the labels, which must be under 0.1. Without calibration, the thresholds in eq. (3) mean nothing.</dd>
+    <dt>Answer accuracy</dt><dd>The existing 13 cases must stay at 18/18. New cases: multi-hop association ("who asked for the thing the demo is about?"), fading (an old trivial fact shouldn't outrank a recent important one), and caller scope (a caller asks about an unrelated private fact and gets nothing).</dd>
+    <dt>Cost</dt><dd>Model calls per day must fall: Stage 0 skips most teammate prose. The gate, activation, PPR and layout use no model at all. The curiosity queue needs no model; only the conversation does.</dd>
+  </dl>
+
+  <h2>8. Build plan</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Phase</th><th>What</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="num">P0</td><td>Write-path evals and a labelled sample of real history</td><td><code>evals/memory.py</code>, <code>evals/gate.py</code></td></tr>
+      <tr><td class="num">P1</td><td>Fixes: caller scope (privacy), version re-queue, orphans, budget by line</td><td><code>mem.py</code>, <code>calls.py</code></td></tr>
+      <tr><td class="num">P2</td><td>Stage 0, gate fields, tentative tier, promotion, fading</td><td><code>mem.py</code> (new columns via <code>setup</code>)</td></tr>
+      <tr><td class="num">P3</td><td>Activation, <code>mentions</code>, PPMI edges, PPR recall, fitted ranking</td><td><code>mem.py</code>, new <code>memgraph.py</code></td></tr>
+      <tr><td class="num">P4</td><td>Graph API and the native neural map (Skia, layout on the phone)</td><td><code>main.py</code>, <code>app/src/app/memory-map.tsx</code></td></tr>
+      <tr><td class="num">P5</td><td>Memory agent chat, curiosity queue, voice tools</td><td><code>graph.py</code>, <code>live.py</code>, app chat</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>9. Limits</h2>
+  <ul>
+    <li>Novelty from embeddings is a proxy, not true Bayesian surprise. We can't read the model's own probabilities through a free API.</li>
+    <li>The gate is only as good as its labels. Until there are about 100, it runs on priors and should be read as a sensible default, not as calibrated.</li>
+    <li>PPMI is noisy for rare entities: one co-occurrence between two entities seen once looks strong. We require n<sub>ab</sub> ≥ 2 before drawing an edge.</li>
+    <li>Stress majorization is O(n²) per step. That's fine on a phone up to a few hundred entities. Beyond that, sparse stress [25] or a landmark subset is needed.</li>
+  </ul>
+
+  <h2>Plain-language glossary</h2>
+  <dl>
+    <dt>Episode</dt><dd>One thing that happened, word for word: a message, a call line, an email a teammate read.</dd>
+    <dt>Entity</dt><dd>A person, company, project, place or life chapter that memory knows about.</dd>
+    <dt>Fact</dt><dd>One sentence about an entity, with when it was true and the exact words it came from.</dd>
+    <dt>Bi-temporal</dt><dd>Two clocks per fact: when it was true in the world, and when we learned it.</dd>
+    <dt>Salience gate</dt><dd>The bouncer at memory's door. It estimates how likely you'll need something later.</dd>
+    <dt>Tentative</dt><dd>On probation: kept quietly, promoted if it comes up again, faded if it doesn't.</dd>
+    <dt>Activation</dt><dd>How "warm" a memory is right now. Use makes it warmer, and time cools it slowly.</dd>
+    <dt>PPMI</dt><dd>How much more often two things come up together than chance would predict.</dd>
+    <dt>Spreading activation / PPR</dt><dd>Recall that follows associations, the way thinking of one person brings up the project you share.</dd>
+    <dt>Stress majorization</dt><dd>A way to place dots so that the distance between them on screen matches how related they are.</dd>
+    <dt>Modularity / Louvain</dt><dd>A way to find groups that are more connected inside than to each other: the "regions" of your memory.</dd>
+    <dt>Calibration</dt><dd>When the system says 70%, it should be right about 70% of the time.</dd>
+    <dt>Active learning</dt><dd>Asking the questions whose answers teach the most, instead of asking everything.</dd>
+  </dl>
+
+  <h2>References</h2>
+  <ol class="refs">
+    <li><b>Park, J. S. et al.</b> Generative Agents: Interactive Simulacra of Human Behavior. UIST 2023. <a href="https://arxiv.org/abs/2304.03442">arXiv:2304.03442</a></li>
+    <li><b>Chhikara, P., Khant, D., Aryan, S., Singh, T., Yadav, D.</b> Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory. 2025. <a href="https://arxiv.org/abs/2504.19413">arXiv:2504.19413</a></li>
+    <li><b>Rasmussen, P. et al.</b> Zep: A Temporal Knowledge Graph Architecture for Agent Memory. 2025. <a href="https://arxiv.org/abs/2501.13956">arXiv:2501.13956</a></li>
+    <li><b>Packer, C. et al.</b> MemGPT: Towards LLMs as Operating Systems. 2023. <a href="https://arxiv.org/abs/2310.08560">arXiv:2310.08560</a></li>
+    <li><b>Xu, W. et al.</b> A-MEM: Agentic Memory for LLM Agents. 2025. <a href="https://arxiv.org/abs/2502.12110">arXiv:2502.12110</a></li>
+    <li><b>Gutiérrez, B. J. et al.</b> HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models. NeurIPS 2024. <a href="https://arxiv.org/abs/2405.14831">arXiv:2405.14831</a></li>
+    <li><b>Behrouz, A., Zhong, P., Mirrokni, V.</b> Titans: Learning to Memorize at Test Time. 2025. <a href="https://arxiv.org/abs/2501.00663">arXiv:2501.00663</a></li>
+    <li><b>Fountas, Z. et al.</b> Human-inspired Episodic Memory for Infinite Context LLMs (EM-LLM). ICLR 2025. <a href="https://arxiv.org/abs/2407.09450">arXiv:2407.09450</a></li>
+    <li><b>Wu, D. et al.</b> LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory. ICLR 2025. <a href="https://arxiv.org/abs/2410.10813">arXiv:2410.10813</a></li>
+    <li><b>Memory-R1:</b> Enhancing Large Language Model Agents to Manage and Utilize Memories via Reinforcement Learning. ACL 2026. <a href="https://arxiv.org/abs/2508.19828">arXiv:2508.19828</a></li>
+    <li><b>Zhong, W. et al.</b> MemoryBank: Enhancing Large Language Models with Long-Term Memory. AAAI 2024. <a href="https://arxiv.org/abs/2305.10250">arXiv:2305.10250</a></li>
+    <li><b>Supermemory.</b> Research and LongMemEval-S evaluation reports (self-reported). <a href="https://supermemory.ai/research">supermemory.ai/research</a></li>
+    <li><b>Anderson, J. R., Schooler, L. J.</b> Reflections of the environment in memory. Psychological Science 2(6), 1991.</li>
+    <li><b>Anderson, J. R., Lebiere, C.</b> The Atomic Components of Thought. Erlbaum, 1998. (ACT-R base-level learning, d = 0.5.)</li>
+    <li><b>Frey, U., Morris, R. G. M.</b> Synaptic tagging and long-term potentiation. Nature 385, 1997.</li>
+    <li><b>McGaugh, J. L.</b> The amygdala modulates the consolidation of memories of emotionally arousing experiences. Annual Review of Neuroscience 27, 2004.</li>
+    <li><b>Collins, A. M., Loftus, E. F.</b> A spreading-activation theory of semantic processing. Psychological Review 82(6), 1975.</li>
+    <li><b>McClelland, J. L., McNaughton, B. L., O'Reilly, R. C.</b> Why there are complementary learning systems in the hippocampus and neocortex. Psychological Review 102(3), 1995.</li>
+    <li><b>Conway, M. A., Pleydell-Pearce, C. W.</b> The construction of autobiographical memories in the self-memory system. Psychological Review 107(2), 2000.</li>
+    <li><b>Itti, L., Baldi, P.</b> Bayesian surprise attracts human attention. Vision Research 49(10), 2009.</li>
+    <li><b>Church, K. W., Hanks, P.</b> Word association norms, mutual information, and lexicography. Computational Linguistics 16(1), 1990.</li>
+    <li><b>Hebb, D. O.</b> The Organization of Behavior. Wiley, 1949.</li>
+    <li><b>Haveliwala, T. H.</b> Topic-sensitive PageRank. WWW 2002.</li>
+    <li><b>Cleveland, W. S., McGill, R.</b> Graphical perception. Journal of the American Statistical Association 79(387), 1984.</li>
+    <li><b>Gansner, E. R., Koren, Y., North, S.</b> Graph drawing by stress majorization. Graph Drawing 2004, LNCS 3383.</li>
+    <li><b>Blondel, V. D. et al.</b> Fast unfolding of communities in large networks. J. Stat. Mech. 2008.</li>
+    <li><b>Traag, V. A., Waltman, L., van Eck, N. J.</b> From Louvain to Leiden: guaranteeing well-connected communities. Scientific Reports 9, 2019.</li>
+    <li><b>Fruchterman, T. M. J., Reingold, E. M.</b> Graph drawing by force-directed placement. Software: Practice and Experience 21(11), 1991.</li>
+    <li><b>Settles, B.</b> Active Learning Literature Survey. University of Wisconsin–Madison, CS Technical Report 1648, 2009.</li>
+  </ol>
+</main>
+
+<script>
+(() => {
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; };
+const sig = z => 1 / (1 + Math.exp(-z));
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---------- Figure 2: gate (eq. 1, prior weights)
+const B = { b0: -3.5, imp: 3, dur: 2.5, nov: 1.5, tr: 1, ex: 2, rep: 1 };
+const moments = [
+  ["Test SMS to Saqlain (\"please ignore\")", .1, 0, 1, .5, 0, 0],
+  ["\"Hey there\" test message to Kishore", .1, 0, 1, 1, 0, 0],
+  ["Deadlines set for MLP and MLP project", .6, .66, 1, 1, 0, 0],
+  ["Prefers a warm tone for posts", .5, 1, 1, 1, 0, 0],
+  ["Enrolled in the IITM online degree", .7, 1, 1, 1, 0, 0],
+];
+const z = m => B.b0 + B.imp * m[1] + B.dur * m[2] + B.nov * m[3] + B.tr * m[4] + B.ex * m[5] + B.rep * Math.log(1 + m[6]);
+const band = p => p >= .5 ? ["Long-term", "good"] : p >= .25 ? ["Tentative", "med"] : ["Skipped", "low"];
+const tb = document.querySelector("#gatetab tbody");
+for (const m of moments) { const zz = z(m), p = sig(zz), [b, c] = band(p);
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${m[0]}</td><td class="num">${m[1]}</td><td class="num">${m[2]}</td><td class="num">${m[3]}</td><td class="num">${m[4] * 2}</td><td class="num">${zz.toFixed(2)}</td><td class="num">${p.toFixed(2)}</td><td><span class="pill ${c}">${b}</span></td>`;
+  tb.appendChild(tr); }
+{
+  const g = document.getElementById("gate"), L = 60, R = 640, T = 20, Bt = 250;
+  const X = v => L + (v + 6) / 12 * (R - L), Y = p => Bt - p * (Bt - T);
+  [[0, .25, "var(--line)", .55], [.25, .5, "var(--warn)", .1], [.5, 1, "var(--ok)", .1]].forEach(([a, b, c, o]) =>
+    el("rect", { x: L, y: Y(b), width: R - L, height: Y(a) - Y(b), style: `fill:${c};opacity:${o}` }, g));
+  [0, .25, .5, 1].forEach(p => { el("line", { class: "grid", x1: L, x2: R, y1: Y(p), y2: Y(p) }, g); el("text", { x: L - 8, y: Y(p) + 4, "text-anchor": "end", "font-size": 11, class: "sub" }, g, p); });
+  for (let v = -6; v <= 6; v += 2) el("text", { x: X(v), y: Bt + 18, "text-anchor": "middle", "font-size": 11, class: "sub" }, g, v);
+  el("text", { x: R, y: Bt + 34, "text-anchor": "end", "font-size": 11, class: "sub" }, g, "gate score z");
+  el("text", { x: L + 6, y: Y(1) + 14, "font-size": 11, class: "sub" }, g, "p (probability it will be needed)");
+  el("line", { class: "axis", x1: L, x2: R, y1: Bt, y2: Bt }, g);
+  let d = ""; for (let i = 0; i <= 240; i++) { const v = -6 + i / 20; d += (i ? "L" : "M") + X(v).toFixed(1) + " " + Y(sig(v)).toFixed(1); }
+  el("path", { d, style: "fill:none;stroke:var(--accent);stroke-width:2" }, g);
+  el("text", { x: R - 6, y: Y(.75) + 4, "text-anchor": "end", "font-size": 11, style: "fill:var(--ok)" }, g, "long-term");
+  el("text", { x: R - 6, y: Y(.375) + 4, "text-anchor": "end", "font-size": 11, style: "fill:var(--warn)" }, g, "tentative");
+  el("text", { x: R - 6, y: Y(.12) + 4, "text-anchor": "end", "font-size": 11, class: "sub" }, g, "skipped");
+  moments.forEach((m, k) => { const zz = z(m), p = sig(zz);
+    el("circle", { cx: X(zz), cy: Y(p), r: 5, style: "fill:var(--paper);stroke:var(--fg);stroke-width:1.5" }, g);
+    el("text", { x: X(zz) + 9, y: Y(p) + (k % 2 ? 14 : -6), "font-size": 11 }, g, String(k + 1));
+  });
+  [...tb.rows].forEach((r, k) => r.cells[0].textContent = `${k + 1}. ${r.cells[0].textContent}`);
+}
+
+// ---------- Figure 3: activation (eq. 4-5)
+{
+  const g = document.getElementById("act"), L = 50, R = 650, T = 20, Bt = 230, tau = -1, s = .4, dd = .5;
+  const X = t => L + t / 60 * (R - L), Y = p => Bt - p * (Bt - T);
+  const P = (t, uses) => { const sum = uses.filter(u => u < t).reduce((a, u) => a + Math.pow(Math.max(t - u, 1 / 24), -dd), 0); return sum ? sig((Math.log(sum) - tau) / s) : 0; };
+  [0, .5, 1].forEach(p => { el("line", { class: "grid", x1: L, x2: R, y1: Y(p), y2: Y(p) }, g); el("text", { x: L - 8, y: Y(p) + 4, "text-anchor": "end", "font-size": 11, class: "sub" }, g, p); });
+  for (let t = 0; t <= 60; t += 10) el("text", { x: X(t), y: Bt + 18, "text-anchor": "middle", "font-size": 11, class: "sub" }, g, t);
+  el("text", { x: R, y: Bt + 34, "text-anchor": "end", "font-size": 11, class: "sub" }, g, "days since first learned");
+  el("text", { x: L + 6, y: Y(1) - 6, "font-size": 11, class: "sub" }, g, "recall probability P");
+  el("line", { class: "axis", x1: L, x2: R, y1: Bt, y2: Bt }, g);
+  const curve = (uses, style) => { let d = ""; for (let i = 1; i <= 600; i++) { const t = i / 10; d += (i > 1 ? "L" : "M") + X(t).toFixed(1) + " " + Y(P(t, uses)).toFixed(1); } el("path", { d, style }, g); };
+  curve([0], "fill:none;stroke:var(--faint);stroke-width:2;stroke-dasharray:5 4");
+  curve([0, 5, 12], "fill:none;stroke:var(--accent);stroke-width:2.2");
+  [[5, "restated"], [12, "used in recall"]].forEach(([t, lab]) => { el("line", { x1: X(t), x2: X(t), y1: T + 10, y2: Bt, style: "stroke:var(--accent);stroke-width:1;opacity:.35" }, g); el("text", { x: X(t) + 4, y: T + 20, "font-size": 11, class: "sub" }, g, lab); });
+  el("text", { x: X(44), y: Y(P(44, [0, 5, 12])) - 8, "font-size": 11, style: "fill:var(--accent)" }, g, "learned, restated, used");
+  el("text", { x: X(36), y: Y(P(36, [0])) + 16, "font-size": 11, class: "sub" }, g, "seen once");
+}
+
+// ---------- Figure 4: sample graph (eq. 4-9)
+{
+  const N = 60; // episodes in the sample
+  const nodes = [
+    ["Tubelight", 30, [0.2, 1, 2, 4, 9]], ["Stepwise", 12, [3, 15]], ["Home server", 8, [1, 6]], ["Gemini", 10, [2, 5, 20]],
+    ["IITM degree", 9, [4, 30]], ["MLP", 6, [1, 3, 8]], ["MLP project", 5, [0.5, 2]], ["Priya", 7, [6, 12]],
+    ["Dev", 6, [10, 25]], ["Meera", 4, [40]], ["Swiggy", 3, [45]], ["Demo, 12 Sep", 3, [12, 14]],
+  ].map(([label, n, uses], i) => ({ i, label, n, uses }));
+  const co = [[0, 1, 10], [0, 2, 7], [0, 3, 8], [1, 2, 3], [2, 3, 2], [4, 5, 5], [4, 6, 4], [5, 6, 4], [7, 11, 3], [7, 0, 5], [8, 0, 4], [8, 7, 2], [9, 10, 3], [9, 8, 2], [11, 0, 2]];
+  const edges = co.filter(e => e[2] >= 2).map(([a, b, nab]) => ({ a, b, w: Math.max(0, Math.log(nab * N / (nodes[a].n * nodes[b].n))) })).filter(e => e.w > 0);
+  const n = nodes.length, INF = 1e9;
+  // graph distances (Floyd–Warshall), edge length 0.5 + 1 / (0.5 + PPMI): monotone, with a floor so close ties don't overlap
+  const D = [...Array(n)].map((_, i) => [...Array(n)].map((_, j) => i === j ? 0 : INF));
+  edges.forEach(e => { const l = .5 + 1 / (.5 + e.w); D[e.a][e.b] = D[e.b][e.a] = Math.min(D[e.a][e.b], l); });
+  for (let k = 0; k < n; k++) for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (D[i][k] + D[k][j] < D[i][j]) D[i][j] = D[i][k] + D[k][j];
+  const finite = D.flat().filter(v => v < INF), dmax = Math.max(...finite);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (D[i][j] >= INF) D[i][j] = dmax * .8; // separate components: about as far as the farthest connected pair
+  // stress majorization (Gansner, Koren, North 2004), deterministic start
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const P = nodes.map((_, i) => [Math.cos(i * 2.4) * 2 + rnd() * .1, Math.sin(i * 2.4) * 2 + rnd() * .1]);
+  const stress = () => { let s = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const dx = P[i][0] - P[j][0], dy = P[i][1] - P[j][1]; s += (Math.hypot(dx, dy) - D[i][j]) ** 2 / D[i][j] ** 2; } return s; };
+  for (let it = 0; it < 300; it++) for (let i = 0; i < n; i++) { let sx = 0, sy = 0, sw = 0;
+    for (let j = 0; j < n; j++) { if (i === j) continue; const w = D[i][j] ** -2, dx = P[i][0] - P[j][0], dy = P[i][1] - P[j][1], dist = Math.hypot(dx, dy) || 1e-6;
+      sx += w * (P[j][0] + D[i][j] * dx / dist); sy += w * (P[j][1] + D[i][j] * dy / dist); sw += w; }
+    P[i] = [sx / sw, sy / sw]; }
+  const st = stress();
+  // Louvain, level 1 (local moving of nodes to maximise modularity)
+  const adj = nodes.map(() => new Map()); edges.forEach(e => { adj[e.a].set(e.b, e.w); adj[e.b].set(e.a, e.w); });
+  const k = adj.map(m => [...m.values()].reduce((a, b) => a + b, 0)), m2 = k.reduce((a, b) => a + b, 0);
+  const com = nodes.map((_, i) => i), tot = [...k];
+  for (let moved = true, pass = 0; moved && pass < 20; pass++) { moved = false;
+    for (let i = 0; i < n; i++) { if (!k[i]) continue; const ci = com[i]; tot[ci] -= k[i];
+      const links = new Map(); adj[i].forEach((w, j) => links.set(com[j], (links.get(com[j]) || 0) + w));
+      let best = ci, gain = (links.get(ci) || 0) - tot[ci] * k[i] / m2;
+      links.forEach((kin, c) => { const g2 = kin - tot[c] * k[i] / m2; if (g2 > gain + 1e-12) { gain = g2; best = c; } });
+      com[i] = best; tot[best] += k[i]; if (best !== ci) moved = true; } }
+  let Q = 0; { const inW = {}, tt = {}; edges.forEach(e => { if (com[e.a] === com[e.b]) inW[com[e.a]] = (inW[com[e.a]] || 0) + 2 * e.w; }); nodes.forEach((_, i) => tt[com[i]] = (tt[com[i]] || 0) + k[i]);
+    for (const c in tt) Q += (inW[c] || 0) / m2 - (tt[c] / m2) ** 2; }
+  const palette = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)"], cid = [...new Set(com)];
+  // activation now (day 0 = today; uses are days ago)
+  const Pr = u => sig((Math.log(u.reduce((a, d) => a + Math.max(d, 1 / 24) ** -.5, 0)) + 1) / .4);
+  // draw
+  const g = document.getElementById("graph"), W = 680, H = 420, pad = 60;
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const sc = Math.min((W - 2 * pad) / (x1 - x0 || 1), (H - 2 * pad) / (y1 - y0 || 1));
+  const S = p => [W / 2 + (p[0] - (x0 + x1) / 2) * sc, H / 2 + (p[1] - (y0 + y1) / 2) * sc];
+  const defs = el("defs", {}, g); const f = el("filter", { id: "glow", x: "-100%", y: "-100%", width: "300%", height: "300%" }, defs); el("feGaussianBlur", { stdDeviation: 6 }, f);
+  const wmax = Math.max(...edges.map(e => e.w));
+  edges.forEach(e => { const [ax, ay] = S(P[e.a]), [bx, by] = S(P[e.b]); const mx = (ax + bx) / 2 + (ay - by) * .08, my = (ay + by) / 2 + (bx - ax) * .08;
+    el("path", { d: `M${ax} ${ay} Q${mx} ${my} ${bx} ${by}`, style: `fill:none;stroke:var(--faint);stroke-linecap:round;stroke-width:${(.6 + 2.4 * e.w / wmax).toFixed(2)};opacity:.7` }, g); });
+  const imp = nodes.map(nd => nd.n); const impMax = Math.max(...imp);
+  const glows = [], cores = [];
+  nodes.forEach((nd, i) => { const [x, y] = S(P[i]), r = 6 + 16 * Math.sqrt(nd.n / impMax), col = palette[cid.indexOf(com[i]) % palette.length], pr = Pr(nd.uses);
+    glows[i] = el("circle", { cx: x, cy: y, r: r * 1.9, filter: "url(#glow)", style: `fill:${col};opacity:${(.15 + .55 * pr).toFixed(2)}` }, g);
+    cores[i] = el("circle", { cx: x, cy: y, r, style: `fill:${col};opacity:${(.35 + .65 * pr).toFixed(2)};stroke:var(--paper);stroke-width:1.5` }, g);
+    el("text", { x, y: y + r + 14, "text-anchor": "middle", "font-size": 11.5, "font-weight": 500 }, g, nd.label);
+    nd.base = .15 + .55 * pr; nd.r = r; });
+  const stats = document.getElementById("graphstats");
+  stats.textContent = `stress ${st.toFixed(2)} · modularity Q ${Q.toFixed(2)} · ${edges.length} PPMI edges · ${cid.length} communities`;
+  // spreading activation (eq. 7), replayed step by step
+  const fire = (seedIdx) => { const alpha = .15, steps = 20; let pi = nodes.map((_, i) => i === seedIdx ? 1 : 0); const sv = [...pi], frames = [pi];
+    for (let s2 = 0; s2 < steps; s2++) { const nx = sv.map(v => alpha * v); nodes.forEach((_, j) => { if (!k[j]) { nx[j] += (1 - alpha) * pi[j]; return; } adj[j].forEach((w, i2) => nx[i2] += (1 - alpha) * pi[j] * w / k[j]); }); pi = nx; frames.push(pi); }
+    const show = fr => { const mx = Math.max(...fr); nodes.forEach((nd, i) => { const v = fr[i] / mx; glows[i].setAttribute("r", nd.r * (1.9 + 1.6 * v)); glows[i].style.opacity = Math.min(1, nd.base + .8 * v).toFixed(2); }); };
+    const top = frames[steps].map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(1, 4).map(([v, i]) => `${nodes[i].label} ${v.toFixed(2)}`).join(", ");
+    if (reduced) { show(frames[steps]); } else { frames.forEach((fr, s2) => setTimeout(() => show(fr), s2 * 110)); }
+    setTimeout(() => stats.textContent = `π after ${steps} steps from ${nodes[seedIdx].label}: ${top}`, reduced ? 0 : steps * 110); };
+  document.getElementById("fire").onclick = () => fire(5);
+  document.getElementById("fire2").onclick = () => fire(7);
+}
+})();
+</script>
