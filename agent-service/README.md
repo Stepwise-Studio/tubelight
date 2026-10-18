@@ -14,7 +14,8 @@ cp .env.example .env   # then fill it in
 ```
 
 The first memory write or search downloads the local embedding model
-(fastembed `BAAI/bge-small-en-v1.5`, 384 dims, ~70 MB). Memory search makes no API requests.
+(fastembed `BAAI/bge-small-en-v1.5`, 384 dims, ~70 MB). Memory search then makes no API requests. On CPUs without
+SSE4.2 (NumPy won't load), set `EMBEDDINGS=cloudflare` to embed with Workers AI instead.
 
 ## Run
 
@@ -59,6 +60,21 @@ ends the `git diff` is stored in `activity` and the workdir is deleted (it survi
 
 Expo push via `https://exp.host/--/api/v2/push/send` to the tokens in `push_tokens`; no server keys.
 Tokens reported `DeviceNotRegistered` are deleted.
+
+## Memory
+
+The memory design, with its maths and citations, is in [`../docs/memory-v3.html`](../docs/memory-v3.html).
+
+| File | What it does |
+|---|---|
+| `app/mem.py` | Episodes, entities, facts, profiles; extraction (one call per quiet conversation, a second look for what you tell your memory), the salience gate, recall and the map's data |
+| `app/memgraph.py` | The maths: ACT-R strength, PPMI links, Personalized PageRank, ranking (`python -m app.memgraph` checks it) |
+| `app/mind.py` | The Memory teammate: its persona, curiosity queue and tools |
+| `evals/memory.py` | Question answering over dated chats, calls and emails (v1 vs v2) |
+| `evals/gate.py` | What gets stored vs what should be; fits the gate's weights and reports calibration |
+
+The worker extracts quiet conversations every 30 s under a Postgres advisory lock, so only one process extracts.
+`python -m app.mem backfill <owner>` queues a user's chat history. Raising `mem.VERSION` re-reads history.
 
 ## Connectors (Composio)
 

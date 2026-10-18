@@ -292,7 +292,7 @@ def test_stage0_reads_what_could_matter_and_drops_chatter():
     assert not mem._worth_reading(ep("Done. Timer cancelled.", 1), said)
     assert mem._worth_reading(ep("Call Saqlain"), said)  # short, but names someone
     assert mem._worth_reading(ep(said), said)
-    assert mem._worth_reading(ep("Found it: nischay@example.com (Nischay Rupakula).", 1), said)
+    assert mem._worth_reading(ep("Found it: nischay@example.com (Nischay Rao).", 1), said)
     assert mem._worth_reading(ep("ok", 0), said) and mem._worth_reading(ep("hi", 1, "note"), said)  # apps, notes: always
 
 
