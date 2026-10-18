@@ -7,6 +7,7 @@ import { FlatList, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { AiBrain01Icon, CheckmarkCircle02Icon, Delete02Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 
+import { MemoryMapView } from '@/components/memory-map'
 import { PeopleList, PersonMark, heardFrom } from '@/components/people'
 import { ScreenHeader } from '@/components/screen-header'
 import { api } from '@/lib/api'
@@ -32,16 +33,17 @@ const whose = (m: MemoryItem) => (m.scope === 'user' ? 'All teammates' : m.scope
 
 export default function MemoryScreen() {
   const insets = useSafeAreaInsets()
-  const [view, setView] = useState<'overview' | 'people' | 'lessons'>('overview')
+  const [view, setView] = useState<'overview' | 'map' | 'people' | 'lessons'>('overview')
   return (
     <View style={{ flex: 1 }}>
       <ScreenHeader title="Memory" subtitle="What your teammates know, and where they learned it" />
       <View style={{ paddingHorizontal: 16, paddingTop: 12 }}><TalkToMemory /></View>
       <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <Segment value={view} onChange={setView} accessibilityLabel="Show"
-          options={[{ value: 'overview', label: 'Overview' }, { value: 'people', label: 'People' }, { value: 'lessons', label: 'Lessons' }]} />
+          options={[{ value: 'overview', label: 'Overview' }, { value: 'map', label: 'Map' }, { value: 'people', label: 'People' }, { value: 'lessons', label: 'Lessons' }]} />
       </View>
       {view === 'overview' ? <Overview bottom={insets.bottom + 32} onPeople={() => setView('people')} />
+        : view === 'map' ? <MemoryMapView bottom={insets.bottom + 24} />
         : view === 'people' ? <PeopleList bottom={insets.bottom + 24} />
           : <Lessons bottom={insets.bottom + 24} />}
     </View>
