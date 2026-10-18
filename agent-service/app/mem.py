@@ -337,8 +337,10 @@ Rules:
 - Skip small talk, pleasantries, the teammates' own process ("I'll check"), promotions, and anything already in the
   current facts in other words. No secrets: passwords, codes, OTPs, card or account numbers.
 - sensitive: true for health, money, family matters and other private topics.
-- Entities: reuse a known id ("same_as") when it's the same one, even under another name or nickname. New ones get
-  a ref like "n1". Add phone numbers, emails and handles you see for them under "ids".
+- Entities: list every person, organisation, project and place in {user}'s world that the episodes name, even when
+  there's no new fact about it (a fact filed under {user} that names one links it). Reuse a known id ("same_as") when
+  it's the same one, even under another name or nickname. New ones get a ref like "n1". Add phone numbers, emails and
+  handles you see for them under "ids".
 - importance: how much having this later would matter to {user}: trivial (tests of the app, one-off device
   commands, "please ignore"), minor, useful, important (people, work, studies, money, health, plans), critical.
 - lasts: how long it stays true or relevant: hours, days, months, years.
