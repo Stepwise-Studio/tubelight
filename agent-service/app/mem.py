@@ -51,7 +51,7 @@ create table if not exists mem_episodes (
   text text not null,
   occurred_at timestamptz not null,
   hash text not null,
-  extracted smallint not null default 0,  -- extractor VERSION that processed it; 0 waiting, -1 gave up
+  extracted smallint not null default 0,  -- extractor VERSION that processed it; 0 waiting, -VERSION gave up
   attempts smallint not null default 0,
   created_at timestamptz not null default now(),
   unique (owner, hash)
@@ -116,6 +116,13 @@ async def setup(pool=None) -> None:
         for stmt in re.sub(r"--[^\n]*", "", SCHEMA).split(";"):
             if stmt.strip():
                 await conn.execute(stmt)
+        # a new extractor re-reads what an older one read or gave up on (restatements are recognised, not duplicated)
+        await conn.execute("update mem_episodes set extracted = 0, attempts = 0 where extracted not in (0, %s, %s)",
+                           (VERSION, -VERSION))
+        # people with nothing on record and no number or email to recognise them by
+        await conn.execute("delete from mem_entities e where kind <> 'user' and created_at < now() - interval '1 day' "
+                           "and not exists (select 1 from mem_facts f where f.subject = e.id) "
+                           "and not exists (select 1 from mem_entity_ids i where i.entity = e.id)")
 
 
 def ready() -> bool:
@@ -448,6 +455,11 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
             await _source(old["id"], ep, d.get("quote"), field)
             await _q("update mem_entities set touched_at = now() where id = %s", old["subject"])
             out[field] += 1
+    named = [v for k, v in refs.items() if v and known.get(k) != v]  # entities this plan created or matched by name
+    if named:  # keep someone only once a fact about them survived checking, or we can recognise them by a number
+        await _q("delete from mem_entities e where owner = %s and id = any(%s::uuid[]) and kind <> 'user' "
+                 "and not exists (select 1 from mem_facts f where f.subject = e.id) "
+                 "and not exists (select 1 from mem_entity_ids i where i.entity = e.id)", owner, named)
     return out
 
 
@@ -553,8 +565,8 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
             limited = "429" in str(e) or "rate" in str(e).lower() or "quota" in str(e).lower()
             log.warning("memory: extraction failed (%s)", str(e)[:200])
             if not limited:  # a rate limit isn't the batch's fault: don't count it against its attempts
-                await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then -1 "
-                         "else extracted end where id = any(%s)", ids)
+                await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then %s "
+                         "else extracted end where id = any(%s)", -VERSION, ids)
             break  # try again next tick
     for o in owners if len(batches) <= max_batches else ():  # profiles once the backlog is through
         try:
@@ -604,10 +616,28 @@ def _line(f: dict[str, Any]) -> str:
     return f"- {_when(f)}{f['text']}{tail}{src}"
 
 
+_COLS = ("id, subject, kind, text, valid_from, valid_to, status, trust, due, done, (select ep.source from mem_fact_sources s "
+         "join mem_episodes ep on ep.id = s.episode where s.fact = mem_facts.id and s.role = 'says' "
+         "order by ep.occurred_at limit 1) as origin")
+
+
+def _fit(blocks: list[tuple[str, list[str]]], budget: int) -> str:
+    """Blocks of (heading, lines) within budget characters: whole lines go, from the end of whichever block is longest,
+    so every section keeps its best lines and nothing is cut mid-sentence. A block left with no lines goes."""
+    blocks = [(h, list(ls)) for h, ls in blocks if ls]
+    render = lambda: "\n\n".join(h + "\n" + "\n".join(ls) for h, ls in blocks)  # noqa: E731
+    while blocks and len(render()) > budget:
+        h, ls = max(blocks, key=lambda b: len(b[1]))
+        ls.pop()
+        blocks = [b for b in blocks if b[1]]
+    return render()
+
+
 async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, ...] = (), brief: bool = False,
                  budget: int = 3500) -> str:
     """What memory holds for this moment, as notes for a prompt. brief: also the user's preferences and open
-    commitments (a teammate's turn). Empty when nothing is on record."""
+    commitments (a teammate's turn). Empty when nothing is on record. Only for the user's own teammates: someone
+    outside (a caller) gets `about_caller`."""
     if not ready():
         return ""
     words = {w for w in _norm(" ".join([query, *names])).split() if len(w) > 2}
@@ -628,15 +658,12 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
     # full-name matches first ("Priya Shah" over every Priya)
     hit.sort(key=lambda e: -len(words & set(_norm(e["name"]).split())))
     hit = hit[:5]
-    sections: list[str] = []
+    blocks: list[tuple[str, list[str]]] = []
     seen: set = set()
-    cols = ("id, subject, kind, text, valid_from, valid_to, status, trust, due, done, (select ep.source from mem_fact_sources s "
-            "join mem_episodes ep on ep.id = s.episode where s.fact = mem_facts.id and s.role = 'says' "
-            "order by ep.occurred_at limit 1) as origin")
     for e in hit:
         # its own facts, and others that name it ("Jayanth owes Ananya the deck" may sit on Jayanth)
         pats = [rf"\m{re.escape(n)}\M" for n in [e["name"], *e["aliases"]] if len(n) > 2]
-        facts = await _q(f"select {cols} from mem_facts where owner = %s and status in ('current', 'closed') "
+        facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'closed') "
                          "and (subject = %s or text ~* any(%s)) order by subject = %s desc, status = 'current' desc, "
                          "learned_at desc limit 14", owner, e["id"], pats, e["id"])
         facts = [f for f in facts if f["id"] not in seen]
@@ -644,14 +671,14 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         old = [f for f in facts if f["status"] == "closed"][:3]
         seen |= {f["id"] for f in cur + old}
         head = f"{e['name']} ({e['kind']}" + (f", also called {', '.join(e['aliases'][:4])}" if e["aliases"] else "") + ")"
-        body = (f"\n  {e['profile']}" if e["profile"] else "") + "".join(f"\n  {_line(f)}" for f in cur + old)
-        sections.append(head + (":" + body if body else ""))
+        blocks.append(((f"People and things this is about:\n" if not blocks else "") + head + ":",
+                       ([f"  {e['profile']}"] if e["profile"] else []) + [f"  {_line(f)}" for f in cur + old] or ["  (nothing more on record)"]))
     found = []
     if query.strip():
         vec = _vec((await memory.embed([query[:500]]))[0])
         # bge-small puts unrelated facts at ~0.5 cosine and related ones at 0.6+; words that match count too
         found = await _q(
-            f"select * from (select {cols}, 1 - (embedding <=> %s::vector) as cos, ts_rank(tsv, q) as tr, "
+            f"select * from (select {_COLS}, 1 - (embedding <=> %s::vector) as cos, ts_rank(tsv, q) as tr, "
             "learned_at, confidence from mem_facts, plainto_tsquery('english', %s) q where owner = %s "
             "and status = 'current') x where cos >= 0.6 or tr > 0 order by 0.6 * cos + 0.25 * least(1, tr * 10) "
             "+ 0.1 * exp(-extract(epoch from now() - learned_at) / 86400 / 60) + 0.05 * confidence desc limit 10",
@@ -659,23 +686,42 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         top = max((f["cos"] for f in found), default=0)  # the floor moves with the query: keep the near-best only
         found = [f for f in found if f["id"] not in seen and (f["cos"] >= top - 0.08 or f["tr"] > 0)]
         seen |= {f["id"] for f in found}
-    out = []
-    if sections:
-        out.append("People and things this is about:\n" + "\n".join(sections))
-    if found:
-        out.append("Related facts:\n" + "\n".join(_line(f) for f in found))
+    blocks.append(("Related facts:", [_line(f) for f in found]))
     if brief:
         me = await user_entity(owner)
-        prefs = await _q(f"select {cols} from mem_facts where subject = %s and kind = 'preference' and status = 'current' "
+        prefs = await _q(f"select {_COLS} from mem_facts where subject = %s and kind = 'preference' and status = 'current' "
                          "order by learned_at desc limit 12", me)
-        owed = await _q(f"select {cols} from mem_facts where owner = %s and kind = 'commitment' and status = 'current' "
+        owed = await _q(f"select {_COLS} from mem_facts where owner = %s and kind = 'commitment' and status = 'current' "
                         "and done is not true order by due nulls last, learned_at desc limit 10", owner)
-        prefs, owed = [f for f in prefs if f["id"] not in seen], [f for f in owed if f["id"] not in seen]
-        if prefs:
-            out.append("How the user likes things:\n" + "\n".join(_line(f) for f in prefs))
-        if owed:
-            out.append("Open commitments:\n" + "\n".join(_line(f) for f in owed))
-    return "\n\n".join(out)[:budget]
+        blocks.append(("How the user likes things:", [_line(f) for f in prefs if f["id"] not in seen]))
+        blocks.append(("Open commitments:", [_line(f) for f in owed if f["id"] not in seen]))
+    return _fit(blocks, budget)
+
+
+async def about_caller(owner: str, name: str, phone: str = "", budget: int = 2500) -> str:
+    """What an assistant speaking to someone outside (the call stand-in) may know: facts about that person or naming
+    them, current only, never sensitive, and no open search over the rest of memory. Enforced here, not in a prompt.
+    Profiles are left out: they're written from all of a person's facts, sensitive ones included."""
+    if not ready():
+        return ""
+    ent = None
+    if phone and _phone(phone):
+        row = await _q("select e.id, e.kind, e.name, e.aliases from mem_entity_ids i join mem_entities e on e.id = i.entity "
+                       "where i.owner = %s and i.type = 'phone' and i.value = %s", owner, _phone(phone))
+        ent = row[0] if row else None
+    if not ent and name.strip():
+        rows = await _q("select id, kind, name, aliases from mem_entities where owner = %s and kind <> 'user' and "
+                        "(lower(name) = lower(%s) or exists (select 1 from unnest(aliases) a where lower(a) = lower(%s)))",
+                        owner, name.strip(), name.strip())
+        ent = rows[0] if len(rows) == 1 else None  # two people share the name: can't tell which one is calling
+    if not ent:
+        return ""
+    pats = [rf"\m{re.escape(n)}\M" for n in [ent["name"], *ent["aliases"]] if len(n) > 2]
+    facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status = 'current' and not sensitive "
+                     "and (subject = %s or text ~* any(%s)) order by subject = %s desc, learned_at desc limit 15",
+                     owner, ent["id"], pats, ent["id"])
+    head = f"{ent['name']} ({ent['kind']}" + (f", also called {', '.join(ent['aliases'][:4])}" if ent["aliases"] else "") + "):"
+    return _fit([(head, [f"  {_line(f)}" for f in facts] or ["  (nothing more on record)"])], budget)
 
 
 # ------------------------------------------------------------------ forgetting, backfill

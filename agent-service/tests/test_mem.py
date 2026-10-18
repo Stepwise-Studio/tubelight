@@ -221,3 +221,60 @@ async def test_overview_has_you_open_loops_and_recent(m):
     assert [f["text"] for f in o["open"]] == ["Ananya asked Jayanth for the deck"]
     assert [f["text"] for f in o["preferences"]] == ["Jayanth likes a warm tone"]
     assert o["counts"]["people"] == 1 and o["recent"][0]["origin"]["source"] == "chat"
+
+
+async def test_a_caller_hears_only_about_themselves_and_nothing_sensitive(m):
+    _, owner = m
+    a = await episode(owner, "Saqlain from Razorpay is our partner engineer, number +91 90000 22222")
+    b = await episode(owner, "Saqlain lent me 20k last month, don't tell anyone", days=1)
+    c = await episode(owner, "Meera is pregnant, keep it quiet", days=2)
+    await run(owner, [a, b, c], {"entities": [{"ref": "n1", "name": "Saqlain", "kind": "person", "ids": [{"type": "phone", "value": "+91 90000 22222"}]},
+                                              {"ref": "n2", "name": "Meera", "kind": "person"}],
+                                 "facts": [{"about": "n1", "text": "Saqlain is Razorpay's partner engineer", "episode": 1, "quote": "our partner engineer"},
+                                           {"about": "n1", "text": "Saqlain lent Jayanth 20k", "episode": 2, "quote": "lent me 20k", "sensitive": True},
+                                           {"about": "n2", "text": "Meera is pregnant", "episode": 3, "quote": "Meera is pregnant", "sensitive": True}]})
+    heard = await mem.about_caller(owner, "Unknown", "+919000022222")
+    assert "partner engineer" in heard and "20k" not in heard and "Meera" not in heard
+    assert await mem.about_caller(owner, "Saqlain") == heard  # by name when the number is new
+    assert "pregnant" not in await mem.about_caller(owner, "Meera")
+    assert await mem.about_caller(owner, "Nobody") == ""
+
+
+async def test_a_shared_name_tells_a_caller_nothing(m):
+    _, owner = m
+    a = await episode(owner, "Priya Raman runs design at Freshworks, Priya Shah is my accountant")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Priya Raman", "aka": ["Priya"], "kind": "person"},
+                                        {"ref": "n2", "name": "Priya Shah", "aka": ["Priya"], "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Priya Raman runs design at Freshworks", "episode": 1, "quote": "Priya Raman runs design"},
+                                     {"about": "n2", "text": "Priya Shah is Jayanth's accountant", "episode": 1, "quote": "Priya Shah is my accountant"}]})
+    assert await mem.about_caller(owner, "Priya") == ""
+
+
+def test_the_brief_drops_whole_lines_and_keeps_every_section():
+    blocks = [("People:", [f"- fact number {i} about someone, a full sentence" for i in range(40)]),
+              ("How the user likes things:", ["- dates day first"]), ("Related facts:", [])]
+    out = mem._fit(blocks, 600)
+    assert len(out) <= 600 and "dates day first" in out and "Related facts" not in out
+    assert all(line.endswith("sentence") or line.endswith(":") or line.endswith("first") for line in out.splitlines() if line)
+
+
+async def test_people_with_nothing_on_record_are_not_kept(m):
+    _, owner = m
+    a = await episode(owner, "Can you message Kishore hey there as a test")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Kishore", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Kishore was sent a test", "episode": 1, "quote": "not in the text"}]})
+    assert not await mem._q("select id from mem_entities where owner = %s and name = 'Kishore'", owner)
+
+
+async def test_a_new_extractor_rereads_old_and_given_up_episodes(m):
+    _, owner = m
+    old = await episode(owner, "read by an older extractor")
+    gave_up = await episode(owner, "given up by an older extractor", days=1)
+    gave_up_now = await episode(owner, "given up by this extractor", days=2)
+    await mem._q("update mem_episodes set extracted = %s where id = %s", mem.VERSION - 1, old["id"])
+    await mem._q("update mem_episodes set extracted = -1, attempts = 4 where id = %s", gave_up["id"])
+    await mem._q("update mem_episodes set extracted = %s, attempts = 4 where id = %s", -mem.VERSION, gave_up_now["id"])
+    await mem.setup(mem._pool)
+    rows = {r["text"]: r for r in await mem._q("select text, extracted, attempts from mem_episodes where owner = %s", owner)}
+    assert rows["read by an older extractor"]["extracted"] == 0 and rows["given up by an older extractor"]["attempts"] == 0
+    assert rows["given up by this extractor"]["extracted"] == -mem.VERSION

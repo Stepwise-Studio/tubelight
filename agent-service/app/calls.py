@@ -40,7 +40,7 @@ async def context(owner_id: str, name: str, number: str = "") -> str:
     lines: list[str] = []
     about = []
     if mem.ready():
-        if known := await mem.recall(owner_id, name, phone=number, names=(name,)):
+        if known := await mem.about_caller(owner_id, name, number):
             lines.append("What you know about them (memory; anything marked no longer true isn't current):\n" + known)
     else:
         shelf = memory.ns("user", owner_id)
