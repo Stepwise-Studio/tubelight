@@ -354,4 +354,4 @@ async def test_a_long_message_is_kept_whole_and_a_journal_is_read_a_paragraph_at
     journal = [r["text"] for r in rows if r["ref"] == "t-journal"]
     assert len(journal) == 5 and journal[0].startswith("Paragraph 0")
     batches = [b for b in await mem._batches(owner, force=True) if b[0]["ref"] == "t-journal"]
-    assert all(sum(len(e["text"]) for e in b) <= mem.JOURNAL_BATCH or len(b) == 1 for b in batches) and len(batches) >= 3
+    assert len(batches) == 5 and all(len(b) == 1 for b in batches)

@@ -164,9 +164,9 @@ def _phone(v: str) -> str:
 
 # ------------------------------------------------------------------ episodes
 CHUNK = 3000  # a long message is kept as pieces of at most this (paragraph, then sentence breaks), never cut off
-# What the user tells their memory is read a paragraph or two at a time: on a 5,000-character life story the extractor
-# found 10 facts read whole, 16 in two pieces and 21 a paragraph at a time (same model).
-JOURNAL_BATCH = 1500
+# What the user tells their memory is read a paragraph at a time: on a 5,000-character life story the extractor found
+# 10 facts read whole, 16 in two pieces and 21 a paragraph at a time (same model); two short paragraphs read together
+# once came back empty.
 
 
 def _chunks(text: str, size: int = CHUNK) -> list[str]:
@@ -641,8 +641,8 @@ async def _batches(owner: str | None = None, force: bool = False) -> list[list[d
             continue
         batch, size = [], 0
         for e in g:
-            limit = JOURNAL_BATCH if e["source"] == "journal" or any(x["source"] == "journal" for x in batch) else BATCH_CHARS
-            if batch and size + len(e["text"]) > limit:
+            alone = e["source"] == "journal" or any(x["source"] == "journal" for x in batch)  # a journal paragraph: on its own
+            if batch and (alone or size + len(e["text"]) > BATCH_CHARS):
                 out.append(batch)
                 batch, size = [], 0
             batch.append(e)
