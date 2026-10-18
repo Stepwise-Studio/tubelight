@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -30,13 +31,22 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from . import config, db, llm, memory
 
 log = logging.getLogger(__name__)
-VERSION = 4  # extractor version: episodes processed by an older one can be re-run after a prompt change
+VERSION = 5  # extractor version: episodes processed by an older one can be re-run after a prompt change
 QUIET = timedelta(seconds=90)  # a conversation is extracted once it's been quiet this long
 BATCH_CHARS = 6000
 SAME = 0.92  # cosine similarity above which a new fact restates a known one
 TRUST = {2: "the user", 1: "a teammate", 0: "outside"}
 KINDS = ("trait", "relation", "event", "commitment", "preference")
 ENTITY_KINDS = ("person", "org", "project", "place", "thing")
+# The salience gate (docs/memory-v3.html §5.2): p = σ(b0 + Σ w·x), the chance a fact will be needed later.
+# Starting weights; refit with `python -m evals.gate` on labelled history. KEEP from a 1:3 cost of storing junk vs
+# missing something (θ = 1/(1+3)); between KEEP and SURE a fact is tentative: kept quietly, promoted if it comes up again.
+GATE = {"b0": -3.5, "imp": 3.0, "dur": 2.5, "nov": 1.5, "tr": 1.0, "ex": 2.0, "rep": 1.0}
+KEEP, SURE = 0.25, 0.5
+FADE = timedelta(days=30)  # ponytail: a tentative fact fades after 30 days unrestated; ACT-R activation replaces this (P3)
+IMPORTANCE = {"trivial": 0.1, "minor": 0.3, "useful": 0.5, "important": 0.7, "critical": 0.9}
+LASTS = {"hours": 0.0, "days": 0.33, "months": 0.66, "years": 1.0}
+_EXPLICIT = re.compile(r"\b(remember|don'?t forget|keep in mind|note (?:that|this))\b", re.I)
 
 _pool = None
 
@@ -90,11 +100,15 @@ create table if not exists mem_facts (
   due date,
   done boolean,
   sensitive boolean not null default false,
-  status text not null default 'current',  -- current | closed (replaced) | retracted (shown wrong)
+  status text not null default 'current',  -- current | tentative (unsure) | faded | closed (replaced) | retracted (wrong)
   embedding vector(384),
   tsv tsvector generated always as (to_tsvector('english', text)) stored
 );
 create index if not exists mem_facts_subject on mem_facts (owner, subject, status);
+alter table mem_facts add column if not exists importance real;
+alter table mem_facts add column if not exists salience real;  -- the gate's p when written
+alter table mem_facts add column if not exists gate jsonb;      -- its inputs, so a restatement can recompute p
+alter table mem_facts add column if not exists seen smallint not null default 1;  -- times stated
 create index if not exists mem_facts_tsv on mem_facts using gin (tsv);
 create table if not exists mem_fact_sources (
   fact uuid not null references mem_facts(id) on delete cascade,
@@ -291,6 +305,9 @@ Rules:
 - sensitive: true for health, money, family matters and other private topics.
 - Entities: reuse a known id ("same_as") when it's the same one, even under another name or nickname. New ones get
   a ref like "n1". Add phone numbers, emails and handles you see for them under "ids".
+- importance: how much having this later would matter to {user}: trivial (tests of the app, one-off device
+  commands, "please ignore"), minor, useful, important (people, work, studies, money, health, plans), critical.
+- lasts: how long it stays true or relevant: hours, days, months, years.
 - Most episodes need nothing. Return empty lists then.
 
 Reply with JSON only:
@@ -298,7 +315,8 @@ Reply with JSON only:
   "same_as": "known id or null", "ids": [{{"type": "phone|email|handle", "value": "..."}}]}}],
  "facts": [{{"about": "known id | n1 | user", "kind": "trait|relation|event|commitment|preference", "text": "...",
   "since": "YYYY-MM-DD or null", "due": "YYYY-MM-DD or null", "episode": 1, "quote": "...", "replaces": ["F1"],
-  "confidence": 0.9, "sensitive": false}}],
+  "confidence": 0.9, "sensitive": false, "importance": "trivial|minor|useful|important|critical",
+  "lasts": "hours|days|months|years"}}],
  "done": [{{"fact": "F2", "episode": 1, "quote": "..."}}],
  "wrong": [{{"fact": "F3", "episode": 1, "quote": "..."}}]}}"""
 
@@ -324,6 +342,35 @@ def _new_words(new: str, old: str) -> set[str]:
     return key(new) - key(old) - {w.lower() for w in old.split()}
 
 
+_STARTERS = {"I", "I'm", "I've", "I'll", "OK", "Ok", "AM", "PM", "IST", "UTC"}
+
+
+def _keys(t: str) -> set[str]:
+    """Names, numbers and addresses: capitalised words that don't start a sentence, 3+ digit numbers, emails, links."""
+    found = re.finditer(r"(?<![.!?:\n]\s)(?<!^)\b[A-Z][\w'-]+|\b\d[\d,.]{2,}\b|\S+@\S+\.\w+|https?://\S+", t)
+    return {m.group(0).lower().strip(".,") for m in found if m.group(0) not in _STARTERS}
+
+
+def _worth_reading(ep: dict[str, Any], said: str) -> bool:
+    """Stage 0 of the gate, no model: can this episode hold anything lasting? Unsure means yes: what's skipped here is
+    never read (until a new extractor version). Drops greetings, slash commands, and teammate replies that bring no name,
+    number or address beyond what the user said ("Done.", "Timer set for 2 minutes.")."""
+    t = ep["text"].strip()
+    if ep["trust"] == 0 or ep["source"] != "chat":
+        return True
+    if t.startswith("/") and len(t) < 40:
+        return False
+    if ep["trust"] == 2:
+        return len(re.findall(r"[\w'-]+", t)) > 4 or bool(_keys(t)) or bool(re.search(r"\d", t))
+    return bool(_keys(t) - _keys(said) - set(said.lower().split()))
+
+
+def _salience(g: dict[str, float], seen: int = 1) -> float:
+    """The gate's p for a fact's inputs, stated `seen` times."""
+    z = GATE["b0"] + sum(GATE[k] * g.get(k, 0) for k in ("imp", "dur", "nov", "tr", "ex")) + GATE["rep"] * math.log(seen)
+    return 1 / (1 + math.exp(-z))
+
+
 def _quoted(quote: str, text: str) -> bool:
     q = _norm(quote)
     return len(q) >= 3 and q in _norm(text)
@@ -344,7 +391,14 @@ async def _roster(owner: str) -> list[str]:
 
 
 async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) -> dict[str, int]:
-    """One model call over a batch of episodes (one conversation, oldest first): entities, facts, completions."""
+    """One model call over a batch of episodes (one conversation, oldest first): entities, facts, completions.
+    Episodes stage 0 rules out aren't sent; a batch with nothing left costs no call."""
+    said = " ".join(e["text"] for e in episodes if e["trust"] == 2)
+    skipped = len(episodes)
+    episodes = [e for e in episodes if _worth_reading(e, said)]
+    skipped -= len(episodes)
+    if not episodes:
+        return {"facts": 0, "stage0": skipped}
     text = "\n".join(e["text"] for e in episodes)
     me = await user_entity(owner, user_name)
     cands = await _candidates(owner, text)
@@ -369,13 +423,14 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]]) ->
     res = await _model().ainvoke([SystemMessage(prompt), HumanMessage(eps)])
     plan = _parse(res.text)
     log.debug("memory plan: %s", plan)
-    return await apply(owner, plan, episodes, known, fids)
+    return {**await apply(owner, plan, episodes, known, fids), "stage0": skipped}
 
 
 async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]], known: dict[str, str],
                 fids: dict[str, dict[str, Any]]) -> dict[str, int]:
     """Check and write an extraction plan. Everything the model says is verified here; nothing is taken on trust."""
-    out = {"facts": 0, "same": 0, "closed": 0, "done": 0, "wrong": 0, "dropped": 0}
+    out: dict[str, Any] = {"facts": 0, "tentative": 0, "skipped": 0, "promoted": 0, "same": 0, "closed": 0, "done": 0,
+                           "wrong": 0, "dropped": 0, "decisions": []}
     refs = dict(known)
     for e in plan.get("entities") or []:
         if not isinstance(e, dict):
@@ -406,17 +461,37 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
             continue
         vec = (await memory.embed([text]))[0]
         replaced = {str(fids[str(k)]["id"]) for k in f.get("replaces") or [] if str(k) in fids}
-        near = await _q("select id, status, trust, text from mem_facts where owner = %s and subject = %s "
-                        "and status in ('current', 'retracted') and 1 - (embedding <=> %s::vector) >= %s "
+        near = await _q("select id, status, trust, text, seen, gate from mem_facts where owner = %s and subject = %s "
+                        "and status in ('current', 'tentative', 'retracted') and 1 - (embedding <=> %s::vector) >= %s "
                         "order by embedding <=> %s::vector limit 3", owner, subject, _vec(vec), SAME, _vec(vec))
         # embeddings put "works at Swiggy" next to "works at Zomato": a restatement adds no new name or number
         same = [r for r in near if str(r["id"]) not in replaced and not _new_words(text, r["text"])][:1]
-        if same and (same[0]["status"] == "current" or ep["trust"] < 2):  # restated, or shown wrong and not reinstated
-            if same[0]["status"] == "current":
-                await _q("update mem_facts set confidence = least(1, confidence + 0.05), trust = greatest(trust, %s) "
-                         "where id = %s", ep["trust"], same[0]["id"])
-                await _source(same[0]["id"], ep, f.get("quote"))
+        live = same and same[0]["status"] in ("current", "tentative")
+        if same and (live or ep["trust"] < 2):  # restated, or shown wrong and not reinstated
+            if live:
+                old = same[0]
+                g = {**(old["gate"] or {}), "tr": max((old["gate"] or {}).get("tr", 0), ep["trust"] / 2)}
+                p = _salience(g, old["seen"] + 1) if old["gate"] else 1.0
+                up = old["status"] == "tentative" and p >= SURE  # it came up again: a tentative fact is promoted
+                await _q("update mem_facts set confidence = least(1, confidence + 0.05), trust = greatest(trust, %s), "
+                         "seen = seen + 1, gate = %s, salience = %s, status = %s where id = %s", ep["trust"],
+                         json.dumps(g) if old["gate"] else None, p, "current" if up else old["status"], old["id"])
+                await _source(old["id"], ep, f.get("quote"))
+                out["promoted"] += up
             out["same"] += 1
+            out["decisions"].append({"episode": str(ep["id"]), "text": text, "status": "same"})
+            continue
+        # the gate: how likely is this to be needed later?
+        near_any = await _q("select max(1 - (embedding <=> %s::vector)) as c from mem_facts where owner = %s and subject = %s "
+                            "and status in ('current', 'tentative')", _vec(vec), owner, subject)
+        g = {"imp": IMPORTANCE.get(str(f.get("importance")), 0.5), "dur": LASTS.get(str(f.get("lasts")), 0.66),
+             "nov": round(1 - max(0.0, near_any[0]["c"] or 0.0), 3), "tr": ep["trust"] / 2,
+             "ex": 1.0 if ep["source"] == "journal" or _EXPLICIT.search(ep["text"]) else 0.0}
+        p = _salience(g)
+        status = "current" if p >= SURE else "tentative" if p >= KEEP else None
+        out["decisions"].append({"episode": str(ep["id"]), "text": text, "gate": g, "p": round(p, 3), "status": status})
+        if not status:
+            out["skipped"] += 1
             continue
         since = _day(f.get("since")) or ep["occurred_at"].date()
         try:
@@ -425,14 +500,16 @@ async def apply(owner: str, plan: dict[str, Any], episodes: list[dict[str, Any]]
             conf = 0.8
         conf = min(conf, 0.6) if ep["trust"] == 0 else conf
         row = await _q("insert into mem_facts (owner, subject, kind, text, valid_from, confidence, trust, due, done, "
-                       "sensitive, embedding) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector) returning id",
+                       "sensitive, embedding, status, importance, salience, gate) values (%s, %s, %s, %s, %s, %s, %s, %s, "
+                       "%s, %s, %s::vector, %s, %s, %s, %s) returning id",
                        owner, subject, kind, text, since, conf, ep["trust"], _day(f.get("due")),
-                       False if kind == "commitment" else None, bool(f.get("sensitive")), _vec(vec))
+                       False if kind == "commitment" else None, bool(f.get("sensitive")), _vec(vec), status, g["imp"], p,
+                       json.dumps(g))
         fid = row[0]["id"]
         await _source(fid, ep, f.get("quote"))
         await _q("update mem_entities set touched_at = now() where id = %s", subject)
-        out["facts"] += 1
-        for k in f.get("replaces") or []:
+        out["facts" if status == "current" else "tentative"] += 1
+        for k in (f.get("replaces") or []) if status == "current" else ():  # only a fact we're sure of replaces one
             old = fids.get(str(k))
             if old and old["trust"] <= ep["trust"]:  # never overrides someone more trusted
                 await _q("update mem_facts set status = 'closed', valid_to = %s where id = %s and status = 'current'",
@@ -559,7 +636,7 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
         try:
             res = await extract(o, names[o], batch)
             await _q("update mem_episodes set extracted = %s where id = any(%s)", VERSION, ids)
-            log.info("memory: %d episodes -> %s", len(batch), res)
+            log.info("memory: %d episodes -> %s", len(batch), {k: v for k, v in res.items() if k != "decisions"})
             done += 1
         except Exception as e:
             limited = "429" in str(e) or "rate" in str(e).lower() or "quota" in str(e).lower()
@@ -568,6 +645,8 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
                 await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then %s "
                          "else extracted end where id = any(%s)", -VERSION, ids)
             break  # try again next tick
+    # tentative facts nobody came back to fade (hidden from recall, kept on record); each restatement buys more time
+    await _q("update mem_facts set status = 'faded' where status = 'tentative' and learned_at < now() - %s * seen", FADE)
     for o in owners if len(batches) <= max_batches else ():  # profiles once the backlog is through
         try:
             await consolidate(o, names[o])
@@ -612,6 +691,7 @@ def _line(f: dict[str, Any]) -> str:
     if f["kind"] == "commitment":
         tail = f" (done {f['valid_to']:%Y-%m-%d})" if f["done"] and f.get("valid_to") else " (done)" if f["done"] else \
             f" (open, due {f['due']})" if f["due"] else " (open)"
+    tail += " (not sure yet)" if f["status"] == "tentative" else ""
     src = "" if f["trust"] else " (said on a call)" if f.get("origin") == "call" else " (from an email or app, unconfirmed)"
     return f"- {_when(f)}{f['text']}{tail}{src}"
 
@@ -663,11 +743,11 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
     for e in hit:
         # its own facts, and others that name it ("Jayanth owes Ananya the deck" may sit on Jayanth)
         pats = [rf"\m{re.escape(n)}\M" for n in [e["name"], *e["aliases"]] if len(n) > 2]
-        facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'closed') "
+        facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'tentative', 'closed') "
                          "and (subject = %s or text ~* any(%s)) order by subject = %s desc, status = 'current' desc, "
-                         "learned_at desc limit 14", owner, e["id"], pats, e["id"])
+                         "learned_at desc limit 16", owner, e["id"], pats, e["id"])
         facts = [f for f in facts if f["id"] not in seen]
-        cur = [f for f in facts if f["status"] == "current"][:10]
+        cur = [f for f in facts if f["status"] == "current"][:10] + [f for f in facts if f["status"] == "tentative"][:3]
         old = [f for f in facts if f["status"] == "closed"][:3]
         seen |= {f["id"] for f in cur + old}
         head = f"{e['name']} ({e['kind']}" + (f", also called {', '.join(e['aliases'][:4])}" if e["aliases"] else "") + ")"
@@ -680,7 +760,8 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         found = await _q(
             f"select * from (select {_COLS}, 1 - (embedding <=> %s::vector) as cos, ts_rank(tsv, q) as tr, "
             "learned_at, confidence from mem_facts, plainto_tsquery('english', %s) q where owner = %s "
-            "and status = 'current') x where cos >= 0.6 or tr > 0 order by 0.6 * cos + 0.25 * least(1, tr * 10) "
+            "and status in ('current', 'tentative')) x where (status = 'current' or cos >= 0.7) "  # unsure: only if close
+            "and (cos >= 0.6 or tr > 0) order by 0.6 * cos + 0.25 * least(1, tr * 10) "
             "+ 0.1 * exp(-extract(epoch from now() - learned_at) / 86400 / 60) + 0.05 * confidence desc limit 10",
             vec, query[:500], owner)
         top = max((f["cos"] for f in found), default=0)  # the floor moves with the query: keep the near-best only

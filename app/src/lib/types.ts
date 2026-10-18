@@ -244,7 +244,7 @@ export interface Fact {
   due: string | null
   done: boolean | null
   sensitive: boolean
-  status: 'current' | 'closed' | 'retracted'
+  status: 'current' | 'tentative' | 'faded' | 'closed' | 'retracted'
   sources: FactSource[]
 }
 

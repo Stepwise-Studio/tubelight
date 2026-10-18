@@ -23,6 +23,8 @@ const ID_ICON = { phone: Call02Icon, email: Mail01Icon, handle: AtIcon }
 function meta(f: Fact) {
   const from = f.trust === 0 ? 'unconfirmed, from outside content' : f.trust === 2 ? 'you said' : 'a teammate said'
   if (f.status === 'retracted') return `Wrong${f.valid_to ? `, corrected ${shortDate(f.valid_to)}` : ''}`
+  if (f.status === 'tentative') return `Not sure yet · ${from}`
+  if (f.status === 'faded') return `Faded: it never came up again · ${from}`
   if (f.status === 'closed') return `${f.valid_from ? `${shortDate(f.valid_from)} to ` : 'Until '}${f.valid_to ? shortDate(f.valid_to) : 'later'} · no longer true`
   if (f.kind === 'commitment') {
     if (f.done) return `Done${f.valid_to ? ` ${shortDate(f.valid_to)}` : ''}`
@@ -90,7 +92,8 @@ export default function PersonScreen() {
 
   const owed = p.facts.filter((f) => f.status === 'current' && f.kind === 'commitment' && !f.done)
   const now = p.facts.filter((f) => f.status === 'current' && !owed.includes(f) && !(f.kind === 'commitment' && f.done))
-  const earlier = p.facts.filter((f) => !owed.includes(f) && !now.includes(f))
+  const unsure = p.facts.filter((f) => f.status === 'tentative')
+  const earlier = p.facts.filter((f) => !owed.includes(f) && !now.includes(f) && !unsure.includes(f))
 
   return (
     <View style={{ flex: 1 }}>
@@ -117,6 +120,7 @@ export default function PersonScreen() {
 
         {owed.length > 0 && <Group title="Open" facts={owed} onOpen={setOpen} />}
         {now.length > 0 && <Group title="What's true now" facts={now} onOpen={setOpen} />}
+        {unsure.length > 0 && <Group title="Not sure yet" facts={unsure} onOpen={setOpen} />}
         {earlier.length > 0 && <Group title="Earlier" facts={earlier} onOpen={setOpen} />}
         {p.facts.length === 0 && <Text variant="caption" color="ink3" align="center">Nothing on record about them yet.</Text>}
       </ScrollView>

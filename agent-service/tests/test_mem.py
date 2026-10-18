@@ -278,3 +278,55 @@ async def test_a_new_extractor_rereads_old_and_given_up_episodes(m):
     rows = {r["text"]: r for r in await mem._q("select text, extracted, attempts from mem_episodes where owner = %s", owner)}
     assert rows["read by an older extractor"]["extracted"] == 0 and rows["given up by an older extractor"]["attempts"] == 0
     assert rows["given up by this extractor"]["extracted"] == -mem.VERSION
+
+
+def test_stage0_reads_what_could_matter_and_drops_chatter():
+    said = "Can u see the deadlines i set for mlp and mlp project?"
+    ep = lambda text, trust=2, source="chat": {"text": text, "trust": trust, "source": source}  # noqa: E731
+    assert not mem._worth_reading(ep("Hey there"), said)
+    assert not mem._worth_reading(ep("/status"), said)
+    assert not mem._worth_reading(ep("Done. Timer cancelled.", 1), said)
+    assert mem._worth_reading(ep("Call Saqlain"), said)  # short, but names someone
+    assert mem._worth_reading(ep(said), said)
+    assert mem._worth_reading(ep("Found it: nischay@example.com (Nischay Rupakula).", 1), said)
+    assert mem._worth_reading(ep("ok", 0), said) and mem._worth_reading(ep("hi", 1, "note"), said)  # apps, notes: always
+
+
+PRIOR = {"b0": -3.5, "imp": 3.0, "dur": 2.5, "nov": 1.5, "tr": 1.0, "ex": 2.0, "rep": 1.0}  # fixed: refits can't break these
+
+
+async def test_the_gate_keeps_holds_or_skips_by_how_much_it_will_matter(m, monkeypatch):
+    monkeypatch.setattr(mem, "GATE", PRIOR)
+    _, owner = m
+    a = await episode(owner, "Send an SMS to Saqlain saying: Test from Tubelight, please ignore", trust=1, speaker="Shelby")
+    b = await episode(owner, "Kishore is a friend, I chat with him on WhatsApp", days=1)
+    c = await episode(owner, "I'm taking the MLP course this term, deadlines are in my calendar", days=2)
+    fact = lambda n, about, text, imp, lasts: {"about": about, "text": text, "episode": n, "quote": text.split()[0],  # noqa: E731
+                                               "importance": imp, "lasts": lasts}
+    res = await run(owner, [a, b, c], {"entities": [{"ref": "n1", "name": "Saqlain", "kind": "person"}, {"ref": "n2", "name": "Kishore", "kind": "person"}],
+                                       "facts": [fact(1, "n1", "Send test SMS to Saqlain", "trivial", "hours"),
+                                                 fact(2, "n2", "Kishore is Jayanth's friend on WhatsApp", "trivial", "hours"),
+                                                 fact(3, "user", "I'm taking the MLP course", "important", "months")]})
+    assert (res["skipped"], res["tentative"], res["facts"]) == (1, 1, 1)
+    assert await facts(owner) == ["I'm taking the MLP course"]
+    assert await facts(owner, "tentative") == ["Kishore is Jayanth's friend on WhatsApp"]
+    assert "not sure yet" in await mem.recall(owner, "Who is Kishore?")
+    assert "WhatsApp" not in await mem.about_caller(owner, "Kishore")  # callers never hear unsure things
+    # it keeps coming up: promoted
+    for day in (3, 4):
+        d = await episode(owner, f"Kishore my friend from WhatsApp says hi {day}", days=day)
+        res = await run(owner, [d], {"facts": [fact(1, "Kishore", "Kishore is Jayanth's friend on WhatsApp", "trivial", "hours")]})
+    assert res["promoted"] == 1 and "Kishore is Jayanth's friend on WhatsApp" in await facts(owner)
+
+
+async def test_unsure_facts_nobody_returns_to_fade(m, monkeypatch):
+    monkeypatch.setattr(mem, "GATE", PRIOR)
+    _, owner = m
+    a = await episode(owner, "Kishore is a friend, I chat with him on WhatsApp")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Kishore", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Kishore chats with Jayanth on WhatsApp", "episode": 1, "quote": "Kishore",
+                                      "importance": "trivial", "lasts": "hours"}]})
+    await mem._q("update mem_facts set learned_at = now() - interval '31 days' where owner = %s", owner)
+    await mem.tick(owner)
+    assert await facts(owner, "faded") == ["Kishore chats with Jayanth on WhatsApp"]
+    assert "WhatsApp" not in await mem.recall(owner, "Who is Kishore?")
