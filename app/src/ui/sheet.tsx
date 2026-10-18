@@ -16,7 +16,7 @@ import { ListRow } from './list-row'
 import { Portal } from './portal'
 import { Press } from './press'
 import { elevation } from './surface'
-import { Glass } from './glass'
+import { AnimatedSquircle } from './squircle'
 import { Radio } from './radio'
 import { Text } from './text'
 
@@ -99,13 +99,13 @@ function SheetBody({ open, onClose, onGone, title, children, accessibilityLabel 
           accessibilityLabel={accessibilityLabel ?? title}
           style={[{ position: 'absolute', left: 8, right: 8, bottom: Math.max(insets.bottom, 8), borderRadius: radius.sheet, maxHeight: screenH - insets.top - 24 }, elevation(scheme, 2), panel]}
         >
-          <Glass radius={radius.sheet} veil={0.92} style={{ paddingBottom: 12 }}>
+          <AnimatedSquircle style={{ borderRadius: radius.sheet, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, overflow: 'hidden', paddingBottom: 12 }}>
             <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: title ? 4 : 8 }}>
               <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: c.lineStrong }} />
             </View>
             {title && <Text variant="headline" style={{ paddingHorizontal: 20, paddingTop: 6, paddingBottom: 10 }} accessibilityRole="header">{title}</Text>}
             {children}
-          </Glass>
+          </AnimatedSquircle>
         </Animated.View>
       </GestureDetector>
     </View>
