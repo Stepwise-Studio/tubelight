@@ -163,19 +163,39 @@ def _phone(v: str) -> str:
 
 
 # ------------------------------------------------------------------ episodes
+CHUNK = 3000  # a long message is kept as pieces of at most this (paragraph, then sentence breaks), never cut off
+
+
+def _chunks(text: str, size: int = CHUNK) -> list[str]:
+    out, rest = [], text.strip()
+    while len(rest) > size:
+        cut = max(rest.rfind("\n\n", 0, size), rest.rfind("\n", 0, size))
+        if cut < size // 2:
+            cut = rest.rfind(". ", 0, size) + 1
+        if cut < size // 2:
+            cut = rest.rfind(" ", 0, size)
+        if cut < size // 2:
+            cut = size
+        out.append(rest[:cut].strip())
+        rest = rest[cut:].strip()
+    return [*out, rest] if rest else out
+
+
 async def log_episode(owner: str, source: str, text: str, *, trust: int, ref: str = "", speaker: str = "",
                       at: datetime | None = None) -> None:
     """Record something that happened. Never raises: memory must not break a reply."""
     if not ready() or not (text or "").strip():
         return
     at = at or datetime.now(UTC)
-    h = hashlib.sha1(f"{source}|{ref}|{speaker}|{at.isoformat()}|{text}".encode()).hexdigest()
-    try:
-        await _q("insert into mem_episodes (owner, source, ref, speaker, trust, text, occurred_at, hash) "
-                 "values (%s, %s, %s, %s, %s, %s, %s, %s) on conflict (owner, hash) do nothing",
-                 owner, source, ref, speaker, trust, text[:4000], at, h)
-    except Exception:
-        log.exception("memory: logging an episode failed")
+    for k, part in enumerate(_chunks(text)):  # pieces keep their order a microsecond apart
+        t = at + timedelta(microseconds=k)
+        h = hashlib.sha1(f"{source}|{ref}|{speaker}|{t.isoformat()}|{part}".encode()).hexdigest()
+        try:
+            await _q("insert into mem_episodes (owner, source, ref, speaker, trust, text, occurred_at, hash) "
+                     "values (%s, %s, %s, %s, %s, %s, %s, %s) on conflict (owner, hash) do nothing",
+                     owner, source, ref, speaker, trust, part, t, h)
+        except Exception:
+            log.exception("memory: logging an episode failed")
 
 
 async def log_run(owner: str, thread_id: str, user_name: str, msgs: list, source: str = "chat") -> None:

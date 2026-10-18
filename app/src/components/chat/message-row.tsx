@@ -425,7 +425,7 @@ function UserMessage({ m, first, last, replyTo, highlighted }: {
           <Bubble side="right" first={first} last={last} tone="mine" highlighted={highlighted} style={{ opacity: m.local === 'sending' ? 0.6 : 1 }}>
             {m.reply_to && <ReplyQuote id={m.reply_to} target={replyTo} />}
             <Attachments items={m.meta.attachments} />
-            {!!m.text && <Text selectable>{renderMentions(m.text, m.meta.apps?.length ? new Set([...handles, ...m.meta.apps.map(appToken)]) : handles)}</Text>}
+            {!!m.text && <UserText text={m.text} known={m.meta.apps?.length ? new Set([...handles, ...m.meta.apps.map(appToken)]) : handles} />}
           </Bubble>
         </Pressable>
         <Reactions m={m} side="right" />
@@ -703,6 +703,20 @@ function ToolCalls({ calls }: { calls: { name: string; status: string }[] }) {
           ))}
         </View>
       </Collapse>
+    </View>
+  )
+}
+
+// Android can't lay out one selectable Text of thousands of characters: it measures empty and the bubble shrinks to
+// its padding. So a long message is one Text per paragraph, and a paragraph that's still huge isn't selectable (the
+// hold menu's Copy text has it all).
+const SELECTABLE_MAX = 1200
+
+function UserText({ text, known }: { text: string; known: Set<string> }) {
+  if (text.length <= SELECTABLE_MAX) return <Text selectable>{renderMentions(text, known)}</Text>
+  return (
+    <View style={{ gap: 8 }}>
+      {text.split(/\n{2,}/).map((p, i) => <Text key={i} selectable={p.length <= SELECTABLE_MAX}>{renderMentions(p.trim(), known)}</Text>)}
     </View>
   )
 }

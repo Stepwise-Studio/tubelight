@@ -1175,6 +1175,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             coroutine=spawn_helper, name="spawn_helper",
             description="Delegate a self-contained subtask (research, reading code, a small experiment) to a "
                         "short-lived helper with your read/draft tools. Returns its result. Give it all context it needs."))
+    if mind.is_memory(tm):  # not `remember`: the user's own words there are the evidence; paraphrases add duplicates
+        tools = [t for t in tools if t.name != "remember"]
     return tools
 
 

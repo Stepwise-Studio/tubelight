@@ -50,6 +50,8 @@ type Item = Draft & { att?: Attachment }
  * trailing action (mic when empty, send when there's something, stop while a run is live). Behind it there's no solid
  * band: the chat fades into the canvas and blurs more toward the bottom edge.
  */
+const TINT_MAX = 800
+
 export function Composer({ placeholder, members, live, onSend, onStop, replyTo, onCancelReply, onVoice, commands }: ComposerProps) {
   const { c, scheme } = useTheme()
   const insets = useSafeAreaInsets()
@@ -192,10 +194,14 @@ export function Composer({ placeholder, members, live, onSend, onStop, replyTo, 
           style={[typeScale.body, { flex: 1, color: c.ink, minHeight: 36, maxHeight: 140, paddingTop: 8, paddingBottom: 8, paddingHorizontal: 6, textAlignVertical: 'center' }]}
           maxFontSizeMultiplier={1.3}
         >
-          {/* Finished @mentions tint as you type (the text itself stays plain: this only styles it). */}
-          {mentionParts(text, known, false).map((part, i) => part.mention
-            ? <RNText key={i} style={{ color: c.tube }}>{part.text}</RNText>
-            : part.text)}
+          {/* Finished @mentions tint as you type (the text itself stays plain: this only styles it). Styled pieces make
+              Android re-lay-out the whole field on every key, which lagged a long message: plain text unless there's
+              something to tint, and never past a few lines' worth. */}
+          {text.length <= TINT_MAX && /[@/]/.test(text)
+            ? mentionParts(text, known, false).map((part, i) => part.mention
+              ? <RNText key={i} style={{ color: c.tube }}>{part.text}</RNText>
+              : part.text)
+            : text}
         </TextInput>
         <IconButton
           icon={action.icon}
