@@ -255,6 +255,7 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <li><i>Importance</i>: trivial, minor, useful, important, or critical (scored 0.1 to 0.9).</li>
     <li><i>Durability</i>, meaning how long it will stay true: hours, days, months, or years (0 to 1).</li>
   </ul>
+  <p><b>A second look for what was deliberately shared.</b> When the user tells the memory agent something on purpose (§7), each paragraph is read on its own, then read once more with the facts just recorded in view and the instruction to record only what is still missing. This is GraphRAG's "gleaning" [30]. On a real 5,000-character life story, the same model recorded 10 facts reading it whole, 21 a paragraph at a time, and 23 with the second look. The second look recovered statements like "a designer at heart, an AI person by mind" that the first pass dropped. It costs one extra call per paragraph, and only for deliberate sharing.</p>
   <p><b>Stage 2: the gate.</b> On the server, with no model, those ratings are combined with signals the system measures itself into one probability that the fact will be needed later:</p>
   <div class="eq"><math display="block"><mi>p</mi><mo>=</mo><mi>σ</mi><mo>(</mo><msub><mi>β</mi><mn>0</mn></msub><mo>+</mo><msub><mi>β</mi><mtext>imp</mtext></msub><mi>i</mi><mo>+</mo><msub><mi>β</mi><mtext>dur</mtext></msub><mi>u</mi><mo>+</mo><msub><mi>β</mi><mtext>nov</mtext></msub><mi>ν</mi><mo>+</mo><msub><mi>β</mi><mtext>tr</mtext></msub><mi>τ</mi><mo>+</mo><msub><mi>β</mi><mtext>ex</mtext></msub><mi>e</mi><mo>+</mo><msub><mi>β</mi><mtext>rep</mtext></msub><mi>ln</mi><mo>(</mo><mn>1</mn><mo>+</mo><mi>r</mi><mo>)</mo><mo>)</mo></math><span class="n">(1)</span></div>
   <p>σ is the logistic function, which turns any score into a probability between 0 and 1. The inputs:</p>
@@ -397,6 +398,7 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
   </ul>
   <div class="eq"><math display="block"><mi>q</mi><mo>=</mo><mi>H</mi><mo>(</mo><mi>p</mi><mo>)</mo><mo>·</mo><mi>i</mi><mo>,</mo><mspace width="1em"/><mi>H</mi><mo>(</mo><mi>p</mi><mo>)</mo><mo>=</mo><mo>−</mo><mi>p</mi><msub><mi>log</mi><mn>2</mn></msub><mi>p</mi><mo>−</mo><mo>(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo>)</mo><msub><mi>log</mi><mn>2</mn></msub><mo>(</mo><mn>1</mn><mo>−</mo><mi>p</mi><mo>)</mo></math><span class="n">(10)</span></div>
   <p>H(p) is how uncertain the gate is, in bits. A fact at p = 0.5 is the one the system knows least about (H = 1 bit), and one at p = 0.99 needs no question (H ≈ 0.08).</p>
+  <p><b>Reading back.</b> The agent sees what it learned from the user in the last day, and how many of their paragraphs it is still reading. When the user asks "what did you get from that?", it reads the list back and asks what is missing or wrong. Anything the user adds goes in the same way. Missed facts become visible and fixable instead of silently lost.</p>
   <p><b>Limits on asking.</b> The agent asks at most two questions per conversation, only in its own conversation, and never the same thing twice within two weeks. A skipped question counts as a weak "not important".</p>
   <p>Every answer is a training example for the gate's weights, so the gate learns <i>this user's</i> sense of what matters. This is active learning. It is also what makes the agent feel curious rather than nosy: it asks only where the answer would change something.</p>
   <p class="note">Voice works the same way. A real-time voice model gets the same memory tools, and the conversation becomes episodes when it ends, as phone-call transcripts already do.</p>
@@ -485,6 +487,7 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <li><b>Traag, V. A., Waltman, L., van Eck, N. J.</b> From Louvain to Leiden: guaranteeing well-connected communities. Scientific Reports 9, 2019.</li>
     <li><b>Fruchterman, T. M. J., Reingold, E. M.</b> Graph drawing by force-directed placement. Software: Practice and Experience 21(11), 1991.</li>
     <li><b>Settles, B.</b> Active Learning Literature Survey. University of Wisconsin–Madison, CS Technical Report 1648, 2009.</li>
+    <li><b>Edge, D. et al.</b> From Local to Global: A Graph RAG Approach to Query-Focused Summarization (GraphRAG; "gleanings"). 2024. <a href="https://arxiv.org/abs/2404.16130">arXiv:2404.16130</a></li>
   </ol>
 </main>
 
