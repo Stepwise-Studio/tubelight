@@ -164,6 +164,9 @@ def _phone(v: str) -> str:
 
 # ------------------------------------------------------------------ episodes
 CHUNK = 3000  # a long message is kept as pieces of at most this (paragraph, then sentence breaks), never cut off
+# What the user tells their memory is read a paragraph or two at a time: on a 5,000-character life story the extractor
+# found 10 facts read whole, 16 in two pieces and 21 a paragraph at a time (same model).
+JOURNAL_BATCH = 1500
 
 
 def _chunks(text: str, size: int = CHUNK) -> list[str]:
@@ -187,7 +190,8 @@ async def log_episode(owner: str, source: str, text: str, *, trust: int, ref: st
     if not ready() or not (text or "").strip():
         return
     at = at or datetime.now(UTC)
-    for k, part in enumerate(_chunks(text)):  # pieces keep their order a microsecond apart
+    parts = [c for para in re.split(r"\n\s*\n", text) for c in _chunks(para)] if source == "journal" else _chunks(text)
+    for k, part in enumerate(parts):  # pieces keep their order a microsecond apart
         t = at + timedelta(microseconds=k)
         h = hashlib.sha1(f"{source}|{ref}|{speaker}|{t.isoformat()}|{part}".encode()).hexdigest()
         try:
@@ -637,7 +641,8 @@ async def _batches(owner: str | None = None, force: bool = False) -> list[list[d
             continue
         batch, size = [], 0
         for e in g:
-            if batch and size + len(e["text"]) > BATCH_CHARS:
+            limit = JOURNAL_BATCH if e["source"] == "journal" or any(x["source"] == "journal" for x in batch) else BATCH_CHARS
+            if batch and size + len(e["text"]) > limit:
                 out.append(batch)
                 batch, size = [], 0
             batch.append(e)

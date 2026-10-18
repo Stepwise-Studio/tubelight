@@ -341,3 +341,17 @@ async def test_a_project_group_recalls_its_project_without_naming_it(m):
     assert "Tubelight (project)" not in await mem.recall(owner, "how's the launch prep going?")
     text = await mem.recall(owner, "how's the launch prep going?", names=("Tubelight",))
     assert "Tubelight (project):\n  - " in text and "home server" in text
+
+
+async def test_a_long_message_is_kept_whole_and_a_journal_is_read_a_paragraph_at_a_time(m):
+    _, owner = m
+    story = "\n\n".join(f"Paragraph {i}: " + "word " * 180 for i in range(5))  # ~4,600 characters
+    await mem.log_episode(owner, "chat", story, trust=2, ref="t-chat", speaker="Jayanth", at=T0)
+    await mem.log_episode(owner, "journal", story, trust=2, ref="t-journal", speaker="Jayanth", at=T0)
+    rows = await mem._q("select ref, text from mem_episodes where owner = %s order by occurred_at", owner)
+    chat = [r["text"] for r in rows if r["ref"] == "t-chat"]
+    assert len(chat) == 2 and all(len(t) <= mem.CHUNK for t in chat) and sum(map(len, chat)) >= len(story) - 10
+    journal = [r["text"] for r in rows if r["ref"] == "t-journal"]
+    assert len(journal) == 5 and journal[0].startswith("Paragraph 0")
+    batches = [b for b in await mem._batches(owner, force=True) if b[0]["ref"] == "t-journal"]
+    assert all(sum(len(e["text"]) for e in b) <= mem.JOURNAL_BATCH or len(b) == 1 for b in batches) and len(batches) >= 3
