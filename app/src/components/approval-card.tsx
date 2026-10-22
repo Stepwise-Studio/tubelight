@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { ScrollView, View } from 'react-native'
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated'
+import { Image } from 'expo-image'
 import { Edit02Icon } from '@hugeicons/core-free-icons'
 
 import { Capsule } from '@/components/chat/capsule'
-import { ApiError, api } from '@/lib/api'
+import { ApiError, BASE, api } from '@/lib/api'
 import { relativeTime } from '@/lib/format'
 import type { Approval, Teammate } from '@/lib/types'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
@@ -19,7 +20,7 @@ const LABELS: Record<string, string> = {
   text: 'Text', content: 'Text', title: 'Title', head: 'From branch', base: 'Into branch', branch: 'Branch',
   owner: 'Owner', repo: 'Repository', diff: 'Changes', message: 'Message', commit_message: 'Commit message',
 }
-const label = (k: string) => ({ cmd: 'Command', cwd: 'In folder', folder: 'Drive folder', pattern: 'Files', app: 'App', task: 'To do' } as Record<string, string>)[k] ?? LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
+const label = (k: string) => ({ what: 'Does', site: 'Site', cmd: 'Command', cwd: 'In folder', folder: 'Drive folder', pattern: 'Files', app: 'App', task: 'To do' } as Record<string, string>)[k] ?? LABELS[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (m) => m.toUpperCase())
 
 function shapeOf(a: Approval): Shape {
   const d = a.draft
@@ -40,6 +41,8 @@ const ORDER: Record<Shape, string[]> = {
 const approveLabel: Record<Shape, string> = { email: 'Approve and send', post: 'Approve and post', code: 'Approve', other: 'Approve' }
 
 function fields(a: Approval, shape: Shape) {
+  // A button on a web page: what it does and the text it sends (the screenshot shows the rest).
+  if (a.tool_name === 'browser_commit') return ['what', 'text', 'site'].filter((k) => a.draft[k])
   // A computer action: just what it does (the title says why; sudo and timeouts are plumbing).
   if (a.tool_name.startsWith('computer_')) {
     return ['app', 'task', 'cmd', 'path', 'folder', 'pattern', 'content', ...(a.draft.cwd && a.draft.cwd !== '~' ? ['cwd'] : [])].filter((k) => k in a.draft && a.draft[k] !== '')
@@ -150,6 +153,8 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
   }
 
   const keys = fields(approval, shape)
+  // A web page button: exactly what they see gets pressed, so there's nothing to edit.
+  const commit = approval.tool_name === 'browser_commit'
   const body = (
     <Squircle style={{ borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 14, gap: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -159,6 +164,12 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
         </Text>
       </View>
       <Text variant="headline" accessibilityRole="header">{approval.title}</Text>
+      {commit && typeof approval.draft.image === 'string' && (
+        <Squircle style={{ borderRadius: radius.md, backgroundColor: c.panel2, overflow: 'hidden', alignItems: 'center' }}>
+          <Image source={{ uri: BASE + approval.draft.image }} style={{ width: '100%', height: 380 }} contentFit="contain"
+            accessibilityLabel="The page as it is now" />
+        </Squircle>
+      )}
 
       <View style={{ gap: 10 }}>
         {keys.map((k) => {
@@ -207,14 +218,14 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
       {/* Primary action on its own row so three labels never wrap unevenly on a 360pt phone. */}
       <View style={{ gap: 8, marginTop: 2 }}>
         <Button
-          label={admin ? 'Approve as admin' : edited ? `${approveLabel[shape]} edited` : approveLabel[shape]}
+          label={admin ? 'Approve as admin' : commit ? `Approve: ${String(approval.draft.button ?? 'press it')}` : edited ? `${approveLabel[shape]} edited` : approveLabel[shape]}
           fullWidth
           loading={busy === 'approve'}
           disabled={!!busy || (admin && !password)}
           onPress={() => decide('approve')}
         />
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Button
+          {!commit && <Button
             label={editing ? 'Done editing' : 'Edit'}
             variant="soft"
             icon={editing ? undefined : Edit02Icon}
@@ -222,7 +233,7 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
             style={{ flex: 1 }}
             disabled={!!busy || !keys.some((k) => typeof approval.draft[k] === 'string')}
             onPress={() => { haptic.tap(); setEditing((e) => !e) }}
-          />
+          />}
           <Button label="Reject" variant="outline" fullWidth style={{ flex: 1 }} disabled={!!busy} onPress={() => setRejecting(true)} />
         </View>
       </View>

@@ -59,7 +59,7 @@ COMMIT = re.compile(r"\b(post|tweet|reply|repost|retweet|quote|send|publish|shar
 DANGEROUS_LINK = re.compile(r"\b(delete|remove|deactivate|unsubscribe|buy|pay|checkout|purchase|confirm|transfer|"
                             r"authori[sz]e|log ?out|sign ?out)\b", re.I)
 COMMIT_KEYS = re.compile(r"^(ctrl|control|meta|cmd|mod)\+(enter|return)$", re.I)
-LOGIN = re.compile(r"/(login|log-in|signin|sign-in|sign_in|i/flow/login|accounts/login|auth)\b", re.I)
+LOGIN = re.compile(r"/(login|log-in|signin|sign-in|sign_in|i/flow/login|accounts/login|auth)\b|mode=login", re.I)
 
 
 class Busy(RuntimeError):
@@ -364,7 +364,11 @@ def _prop(n: dict, key: str) -> Any:
 
 
 async def snapshot(b: Browser) -> dict:
-    nodes = (await b.cdp("Accessibility.getFullAXTree"))["nodes"]
+    for _ in range(8):  # a page still drawing (a slow server, a heavy app): wait until it shows something
+        nodes = (await b.cdp("Accessibility.getFullAXTree"))["nodes"]
+        if sum(1 for n in nodes if not n.get("ignored") and n.get("backendDOMNodeId")) > 8:
+            break
+        await asyncio.sleep(1)
     by_id = {n["nodeId"]: n for n in nodes}
     elements: list[dict] = []
     login = False
@@ -409,7 +413,7 @@ async def snapshot(b: Browser) -> dict:
                                                     " return pw && [...document.querySelectorAll('input')].some(e => v(e) && (e.type === 'email' || /username|email|tel/.test(e.autocomplete)"
                                                     " || /user|mail|login|phone/i.test(e.name + e.id))) })()", "returnByValue": True})
     # ponytail: a sign-in page = a login address, or a password box next to a username/email box
-    login = bool(LOGIN.search(urlparse(url).path or "")) or bool((pw.get("result") or {}).get("value"))
+    login = bool(LOGIN.search("/" + url.split("://", 1)[-1].partition("/")[2])) or bool((pw.get("result") or {}).get("value"))
     b.count[0] += 1
     sid = f"b{b.count[0]}"
     b.snaps[sid] = {"url": url, "elements": {e["id"]: e for e in elements}, "at": time.time()}

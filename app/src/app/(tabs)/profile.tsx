@@ -7,7 +7,7 @@ import { router } from 'expo-router'
 import { useFocusLater } from '@/lib/focus'
 import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, AppState, Linking, PermissionsAndroid, Platform, RefreshControl, ScrollView, View } from 'react-native'
-import {
+import { BrowserIcon,
   Add01Icon, Brain02Icon, CheckmarkCircle02Icon, Mail01Icon, Copy01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RefreshIcon, RepeatIcon, DashboardSpeed01Icon, ViewIcon, ViewOffIcon,
 } from '@hugeicons/core-free-icons'
 
@@ -75,6 +75,7 @@ export default function ProfileScreen() {
         <AppsSection />
         <AutomationsSection />
         <ComputersSection />
+        <BrowserSection />
         <UsageSection />
         <MemorySection />
         <Appearance />
@@ -434,6 +435,22 @@ function ComputersSection() {
     <FormSection title="Computers" hint="Your own machines as a place teammates can work, with your approval.">
       <Surface style={{ overflow: 'hidden' }}>
         <ListRow title="Open computers" subtitle={summary} subtitleLines={2} icon={LaptopIcon} chevron onPress={() => router.push('/computers')} />
+      </Surface>
+    </FormSection>
+  )
+}
+
+/** Tubelight's browser on the server: which sites teammates may act on right now; the live view signs you in. */
+function BrowserSection() {
+  const [b, setB] = useState<{ available: boolean; running: boolean; sites: string[] } | null>(null)
+  useFocusLater(useCallback(() => { api<{ available: boolean; running: boolean; sites: string[] }>('/browser').then(setB, () => setB(null)) }, []))
+  if (b && !b.available) return null
+  const summary = !b ? 'Sign in to sites teammates use for you' : b.sites.length ? `Teammates may act on ${b.sites.join(', ')}`
+    : b.running ? 'Open: teammates only read pages' : 'Sign in to sites teammates use for you'
+  return (
+    <FormSection title="Browser" hint="A browser on your server. Teammates post or send only after you see the screen and approve it, and never type your passwords: you sign in here.">
+      <Surface style={{ overflow: 'hidden' }}>
+        <ListRow title="Open browser" subtitle={summary} subtitleLines={2} icon={BrowserIcon} chevron onPress={() => router.push('/browser')} />
       </Surface>
     </FormSection>
   )
