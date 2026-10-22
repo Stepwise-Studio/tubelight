@@ -1,6 +1,7 @@
 import asyncio
 import time
 import faulthandler
+import json
 import logging
 import re
 import signal
@@ -15,14 +16,14 @@ from typing import Any, Literal
 import httpx
 import yaml
 from croniter import croniter
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, browser, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -60,6 +61,8 @@ async def lifespan(_: FastAPI):
         mem._pool = None
     mem_worker = asyncio.create_task(mem.loop()) if mem.ready() else None
     runs.docker_ok = await asyncio.to_thread(sandbox.available)
+    browser.ready = await asyncio.to_thread(browser.available)
+    browsers = asyncio.create_task(browser.loop()) if browser.ready else None
     await runs.sweep_orphans()
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
     scheduler = asyncio.create_task(events.schedule_loop())
@@ -67,6 +70,8 @@ async def lifespan(_: FastAPI):
     yield
     warm.cancel()
     scheduler.cancel()
+    if browsers:
+        browsers.cancel()
     if mem_worker:
         mem_worker.cancel()
     for t in list(runs.tasks.values()):
@@ -1872,3 +1877,51 @@ async def vault_file(owner_id: str, item_id: str, k: str = "file", e: int = 0, s
         return FileResponse(path, media_type="image/jpeg", headers=headers)
     return FileResponse(path, media_type=row["mime"] or "application/octet-stream", headers=headers,
                         filename=row["name"], content_disposition_type="attachment" if dl else "inline")
+
+
+# ------------------------------------------------------------------ the server browser (app/browser.py)
+@app.get("/browser")
+async def browser_state(user: User = Depends(current_user)):
+    return {**await browser.state(user["id"]), "available": browser.ready}
+
+
+@app.post("/browser/stop")
+async def browser_stop(user: User = Depends(current_user)):
+    """The kill switch: every site permission ends and the browser closes."""
+    await browser.stop(user["id"])
+    return {"ok": True}
+
+
+@app.post("/browser/sign-out")
+async def browser_sign_out(user: User = Depends(current_user)):
+    await browser.sign_out(user["id"])
+    return {"ok": True}
+
+
+@app.get("/browser/shot/{owner_id}/{key}")
+async def browser_shot(owner_id: str, key: str, e: int = 0, s: str = ""):
+    p = browser.shot_path(owner_id, key, e, s)
+    if p is None:
+        raise HTTPException(403, "This link has expired.")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
+
+@app.websocket("/browser/live")
+async def browser_live(ws: WebSocket):
+    """The phone's live view: frames out, the user's taps and typing in while they hold the browser."""
+    try:
+        user = await current_user(ws.headers.get("authorization", ""))
+    except HTTPException:
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    if not browser.ready:
+        await ws.close(code=4503)
+        return
+    try:
+        await browser.watch(user["id"], ws)
+    except WebSocketDisconnect:
+        pass
+    except browser.Busy as e:
+        await ws.send_text(json.dumps({"t": "error", "why": str(e)}))
+        await ws.close()

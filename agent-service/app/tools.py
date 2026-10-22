@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, browser, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -72,6 +72,7 @@ INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read",
+    "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
@@ -83,6 +84,8 @@ INTERNAL = {
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app"}
 LABELS = {
+    "browser_use": "Asking to use the browser", "browser_look": "Looking at a web page", "browser_act": "Using a web page",
+    "browser_keys": "Pressing keys on a web page", "browser_subtask": "Working on a web page", "browser_commit": "Pressing the button",
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
@@ -106,6 +109,8 @@ def classify(name: str) -> Literal["read", "draft", "act"]:
 
 
 MULTI = "COMPOSIO_MULTI_EXECUTE_TOOL"
+NEEDS_JS = re.compile(r"enable javascript|javascript is (disabled|required)|something went wrong, but don.t fret|"
+                      r"checking your browser|verify you are human|access denied", re.I)
 
 
 def inner(name: str, args: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -131,7 +136,7 @@ def approval_view(name: str, args: dict[str, Any]) -> tuple[str, str, dict[str, 
 
 def apply_edit(name: str, args: dict[str, Any], edited: dict[str, Any] | None) -> dict[str, Any]:
     """Put the user's edited draft back into the original call shape."""
-    if not edited:
+    if not edited or name == "browser_commit":  # a commit is exactly what they saw; the card has nothing to edit
         return args
     if name != MULTI:
         return edited
@@ -219,6 +224,8 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"Upload {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]} to Google Drive{where}"[:80]
     if name == "computer_close_app":
         return f"Close {str(args.get('name') or 'an app')}"[:80]
+    if name == "browser_use":
+        return f"Use the browser on {args.get('site') or 'a site'}: {str(args.get('task') or '')}"[:80]
     if name == "computer_use":
         return f"Use {str(args.get('app') or 'an app')}: {str(args.get('task') or '')}"[:80]
     if name == "computer_write":
@@ -431,15 +438,23 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
     async def read_page(url: str) -> str:
         if not re.match(r"https?://", url):
             return "Give a full web address starting with http:// or https://."
+        title, text, why = url, "", ""
         try:
             d = await connectors.execute(ctx.owner_id, "COMPOSIO_SEARCH_FETCH_URL_CONTENT", {"urls": [url]})
+            page = (d.get("results") or [{}])[0] or {}
+            title, text = page.get("title") or url, str(page.get("text") or "").strip()
         except Exception as e:
-            return f"Couldn't open {url}: {str(e)[:200]}"
-        page = (d.get("results") or [{}])[0] or {}
-        text = str(page.get("text") or "").strip()
+            why = str(e)[:200]
+        if browser.ready and (len(text) < 400 or NEEDS_JS.search(text[:2000])):
+            # A page that needs scripts, or turns fetchers away: the server browser reads it (incognito, no sign-ins).
+            try:
+                t, got = await browser.read(ctx.owner_id, url)
+                if len(got.strip()) > len(text):
+                    title, text = t or title, got.strip()
+            except Exception as e:
+                why = why or str(e)[:200]
         if not text:
-            return f"{url} had no readable text (it may need a login or be mostly images)."
-        title = page.get("title") or url
+            return f"Couldn't open {url}: {why}" if why else f"{url} had no readable text (it may need a login or be mostly images)."
         return f"{title}\n{url}\n\n" + (text if len(text) <= 9000 else text[:9000] + f"\n[... {len(text) - 9000} more chars]")
 
     tools += [
@@ -451,6 +466,81 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             coroutine=read_page, name="read_page",
             description="Read one web page as text (an article, docs, a link the user sent). url: the full address."),
     ]
+
+    if browser.ready:
+        owner = ctx.owner_id
+
+        async def _b(work) -> str:
+            try:
+                got = await work
+            except (browser.Busy, browser.NeedsOK, PermissionError, LookupError, ValueError, RuntimeError) as e:
+                return str(e)
+            return got if isinstance(got, str) else (cu.head(got) + "\n" + browser.text(got)).strip()
+
+        async def browser_use(site: str, task: str) -> str:
+            sites = browser.grant(owner, *re.split(r"[,\s]+", site))
+            if not sites:
+                return "site: the website's address, like x.com."
+            got = await _b(browser.look(owner, sites[0]))
+            return (f"They OK'd the browser on {', '.join(sites)} for: {task} (20 minutes). Work through it with "
+                    "browser_act (browser_subtask for a run of simple steps). A ⚑ button (post, send, buy...) goes "
+                    "through browser_commit, which shows them the screen first.\n" + got)
+
+        async def browser_look(url: str = "") -> str:
+            return await _b(browser.look(owner, url))
+
+        async def browser_act(snapshot: str, element: str, action: str, value: str = "") -> str:
+            return await _b(browser.act(owner, snapshot, element, action, value))
+
+        async def browser_keys(keys: list[str]) -> str:
+            return await _b(browser.keys(owner, keys))
+
+        async def browser_subtask(goal: str, inputs: list[str] | None = None, done_when: str = "", max_steps: int = 12) -> str:
+            if not browser.granted(owner):
+                return "Ask first: call browser_use with the site and the task; they OK it once."
+
+            async def call(op: str, args: dict[str, Any], _timeout: float) -> dict[str, Any]:
+                try:
+                    if op == "ui_look":
+                        got = await browser.look(owner)
+                    elif op == "ui_act":
+                        got = await browser.act(owner, args["snapshot"], args["element"], args["action"], args.get("value", ""))
+                    else:
+                        got = await browser.keys(owner, args["keys"])
+                except browser.NeedsOK as e:
+                    return {"status": "needs_ok", "why": str(e)}
+                return {**got, "text": browser.text(got)}
+
+            return await cu.subtask("", "browser", goal, inputs or [], done_when, max_steps, call=call, kind=cu.BROWSER)
+
+        async def browser_commit(snapshot: str, element: str, what: str) -> str:
+            return await _b(browser.commit(owner, snapshot, element))
+
+        tools += [
+            StructuredTool.from_function(coroutine=browser_use, name="browser_use",
+                description="Ask to use Tubelight's web browser on a site for a task (post, reply, fill a form, change a "
+                            "setting): once per task, they OK it, then you can act on that site for 20 minutes. Its sign-ins "
+                            "are theirs (they sign in themselves). site: the address, like x.com (several: comma-separated). "
+                            "task: what you'll do, in a line they read before saying yes. Answers with the page."),
+            StructuredTool.from_function(coroutine=browser_look, name="browser_look",
+                description="Read the browser's page: every link, button, field and text, each with an id ([e12]). url: go "
+                            "there first (only sites they allowed)."),
+            StructuredTool.from_function(coroutine=browser_act, name="browser_act",
+                description="Do one thing to one element of a snapshot: CLICK, TYPE (value: the field's new text) or READ "
+                            "(its full text). If the page changed since, nothing happens and you get the new page. ⚑ "
+                            "buttons (post, send, buy, delete...) are refused here: use browser_commit."),
+            StructuredTool.from_function(coroutine=browser_keys, name="browser_keys",
+                description="Press keys on the page: \"page_down\", \"page_up\", \"escape\", \"tab\", \"backspace\"."),
+            StructuredTool.from_function(coroutine=browser_subtask, name="browser_subtask",
+                description="Hand a run of simple steps on the page (open the composer and type the post, fill a form) to a "
+                            "fast helper. It stops with DONE, BLOCKED, NEEDS_INPUT or NEEDS_OK (a ⚑ button is next: call "
+                            "browser_commit with that snapshot and element). goal: one outcome. inputs: every text it may "
+                            "type, exactly. done_when: what the page shows when it's done."),
+            StructuredTool.from_function(coroutine=browser_commit, name="browser_commit",
+                description="Press a ⚑ button (Post, Send, Buy, Delete...) after they approve: they see the screen and the "
+                            "text first. snapshot, element: from the latest look. what: what pressing it does, in a line "
+                            "('posts the tweet'). If the page changes after they approve, nothing is pressed."),
+        ]
 
     if ctx.project and repo.parse(ctx.project.get("repo_url")):
         pid = ctx.project["id"]

@@ -34,6 +34,10 @@ SANDBOX_IMAGE = env("SANDBOX_IMAGE", "tubelight-sandbox")
 SANDBOX_NETWORK = env("SANDBOX_NETWORK")
 SANDBOX_PROXY = env("SANDBOX_PROXY")  # e.g. http://tl-egress-proxy:3128
 SANDBOX_UID = env("SANDBOX_UID")  # the unprivileged user sandboxes run as (the agent itself may run as root)
+# The server browser (app/browser.py): its own internal network (tl-browser) with the same egress proxy.
+BROWSER_IMAGE = env("BROWSER_IMAGE", "tubelight-browser")
+BROWSER_NETWORK = env("BROWSER_NETWORK")
+BROWSER_PROXY = env("BROWSER_PROXY", SANDBOX_PROXY or "")
 WORKSPACES = Path(env("WORKSPACES_DIR", str(Path.home() / ".tubelight" / "workspaces")))
 
 MAX_HANDOFFS = 6

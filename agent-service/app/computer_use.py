@@ -81,6 +81,12 @@ Screen now:
 DESKTOP = {"device": "a Linux computer", "actions": "CLICK|TYPE|SET_VALUE|FOCUS|KEYS", "key": "enter", "rules": """- CLICK, TYPE, SET_VALUE, FOCUS: an element id from the screen below that offers that action.
 - TYPE replaces the field's text with "value", which must be one of the allowed texts.
 - KEYS: chords like "enter", "ctrl+s", "page_down", sent to the window in front."""}
+BROWSER = {"device": "a web browser (a phone-sized page)", "actions": "CLICK|TYPE|KEYS", "key": "page_down", "rules": """- CLICK, TYPE: an element id from the screen below that offers that action. TYPE replaces the field's text with "value",
+  which must be one of the allowed texts.
+- KEYS: "page_down"/"page_up" to scroll, "escape", "tab", "backspace".
+- Elements marked ⚑ post, send or submit: clicking one ends your part (the teammate asks the user first). If that
+  click is all that's left, click it.
+- A sign-in page: BLOCKED (the user signs in themselves). Never type passwords or codes."""}
 PHONE = {"device": "an Android phone", "actions": "CLICK|TYPE|SCROLL|SUBMIT|KEYS", "key": "back", "rules": """- CLICK, TYPE, SCROLL, SUBMIT: an element id from the screen below (SCROLL a list: value "down" or "up").
 - TYPE replaces the field's text with "value", which must be one of the allowed texts; SUBMIT presses the keyboard's
   send/search/go in that field.
@@ -133,30 +139,37 @@ def _json(text: str) -> dict[str, Any]:
         return {}
 
 
-async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: str, max_steps: int) -> str:
+async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: str, max_steps: int,
+                  call: Any = None, kind: dict[str, str] = DESKTOP) -> str:
     """The fast-model loop on the user's computer: look, pick an action allowed on what's on screen, act, until done or
-    stuck. (The phone runs the same loop itself: lib/phone.ts workInApp → POST /phone/step.)"""
-    got = await computers.call(cid, "ui_look", {"app": app, "full": True}, 30)
+    stuck. (The phone runs the same loop itself: lib/phone.ts workInApp → POST /phone/step; the server browser passes
+    its own `call`, and a click it refuses for needing the user's OK ends the loop with NEEDS_OK.)"""
+    if call is None:
+        async def call(op: str, args: dict[str, Any], timeout: float) -> Any:
+            return await computers.call(cid, op, args, timeout)
+    got = await call("ui_look", {"app": app, "full": True}, 30)
     snap, screen = got["snapshot"], got["text"]
     steps: list[str] = []
     for _ in range(max(1, min(max_steps, 25))):
-        d = await decide(goal, inputs, done_when, steps, screen)
+        d = await decide(goal, inputs, done_when, steps, screen, kind)
         action, why = d["action"], d["why"]
         if action in ("DONE", "BLOCKED", "NEEDS_INPUT"):
             return f"{action}: {why}\nSteps: " + ("; ".join(steps) or "none") + f"\n{screen}"
         try:
             if action == "KEYS":
                 keys = [str(k) for k in (d.get("keys") or [])][:6]
-                r = await computers.call(cid, "ui_keys", {"keys": keys, "app": app, "full": True}, 30)
+                r = await call("ui_keys", {"keys": keys, "app": app, "full": True}, 30)
                 steps.append(f"keys {', '.join(keys)}")
             else:
                 value = str(d.get("value") or "")
-                r = await computers.call(cid, "ui_act", {"snapshot": snap, "element": str(d.get("element")), "action": action,
+                r = await call("ui_act", {"snapshot": snap, "element": str(d.get("element")), "action": action,
                                                          "value": value, "full": True}, 40)
                 steps.append(f"{action.lower()} {d.get('element')}{' ' + repr(value) if value else ''}: "
                              + (r.get("did") or r.get("status") or "") + ("" if r.get("status") == "done" else f" ({r.get('why')})"))
         except Exception as e:  # a wrong id or action: tell the model and go on
             steps.append(f"{action.lower()} {d.get('element')}: failed ({str(e)[:120]})")
             continue
+        if r.get("status") == "needs_ok":
+            return f"NEEDS_OK: {r.get('why')}\nSteps: " + "; ".join(steps) + f"\n{r.get('text', screen)}"
         snap, screen = r.get("snapshot", snap), r.get("text", screen)
     return f"STOPPED after {max_steps} steps without reaching the goal.\nSteps: " + "; ".join(steps) + f"\n{screen}"
