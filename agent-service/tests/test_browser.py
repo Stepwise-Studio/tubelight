@@ -8,7 +8,7 @@ import pytest
 from app import browser as B
 
 OWNER = "test-owner-browser"
-FAKE_X = (Path(__file__).parent.parent / "evals" / "data" / "fake_x.html").read_text()
+FAKE_X = (Path(__file__).parent.parent / "evals" / "fake_x.html").read_text()
 
 
 def test_commit_words():
