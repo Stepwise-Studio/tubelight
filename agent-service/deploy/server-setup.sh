@@ -11,6 +11,8 @@ cd "$(dirname "$0")"
 docker network inspect tl-control >/dev/null 2>&1 || docker network create --internal tl-control
 docker network inspect tl-sandbox >/dev/null 2>&1 || docker network create --internal tl-sandbox
 docker network inspect tl-egress >/dev/null 2>&1 || docker network create tl-egress
+# tl-browser: internal network for the server browser (app/browser.py); the agent and the egress proxy join it.
+docker network inspect tl-browser >/dev/null 2>&1 || docker network create --internal tl-browser
 
 docker rm -f tl-docker-proxy >/dev/null 2>&1 || true
 docker run -d --name tl-docker-proxy --restart unless-stopped --network tl-control \
@@ -23,6 +25,8 @@ docker rm -f tl-egress-proxy >/dev/null 2>&1 || true
 docker run -d --name tl-egress-proxy --restart unless-stopped --network tl-egress --memory 128m \
   -v "$PWD/squid.conf:/etc/squid/squid.conf:ro" ubuntu/squid:latest >/dev/null
 docker network connect tl-sandbox tl-egress-proxy
+docker network connect tl-browser tl-egress-proxy
 
-mkdir -p ~/tubelight/data/workspaces ~/tubelight/data/repos
+mkdir -p ~/tubelight/data/workspaces ~/tubelight/data/repos ~/tubelight/data/browser
+chmod 700 ~/tubelight/data/browser  # sign-ins live here
 echo "ok: networks, socket proxy and egress proxy are up"

@@ -177,6 +177,8 @@ def _run(owner_id: str) -> tuple[Any, str]:
         pass
     profile = DATA / owner_id
     profile.mkdir(parents=True, exist_ok=True)
+    for lock in profile.glob("Singleton*"):  # left by the last container: Chromium would think another one has it
+        lock.unlink(missing_ok=True)
     uid = int(config.SANDBOX_UID) if config.SANDBOX_UID else os.getuid()
     try:
         os.chown(profile, uid, uid)
@@ -189,7 +191,7 @@ def _run(owner_id: str) -> tuple[Any, str]:
     if config.BROWSER_PROXY:
         args.insert(0, f"--proxy-server={config.BROWSER_PROXY}")
     c = client.containers.run(
-        config.BROWSER_IMAGE, args, detach=True, name=_name(owner_id), user=f"{uid}:{uid}",
+        config.BROWSER_IMAGE, args, detach=True, name=_name(owner_id), hostname="tubelight-browser", user=f"{uid}:{uid}",
         mem_limit="800m", nano_cpus=1_500_000_000, pids_limit=512, cap_drop=["ALL"], security_opt=["no-new-privileges"],
         read_only=True, tmpfs={"/tmp": "rw,size=256m,mode=1777"}, network=config.BROWSER_NETWORK or None,
         volumes={str(profile): {"bind": "/profile", "mode": "rw"}}, labels={"tubelight": "browser"},
@@ -403,8 +405,11 @@ async def snapshot(b: Browser) -> dict:
     if nodes:
         visit(nodes[0]["nodeId"], 0, "")
     url, title = await _url(b)
-    pw = await b.cdp("Runtime.evaluate", {"expression": "!!document.querySelector('input[type=password]')", "returnByValue": True})
-    login = bool((pw.get("result") or {}).get("value")) or bool(LOGIN.search(urlparse(url).path or ""))
+    pw = await b.cdp("Runtime.evaluate", {"expression": "(() => { const v = e => e.offsetParent !== null; const pw = [...document.querySelectorAll('input[type=password]')].some(v);"
+                                                    " return pw && [...document.querySelectorAll('input')].some(e => v(e) && (e.type === 'email' || /username|email|tel/.test(e.autocomplete)"
+                                                    " || /user|mail|login|phone/i.test(e.name + e.id))) })()", "returnByValue": True})
+    # ponytail: a sign-in page = a login address, or a password box next to a username/email box
+    login = bool(LOGIN.search(urlparse(url).path or "")) or bool((pw.get("result") or {}).get("value"))
     b.count[0] += 1
     sid = f"b{b.count[0]}"
     b.snaps[sid] = {"url": url, "elements": {e["id"]: e for e in elements}, "at": time.time()}
