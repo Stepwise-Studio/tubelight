@@ -730,7 +730,7 @@ async def link(owner: str, user_name: str, since: datetime | None = None) -> int
 # ------------------------------------------------------------------ worker
 async def _batches(owner: str | None = None, force: bool = False) -> list[list[dict[str, Any]]]:
     """Waiting episodes grouped by conversation, only once it's been quiet for QUIET (or force)."""
-    rows = await _q("select * from mem_episodes where extracted = 0 and attempts < 4 "
+    rows = await _q("select * from mem_episodes where extracted = 0 "
                     + ("and owner = %s " if owner else "") + "order by occurred_at limit 400",
                     *([owner] if owner else []))
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -789,12 +789,28 @@ async def fade(owner: str | None = None) -> int:
     return n
 
 
+RETRIES = 3  # days a failing episode gets 4 tries each: a bad hour (server off, a provider down) never loses a memory
+_retried = 0.0
+
+
+async def _retry_given_up(now: float | None = None) -> int:
+    """Once a day, episodes set aside after 4 failures go back in line, until they've had RETRIES rounds."""
+    global _retried
+    now = time.time() if now is None else now
+    if now - _retried < 86400:
+        return 0
+    _retried = now
+    return len(await _q("update mem_episodes set extracted = 0 where extracted = %s and attempts < %s returning id",
+                        -VERSION, 4 * RETRIES))
+
+
 async def tick(owner: str | None = None, force: bool = False, max_batches: int = 3, names: dict | None = None) -> int:
     """Extract a few quiet conversations, then refresh stale profiles. Paced so backfills trickle within free limits."""
     if not ready():
         return 0
     done, owners = 0, set()
     names = names if names is not None else {}
+    await _retry_given_up()
     batches = await _batches(owner, force)
     for batch in batches[:max_batches]:
         o = str(batch[0]["owner"])
@@ -810,8 +826,9 @@ async def tick(owner: str | None = None, force: bool = False, max_batches: int =
             limited = "429" in str(e) or "rate" in str(e).lower() or "quota" in str(e).lower()
             log.warning("memory: extraction failed (%s)", str(e)[:200])
             if not limited:  # a rate limit isn't the batch's fault: don't count it against its attempts
-                await _q("update mem_episodes set attempts = attempts + 1, extracted = case when attempts >= 3 then %s "
-                         "else extracted end where id = any(%s)", -VERSION, ids)
+                # every 4th failure sets it aside till the next day's retry (_retry_given_up); RETRIES rounds, then for good
+                await _q("update mem_episodes set attempts = attempts + 1, extracted = case when (attempts + 1) %% 4 = 0 "
+                         "then %s else extracted end where id = any(%s)", -VERSION, ids)
             break  # try again next tick
     await fade(owner)
     for o in owners - _MENTIONED:  # facts stored before mentions existed get theirs, once per process
@@ -1125,7 +1142,7 @@ async def overview(owner: str) -> dict[str, Any]:
                       "and f.status = 'current' order by f.learned_at desc limit 15", owner)
     counts = (await _q("select (select count(*) from mem_facts where owner = %s and status = 'current') as facts, "
                        "(select count(*) from mem_entities where owner = %s and kind <> 'user') as people, "
-                       "(select count(*) from mem_episodes where owner = %s and extracted = 0 and attempts < 4) as waiting, "
+                       "(select count(*) from mem_episodes where owner = %s and extracted = 0) as waiting, "
                        "(select count(*) from mem_episodes where owner = %s) as episodes, "
                        "(select max(learned_at) from mem_facts where owner = %s) as last_learned",
                        owner, owner, owner, owner, owner))[0]

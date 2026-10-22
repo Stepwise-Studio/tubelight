@@ -134,15 +134,16 @@ async def notes(owner_id: str) -> str:
     qs = await offer(owner_id)
     c = (await mem.overview(owner_id))["counts"]
     lines = [f"On record: {c['facts']} facts about {c['people']} people and things; {c['waiting']} moments still being read."]
-    reading = (await mem._q("select count(*) as n from mem_episodes where owner = %s and source = 'journal' and extracted = 0",
-                            owner_id))[0]["n"]
+    reading = (await mem._q("select count(*) as n from mem_episodes where owner = %s and source = 'journal' and extracted <= 0",
+                            owner_id))[0]["n"]  # waiting, or set aside after failing (retried daily)
     learned = await mem._q(
         "select distinct on (f.id) f.id, f.text, f.status, f.learned_at from mem_facts f join mem_fact_sources s on s.fact = f.id "
         "join mem_episodes ep on ep.id = s.episode where f.owner = %s and ep.source = 'journal' and f.status in ('current', 'tentative') "
         "and f.learned_at > now() - interval '1 day' order by f.id, f.learned_at desc", owner_id)
     if reading:
-        lines.append(f"Still reading {reading} paragraph{'s' if reading > 1 else ''} of what they told you: if they ask what you "
-                     "got, say you're still going through it.")
+        lines.append(f"Still reading {reading} paragraph{'s' if reading > 1 else ''} of what they told you: they are NOT in "
+                     "memory yet. If they ask whether you remember or saved it, say exactly that (\"I'm still going through "
+                     f"{reading} of them\"), never that everything is saved.")
     if learned:
         learned.sort(key=lambda f: f["learned_at"])
         lines.append("Learned from what they told you in the last day (when they ask what you got, or what you missed, read "

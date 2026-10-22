@@ -284,6 +284,20 @@ async def test_a_new_extractor_rereads_old_and_given_up_episodes(m):
     assert rows["given up by this extractor"]["extracted"] == -mem.VERSION
 
 
+async def test_given_up_episodes_come_back_daily_for_a_few_rounds(m):
+    _, owner = m
+    once = await episode(owner, "failed one round")
+    spent = await episode(owner, "failed every round", days=1)
+    await mem._q("update mem_episodes set extracted = %s, attempts = 4 where id = %s", -mem.VERSION, once["id"])
+    await mem._q("update mem_episodes set extracted = %s, attempts = %s where id = %s", -mem.VERSION, 4 * mem.RETRIES,
+                 spent["id"])
+    mem._retried = 0.0
+    assert await mem._retry_given_up(now=10**6) >= 1  # other tests' set-aside episodes come back too
+    assert await mem._retry_given_up(now=10**6 + 3600) == 0  # once a day
+    rows = {r["text"]: r["extracted"] for r in await mem._q("select text, extracted from mem_episodes where owner = %s", owner)}
+    assert rows["failed one round"] == 0 and rows["failed every round"] == -mem.VERSION
+
+
 def test_stage0_reads_what_could_matter_and_drops_chatter():
     said = "Can u see the deadlines i set for mlp and mlp project?"
     ep = lambda text, trust=2, source="chat": {"text": text, "trust": trust, "source": source}  # noqa: E731
