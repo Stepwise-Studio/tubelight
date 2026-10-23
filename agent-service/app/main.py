@@ -72,6 +72,7 @@ async def lifespan(_: FastAPI):
     scheduler.cancel()
     if browsers:
         browsers.cancel()
+        await browser.close_all()
     if mem_worker:
         mem_worker.cancel()
     for t in list(runs.tasks.values()):

@@ -823,17 +823,36 @@ async def _user_input(b: Browser, m: dict) -> None:
 async def _stop(owner_id: str) -> None:
     b = _browsers.pop(owner_id, None)
     if b:
+        # Close Chromium the way a person would, so it writes cookies and site data (the sign-ins) to the profile;
+        # a killed browser loses whatever it hadn't saved yet.
+        try:
+            await b.conn.call("Browser.close", timeout=5)
+        except Exception:
+            pass
         try:
             await b.conn.ws.close()
         except Exception:
             pass
-        await asyncio.to_thread(lambda: b.container.remove(force=True))
+
+        def down() -> None:
+            try:
+                b.container.wait(timeout=15)
+            except Exception:
+                pass
+            b.container.remove(force=True)
+
+        await asyncio.to_thread(down)
 
 
 async def stop(owner_id: str) -> None:
     """The kill switch: no sites allowed any more, the browser closed (sign-ins stay in the profile)."""
     revoke(owner_id)
     await _stop(owner_id)
+
+
+async def close_all() -> None:
+    """The service is shutting down: close every browser properly, so sign-ins are saved."""
+    await asyncio.gather(*(_stop(o) for o in list(_browsers)), return_exceptions=True)
 
 
 async def sign_out(owner_id: str) -> None:
@@ -845,6 +864,7 @@ async def sign_out(owner_id: str) -> None:
 def _sweep() -> None:
     try:
         for c in _docker().containers.list(all=True, filters={"label": "tubelight=browser"}):
+            c.stop(timeout=10)  # SIGTERM: Chromium (the container's main process) saves its profile on the way out
             c.remove(force=True)
     except Exception as e:
         log.info("browser sweep skipped: %s", e)

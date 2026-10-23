@@ -106,3 +106,30 @@ async def test_guardrails_on_a_real_page(tmp_path, monkeypatch):
         assert title == "Home / X" and "shipping the new release" in txt
     finally:
         await B.stop(OWNER)
+
+
+@needs_chromium
+async def test_sign_ins_survive_a_restart(tmp_path, monkeypatch):
+    """Closing the browser (Stop, idle, redeploy) keeps the profile's cookies and site data; sign out wipes them."""
+    monkeypatch.setattr(B, "DATA", tmp_path / "browser")
+    monkeypatch.setitem(B.FAKE, "keep.test", "<p>hi</p>")
+    owner = OWNER + "-keep"
+
+    async def stored() -> str:
+        r = await B._browsers[owner].cdp("Runtime.evaluate", {"expression": "document.cookie + '|' + localStorage.getItem('k')", "returnByValue": True})
+        return r["result"]["value"]
+
+    try:
+        B.grant(owner, "keep.test")
+        await B.look(owner, "https://keep.test/")
+        await B._browsers[owner].cdp("Runtime.evaluate", {"expression": "document.cookie='s=1; max-age=99999; path=/'; localStorage.setItem('k','v')"})
+        await B.stop(owner)
+        B.grant(owner, "keep.test")
+        await B.look(owner, "https://keep.test/")
+        assert await stored() == "s=1|v"
+        await B.sign_out(owner)
+        B.grant(owner, "keep.test")
+        await B.look(owner, "https://keep.test/")
+        assert await stored() == "|null"
+    finally:
+        await B.stop(owner)
