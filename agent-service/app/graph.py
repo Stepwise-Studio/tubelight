@@ -128,7 +128,7 @@ def view_for(tm: dict, msgs: list[BaseMessage], members: list[dict]) -> list[Bas
     answered = {m.tool_call_id for m in msgs if isinstance(m, ToolMessage)}
     out: list[BaseMessage] = []
     for m in msgs:
-        if isinstance(m, AIMessage) and looping(m.text):
+        if isinstance(m, AIMessage) and garbled(m.text):
             # A garbled reply that slipped into the history derails every later call: show a placeholder instead.
             m = m.model_copy(update={"content": "[An earlier reply came out garbled and was dropped.]"})
         if isinstance(m, AIMessage):
@@ -487,6 +487,15 @@ def looping(text: str) -> bool:
     return bool(m) and len(set(m.group(1))) > 1
 
 
+# gpt-oss sometimes writes its own wire format as the reply ("<|start|>assistant<|channel|>commentary to=functions.x"):
+# a tool call that never happened, shown as text.
+_HARMONY = re.compile(r"<\|(start|channel|message|constrain|call|end|return)\|>")
+
+
+def garbled(text: str) -> bool:
+    return looping(text) or bool(_HARMONY.search(text))
+
+
 _GLUED = re.compile(r"(?<=[a-z\)][.!?])(?=[A-Z][a-z])")
 
 
@@ -520,6 +529,8 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
         text = said(acc)
         if looping(text):  # stop now: never stream or save the garbage
             raise StreamCut(f"reply got stuck repeating itself after {len(text)} chars")
+        if _HARMONY.search(text):
+            raise StreamCut("the reply was the model's raw tool-call format, not words")
         if text and not sent:
             await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "writing"))
         if text != sent and time.monotonic() - last >= DELTA_EVERY:

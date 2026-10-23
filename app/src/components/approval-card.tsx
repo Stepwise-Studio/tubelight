@@ -166,7 +166,7 @@ export function ApprovalCard({ approval, teammate, beam, context, onDecided }: A
       <Text variant="headline" accessibilityRole="header">{approval.title}</Text>
       {commit && typeof approval.draft.image === 'string' && (
         <Squircle style={{ borderRadius: radius.md, backgroundColor: c.panel2, overflow: 'hidden', alignItems: 'center' }}>
-          <Image source={{ uri: BASE + approval.draft.image }} style={{ width: '100%', height: 380 }} contentFit="contain"
+          <Image source={{ uri: BASE + approval.draft.image }} style={{ width: '100%', aspectRatio: 412 / 560 }} contentFit="cover"
             accessibilityLabel="The page as it is now" />
         </Squircle>
       )}

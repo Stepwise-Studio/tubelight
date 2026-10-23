@@ -39,6 +39,7 @@ GRANT_S = 20 * 60
 IDLE_S = 10 * 60
 W, H = 412, 915  # a phone-sized page: mobile sites are lighter to read and fit the phone's live view
 MAX_ELEMENTS = 220
+CROP = 560  # height of the approval card's screenshot, in page pixels
 DATA = config.WORKSPACES.parent / "browser"  # ~/tubelight/data/browser: the same path on the host and in the agent
 UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36"
 UA_META = {"brands": [{"brand": "Chromium", "version": "142"}, {"brand": "Google Chrome", "version": "142"},
@@ -669,7 +670,13 @@ async def preview(owner_id: str, args: dict) -> dict:
         url, _ = await _url(b)
         texts = await _typed(b)
         await b.cdp("DOM.scrollIntoViewIfNeeded", {"backendNodeId": e["backend"]})
-        shot = (await b.cdp("Page.captureScreenshot", {"format": "jpeg", "quality": 70}))["data"]
+        # The part of the screen around the button (what's being sent sits above it), not a thin full-height page.
+        quads = (await b.cdp("DOM.getContentQuads", {"backendNodeId": e["backend"]}))["quads"]
+        cy = sum(quads[0][1::2]) / 4 if quads else H / 2
+        view = (await b.cdp("Page.getLayoutMetrics"))["cssVisualViewport"]
+        top = min(max(0.0, cy - 400), H - CROP)
+        shot = (await b.cdp("Page.captureScreenshot", {"format": "jpeg", "quality": 75, "clip": {
+            "x": view["pageX"], "y": view["pageY"] + top, "width": W, "height": CROP, "scale": 1}}))["data"]
     key = uuid.uuid4().hex
     (SHOTS / owner_id).mkdir(parents=True, exist_ok=True)
     (SHOTS / owner_id / f"{key}.jpg").write_bytes(base64.b64decode(shot))
