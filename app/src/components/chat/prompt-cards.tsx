@@ -1,5 +1,6 @@
 import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
+import { router } from 'expo-router'
 import { useState } from 'react'
 import { TextInput, View } from 'react-native'
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated'
@@ -12,7 +13,7 @@ import type { Approval } from '@/lib/types'
 import { motion, radius, type as typeScale, useTheme } from '@/theme'
 import { Beam, Button, Icon, IconButton, Press, Squircle, Text, haptic, toast } from '@/ui'
 
-type Decide = (body: { action: 'answer' | 'connected' | 'skip'; answer?: string }) => Promise<boolean>
+type Decide = (body: { action: 'answer' | 'connected' | 'signed_in' | 'skip'; answer?: string }) => Promise<boolean>
 
 function useDecide(approval: Approval, onDecided?: () => void): [Decide, string | null] {
   const [busy, setBusy] = useState<string | null>(null)
@@ -159,6 +160,53 @@ export function ConnectCard({ approval, onDecided }: { approval: Approval; onDec
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Button label={`Connect ${name}`} loading={linking} disabled={!!busy} onPress={connect} style={{ flex: 1 }} />
             <Button label="Not now" variant="ghost" disabled={linking || !!busy} onPress={() => decide({ action: 'skip' })} />
+          </View>
+        )}
+      </Squircle>
+    </Beam>
+  )
+}
+
+// Sites whose logos the app already knows (as connectable apps); anything else gets its letter.
+const SITE_LOGO: Record<string, string> = {
+  'x.com': 'twitter', 'twitter.com': 'twitter', 'linkedin.com': 'linkedin', 'instagram.com': 'instagram', 'facebook.com': 'facebook',
+  'github.com': 'github', 'reddit.com': 'reddit', 'youtube.com': 'youtube', 'threads.net': 'threads',
+}
+
+/**
+ * A teammate needs them signed in to a site in Tubelight's browser (agent-service browser_signin). Sign in opens the
+ * site's sign-in page there with them in control; they type on the page itself, so no teammate (and no chat) ever
+ * holds the password. Done on that screen marks this card signed in and the teammate carries on.
+ */
+export function SigninCard({ approval, onDecided }: { approval: Approval; onDecided?: () => void }) {
+  const { c } = useTheme()
+  const [decide, busy] = useDecide(approval, onDecided)
+  const d = approval.draft as { site?: string; reason?: string; tab?: string; teammate?: string }
+  const site = d.site ?? ''
+  const pending = approval.status === 'pending'
+  const who = d.teammate || 'Your teammate'
+
+  return (
+    <Beam radius={radius.lg} active={pending}>
+      <Squircle style={{ borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, padding: 14, gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <BrandTile toolkit={SITE_LOGO[site] ?? site.split('.')[0]} size={40} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text variant="bodyMedium" numberOfLines={1}>{pending ? `Sign in to ${site}` : site}</Text>
+            <Text variant="caption" color="ink3" numberOfLines={3}>
+              {pending ? `You sign in on the page yourself, in Tubelight’s browser. ${who} never sees your password.`
+                : approval.status === 'approved' ? 'Signed in' : 'Skipped for now'}
+            </Text>
+          </View>
+          {approval.status === 'approved' && (
+            <Animated.View entering={FadeIn.duration(motion.duration.fast)}><Icon icon={Tick02Icon} size={20} color="success" strokeWidth={2} /></Animated.View>
+          )}
+        </View>
+        {pending && (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button label="Sign in" disabled={!!busy} style={{ flex: 1 }}
+              onPress={() => { haptic.tap(); router.push({ pathname: '/browser', params: { signin: approval.id, tab: d.tab ?? '', site } }) }} />
+            <Button label="Not now" variant="ghost" disabled={!!busy} onPress={() => decide({ action: 'skip' })} />
           </View>
         )}
       </Squircle>

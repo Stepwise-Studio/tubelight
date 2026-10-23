@@ -313,7 +313,7 @@ async def cancel_run(run_id: str, user: User = Depends(current_user)):
 
 class Decision(BaseModel):
     # approve/reject: approvals. answer/skip: questions. connected/skip: connect cards.
-    action: Literal["approve", "reject", "answer", "connected", "skip"]
+    action: Literal["approve", "reject", "answer", "connected", "signed_in", "skip"]
     args: dict[str, Any] | None = None
     note: str | None = None
     answer: str | None = None
@@ -331,7 +331,8 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
         await db.update("approvals", {"id": f"eq.{approval_id}"}, {"status": "expired"})
         raise HTTPException(409, "This request is no longer active, so nothing was done.")
     kind = approval.get("kind", "approval")
-    allowed = {"approval": {"approve", "reject"}, "question": {"answer", "skip"}, "connect": {"connected", "skip"}}[kind]
+    allowed = {"approval": {"approve", "reject"}, "question": {"answer", "skip"}, "connect": {"connected", "skip"},
+               "signin": {"signed_in", "skip"}}[kind]
     if body.action not in allowed:
         raise HTTPException(400, "That response doesn't fit this request.")
     if body.action == "answer" and not (body.answer or "").strip():
@@ -344,7 +345,7 @@ async def decide(approval_id: str, body: Decision, user: User = Depends(current_
         if not body.secret:
             raise HTTPException(400, "This command needs your computer's password. Type it on the card, then approve.")
         computers.stash_password(user["id"], (body.args or approval["draft"]).get("cmd", ""), body.secret)
-    status = "approved" if body.action in ("approve", "answer", "connected") else "rejected"
+    status = "approved" if body.action in ("approve", "answer", "connected", "signed_in") else "rejected"
     await db.update("approvals", {"id": f"eq.{approval_id}"}, {
         "status": status, "final_args": body.args if body.action == "approve" else None,
         "note": body.note, "answer": body.answer, "decided_at": db.now()})

@@ -137,6 +137,7 @@ class Tab:
         self.snaps: dict[str, dict] = {}
         self.ids: dict[int, str] = {}
         self.count = [0, 0]  # snapshots, element ids
+        self.cursor: dict | None = None  # where the teammate last pointed and what it did there (the live view's cursor)
 
     async def cdp(self, method: str, params: dict | None = None, timeout: float = 30) -> dict:
         self.used = self.browser.used = time.time()
@@ -283,7 +284,9 @@ async def _tab(owner_id: str, key: str = "main", label: str = "") -> Tab:
         await _setup(b, session)
         await b.conn.call("Emulation.setFocusEmulationEnabled", {"enabled": True}, session)  # typing works in every tab
         t = b.tabs[key] = Tab(b, key, label or key, target, session)
-        if b.view not in b.tabs:
+        you = b.tabs.get("you")
+        if b.view not in b.tabs or (b.view == "you" and you and not you.takeover):  # watching nothing yet: follow them
+            await _cast(b, False)
             b.view = key
             await _cast(b, True)
         await _announce(b)
@@ -512,8 +515,8 @@ def text(snap: dict) -> str:
     if snap.get("truncated"):
         lines.append(f"(only the first {MAX_ELEMENTS} elements; scroll with KEYS page_down to see more)")
     if snap.get("login"):
-        lines.append("This is a sign-in page. Never type a password or a code. Ask the user to sign in themselves: "
-                     "Tubelight → Profile → Browser, tap Take over. Then look again.")
+        lines.append("This is a sign-in page. Never type a password or a code, and never ask for one in chat: call "
+                     "browser_signin with this site, and they sign in themselves.")
     return "\n".join(lines)
 
 
@@ -562,16 +565,40 @@ async def _submits(b: Tab, e: dict) -> bool:
                                 "return !!(this.form && (t==='submit' || (this.tagName==='BUTTON' && !t) || t==='image'))}"))
 
 
-async def _click(b: Tab, e: dict) -> None:
-    await b.cdp("DOM.scrollIntoViewIfNeeded", {"backendNodeId": e["backend"]})
-    quads = (await b.cdp("DOM.getContentQuads", {"backendNodeId": e["backend"]}))["quads"]
-    if not quads:
+async def _point(b: Tab, e: dict | None, did: str) -> tuple[float, float] | None:
+    """Move the teammate's cursor to an element (its centre, after scrolling it into view) and say what it's doing.
+    While a phone watches this tab, wait a beat so the cursor visibly arrives before the click lands."""
+    at = None
+    if e is not None:
+        await b.cdp("DOM.scrollIntoViewIfNeeded", {"backendNodeId": e["backend"]})
+        quads = (await b.cdp("DOM.getContentQuads", {"backendNodeId": e["backend"]}))["quads"]
+        if quads:
+            at = (sum(quads[0][0::2]) / 4, sum(quads[0][1::2]) / 4)
+    if at:  # page pixels -> the screen the phone sees (a desktop-width page is shown zoomed out)
+        vv = (await b.cdp("Page.getLayoutMetrics"))["cssVisualViewport"]
+        sx, sy = (at[0] - vv["offsetX"]) * vv["scale"], (at[1] - vv["offsetY"]) * vv["scale"]
+    else:
+        sx, sy = (b.cursor or {}).get("x", W / 2), (b.cursor or {}).get("y", H / 3)
+    b.cursor = {"x": round(sx, 1), "y": round(sy, 1), "did": did[:80], "at": time.time()}
+    br = b.browser
+    if br.viewers and br.view == b.key:
+        msg = json.dumps({"t": "cursor", "key": b.key, **b.cursor})
+        for ws in list(br.viewers):
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                br.viewers.discard(ws)
+        await asyncio.sleep(0.35)
+    return at
+
+
+async def _click(b: Tab, e: dict, did: str = "") -> None:
+    at = await _point(b, e, did or f"clicking “{e['name'] or e['role']}”")
+    if at is None:
         await _js(b, e, "function(){this.click()}")
         return
-    q = quads[0]
-    x, y = sum(q[0::2]) / 4, sum(q[1::2]) / 4
     for kind in ("mousePressed", "mouseReleased"):
-        await b.cdp("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1})
+        await b.cdp("Input.dispatchMouseEvent", {"type": kind, "x": at[0], "y": at[1], "button": "left", "clickCount": 1})
 
 
 async def act(owner_id: str, sid: str, element: str, action: str, value: str = "", tab: str = "main") -> dict:
@@ -593,8 +620,9 @@ async def act(owner_id: str, sid: str, element: str, action: str, value: str = "
             did = f"clicked {e['role']} “{e['name']}”"
         elif action == "TYPE":
             if await _js(b, e, "function(){return (this.type||'').toLowerCase()==='password' || this.autocomplete==='one-time-code'}"):
-                raise PermissionError("That's a password or code field: teammates never type those. Ask the user to "
-                                      "sign in themselves (Profile → Browser → Take over).")
+                raise PermissionError("That's a password or code field: teammates never type those, and never ask for "
+                                      "them in chat. Call browser_signin: they sign in themselves.")
+            await _point(b, e, f"typing in “{e['name'] or e['role']}”")
             await b.cdp("DOM.focus", {"backendNodeId": e["backend"]})
             await _js(b, e, "function(){if(this.select){this.select()}else{const r=document.createRange();"
                             "r.selectNodeContents(this);const s=getSelection();s.removeAllRanges();s.addRange(r)}}")
@@ -604,6 +632,7 @@ async def act(owner_id: str, sid: str, element: str, action: str, value: str = "
                 await _key(b, "Delete")
             did = f"typed into {e['role']} “{e['name']}”"
         elif action == "READ":
+            await _point(b, e, f"reading “{e['name'] or e['role']}”")
             got = await _js(b, e, "function(){return (this.innerText||this.value||'').slice(0,12000)}")
             return {"status": "done", "did": str(got or e["name"]), **await snapshot(b)}
         else:
@@ -670,6 +699,7 @@ async def keys(owner_id: str, sequence: list[str], tab: str = "main") -> dict:
             if key_commits(combo, await _focus_kind(b)):
                 raise NeedsOK(f"“{combo}” here would send or submit. Click the page's own button through browser_commit "
                               "instead, so they can approve it.")
+            await _point(b, None, f"pressing {combo.replace('_', ' ')}")
             await _key(b, combo)
         await settle(b)
         return {"status": "done", "did": "pressed " + ", ".join(sequence[:8]), **await snapshot(b)}
@@ -691,6 +721,7 @@ async def goto(b: Tab, url: str) -> None:
     if not allowed(b.owner_id, url):
         sites = ", ".join(granted(b.owner_id)) or "none yet"
         raise PermissionError(f"{site_of(url)} isn't one of the sites they allowed ({sites}). Ask with browser_use.")
+    await _point(b, None, f"opening {site_of(url)}")
     b.loading = True
     r = await b.cdp("Page.navigate", {"url": url}, timeout=40)
     if r.get("errorText"):
@@ -756,7 +787,7 @@ async def commit(owner_id: str, sid: str, element: str, tab: str = "main") -> di
         if moved or _fp(url, e, await _typed(b)) != fp:
             return {"status": "changed", "why": "the page changed after they approved it, so nothing was clicked; "
                                                 "call browser_commit again if it's still wanted", **(moved or await snapshot(b))}
-        await _click(b, e)
+        await _click(b, e, f"pressing “{e['name'] or e['role']}” (you approved it)")
         await settle(b)
         return {"status": "done", "did": f"clicked {e['role']} “{e['name']}” (approved)", **await snapshot(b)}
 
@@ -805,6 +836,27 @@ async def read(owner_id: str, url: str, budget: float = 25) -> tuple[str, str]:
             pass
 
 
+# ------------------------------------------------------------------ sign-in: the user's own hands, in a teammate's tab
+SIGNIN = {"x.com": "https://x.com/i/flow/login", "twitter.com": "https://x.com/i/flow/login",
+          "instagram.com": "https://www.instagram.com/accounts/login/", "linkedin.com": "https://www.linkedin.com/login",
+          "facebook.com": "https://www.facebook.com/login", "github.com": "https://github.com/login",
+          "reddit.com": "https://www.reddit.com/login/", "threads.net": "https://www.threads.net/login"}
+
+
+async def open_signin(owner_id: str, tab: str, label: str, site: str, url: str = "") -> None:
+    """Open the site's sign-in page in the teammate's tab (the card's Sign in button lands the user on it)."""
+    grant(owner_id, site)
+    t = await _tab(owner_id, tab, label)
+    async with t.lock:
+        await goto(t, url if url and allowed(owner_id, url) else SIGNIN.get(site) or f"https://{site}/login")
+    b = _browsers[owner_id]
+    if b.view != tab:
+        await _cast(b, False)
+        b.view = tab
+        await _cast(b, True)
+        await _announce(b)
+
+
 # ------------------------------------------------------------------ live view (the phone watches, or takes over)
 async def _frame(b: Browser, t: Tab, p: dict) -> None:
     await b.conn.call("Page.screencastFrameAck", {"sessionId": p["sessionId"]}, t.session)
@@ -845,7 +897,7 @@ async def state(owner_id: str) -> dict:
     running = bool(b and not b.conn.closed)
     t = b.tabs.get(b.view) if b and running else None
     out = {"running": running, "sites": granted(owner_id), "takeover": bool(t and t.takeover), "available": True,
-           "url": "", "title": "", "tab": t.key if t else "", "tabs": [{"key": x.key, "label": x.label} for x in b.tabs.values()] if running else []}
+           "url": "", "title": "", "tab": t.key if t else "", "cursor": t.cursor if t and not t.takeover else None, "tabs": [{"key": x.key, "label": x.label} for x in b.tabs.values()] if running else []}
     if t:
         try:
             out["url"], out["title"] = await _url(t)
@@ -875,13 +927,25 @@ async def watch(owner_id: str, ws: Any) -> None:
                     t.takeover = False
                 b.view = m["key"]
                 await _cast(b, True)
+            elif kind == "signin":  # from a Sign in card: that teammate's tab on the site's sign-in page, in their hands
+                key, site = str(m.get("key") or "you"), site_of(str(m.get("site") or ""))
+                t = b.tabs.get(key)
+                if site and (t is None or site not in (await _url(t))[0]):
+                    await open_signin(owner_id, key, str(m.get("label") or key), site)
+                if key in b.tabs and b.view != key:
+                    await _cast(b, False)
+                    b.view = key
+                    await _cast(b, True)
+                if t := b.tabs.get(key):
+                    t.takeover = True
             elif kind == "takeover" and t:
                 t.takeover = bool(m.get("on"))
             elif kind == "stop":
                 revoke(owner_id)
             elif t and t.takeover:
-                await _user_input(t, m)
-            if kind in ("takeover", "stop", "go", "back", "tab"):
+                if focus := await _user_input(t, m):
+                    await ws.send_text(json.dumps({"t": "focus", **focus}))
+            if kind in ("takeover", "stop", "go", "back", "tab", "signin"):
                 await ws.send_text(json.dumps({"t": "state", **await state(owner_id)}))
     finally:
         b.viewers.discard(ws)
@@ -891,25 +955,43 @@ async def watch(owner_id: str, ws: Any) -> None:
             await _cast(b, False)
 
 
-async def _user_input(b: Tab, m: dict) -> None:
-    """The user's own hands on the page: no site limits, no commit checks (it's them)."""
+FOCUS = """(() => { const a = document.activeElement; if (!a || a === document.body) return {kind: 'none', label: ''};
+  const t = (a.type || '').toLowerCase(), ac = (a.autocomplete || '').toLowerCase();
+  const field = a.isContentEditable || a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' &&
+    !['button', 'submit', 'checkbox', 'radio', 'range', 'color', 'file', 'image', 'reset'].includes(t));
+  if (!field) return {kind: 'none', label: ''};
+  const kind = t === 'password' ? 'password' : ac.includes('one-time-code') ? 'otp' : t === 'email' || ac.includes('email') ? 'email'
+    : ac.includes('username') || /user|login|phone|mail/i.test(a.name + ' ' + a.id) ? 'username' : t === 'tel' ? 'tel' : 'text';
+  const label = a.getAttribute('aria-label') || a.placeholder || (a.labels && a.labels[0] && a.labels[0].innerText) || a.name || '';
+  const r = a.getBoundingClientRect(), v = window.visualViewport || {offsetTop: 0, scale: 1};
+  return {kind, label: label.trim().slice(0, 40), y: Math.round((r.top + r.height / 2 - v.offsetTop) * v.scale)} })()"""
+
+
+async def _user_input(b: Tab, m: dict) -> dict | None:
+    """The user's own hands on the page: no site limits, no commit checks (it's them). A tap answers with the field it
+    focused (password, username, code...), so the phone's own keyboard and password manager can type into it."""
     kind = m.get("t")
     if kind == "tap":
         x, y = float(m["x"]), float(m["y"])
         for t in ("touchStart", "touchEnd"):
             await b.cdp("Input.dispatchTouchEvent", {"type": t, "touchPoints": [{"x": x, "y": y}] if t == "touchStart" else []})
+        await asyncio.sleep(0.25)
+        r = await b.cdp("Runtime.evaluate", {"expression": FOCUS, "returnByValue": True})
+        return (r.get("result") or {}).get("value") or {"kind": "none", "label": ""}
     elif kind == "scroll":
         await b.cdp("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": W / 2, "y": H / 2, "deltaX": 0, "deltaY": float(m.get("dy", 0))})
     elif kind == "text":
         await b.cdp("Input.insertText", {"text": str(m.get("v", ""))[:2000]})
     elif kind == "key":
-        await _key(b, str(m.get("k", "")))
+        for _ in range(max(1, min(int(m.get("n", 1)), 200))):
+            await _key(b, str(m.get("k", "")))
     elif kind == "back":
         await b.cdp("Runtime.evaluate", {"expression": "history.back()"})
     elif kind == "go":
         url = str(m.get("url", "")).strip()
         if url:
             await b.cdp("Page.navigate", {"url": url if re.match(r"https?://", url) else "https://" + url})
+    return None
 
 
 # ------------------------------------------------------------------ lifecycle

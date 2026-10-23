@@ -152,6 +152,7 @@ async def test_teammates_work_in_parallel_tabs(tmp_path, monkeypatch):
         for k, d in zip("abc", done):
             assert d["status"] == "done" and f"from {k}" in B.text(d) and d["url"] == f"https://{k}.test/"
         b = B._browsers[owner]
+        assert b.tabs["a"].cursor["did"] == "typing in “Note”" and b.tabs["a"].cursor["x"] > 0  # the live view's cursor
         await b.tabs["a"].cdp("Runtime.evaluate", {"expression": "document.cookie='who=me; max-age=999; path=/'"})
         await B.look(owner, "https://a.test/x", tab="b")  # b goes to a's site: same sign-ins
         r = await b.tabs["b"].cdp("Runtime.evaluate", {"expression": "document.cookie", "returnByValue": True})

@@ -176,6 +176,8 @@ VOICE = """## How you talk (always)
 - Judge, don't just list. Say what matters and why, and what they can ignore. Fold routine stuff into one line.
 - When there's an obvious next step, offer it in one short question ("Want me to draft a reply to Priya?"). One or two offers at most, never a generic menu.
 - Never narrate your process ("I'm about to scan...", "I used the search tool"): the app already shows what you're doing live. Never mention tools, slugs, IDs, raw timestamps or UTC.
+- Never ask for a password, PIN, one-time code or other login secret in chat, and never repeat one they send: for a
+  website they sign in themselves in Tubelight's browser (browser_signin); for an app, connect_app.
 - Keep it short: most replies fit on one phone screen. Markdown sparingly: bold for the few things that matter, bullets only for real lists, no headings in short replies. No emojis."""
 
 # App playbooks: how to do the common job well with each app, added when the teammate has it.
@@ -492,6 +494,35 @@ def looping(text: str) -> bool:
 _HARMONY = re.compile(r"<\|(start|channel|message|constrain|call|end|return)\|>")
 
 
+_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def stray_card(text: str) -> tuple[str, str, dict[str, Any]] | None:
+    """A card's arguments written out as the reply instead of called (free models do this now and then): the JSON of
+    an ask_user, browser_signin or connect_app call, bare or in a ```json block. Returns (the words around it, the
+    tool, its arguments), so the card the teammate meant is asked for real."""
+    fenced = _FENCE.search(text)
+    start = fenced.start(1) if fenced else text.find("{")
+    if start < 0:
+        return None
+    try:
+        got, length = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    if not isinstance(got, dict):
+        return None
+    words = (text[:fenced.start()] + text[fenced.end():] if fenced else text[:start] + text[start + length:]).strip()
+    if isinstance(got.get("question"), str) and got["question"].strip():
+        options = [str(o) for o in got.get("options") or [] if str(o).strip()][:6]
+        return words, "ask_user", {"question": got["question"].strip(), "options": options,
+                                   "allow_other": bool(got.get("allow_other", True)) or not options}
+    if isinstance(got.get("site"), str) and got["site"].strip() and set(got) <= {"site", "reason", "url"}:
+        return words, "browser_signin", {k: str(v) for k, v in got.items()}
+    if isinstance(got.get("toolkit"), str) and got["toolkit"].strip() and set(got) <= {"toolkit", "reason"}:
+        return words, "connect_app", {k: str(v) for k, v in got.items()}
+    return None
+
+
 def garbled(text: str) -> bool:
     return looping(text) or bool(_HARMONY.search(text))
 
@@ -533,7 +564,7 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
             raise StreamCut("the reply was the model's raw tool-call format, not words")
         if text and not sent:
             await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "writing"))
-        if text != sent and time.monotonic() - last >= DELTA_EVERY:
+        if text != sent and time.monotonic() - last >= DELTA_EVERY and not text.lstrip().startswith("{"):
             await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": text})
             sent, last = text, time.monotonic()
     if acc is None or (not said(acc).strip() and not acc.tool_calls):
@@ -542,6 +573,14 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
     if said(acc) and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
         # The stream stopped mid-reply with no error (free tiers do this): never save the fragment as the answer.
         raise StreamCut(f"reply stream ended without finishing after {len(said(acc))} chars")
+    if not acc.tool_calls and (card := stray_card(said(acc))):
+        # The model wrote a card as JSON text (Gemini does, now and then): ask it as the card it meant.
+        words, name, args = card
+        if words:
+            await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": words})
+        return AIMessage(content=words, tool_calls=[{"name": name, "args": args, "id": f"call_{uuid.uuid4().hex[:24]}",
+                                                     "type": "tool_call"}], id=acc.id or str(uuid.uuid4()),
+                         response_metadata=acc.response_metadata, usage_metadata=acc.usage_metadata)
     if said(acc) and said(acc) != sent:
         await db.broadcast(ctx.thread_id, "delta", {**_ids(ctx, tm), "stream_id": stream_id, "text": said(acc)})
     return AIMessage(content=acc.content, tool_calls=acc.tool_calls, id=acc.id or str(uuid.uuid4()),
@@ -738,6 +777,16 @@ async def _prompt(ctx: RunCtx, tm: dict, tc: dict) -> dict:
         options = [str(o).strip() for o in (args.get("options") or []) if str(o).strip()][:4]
         title = str(args.get("question") or "Which way should I go?").strip()
         draft = {"question": title, "options": options, "allow_other": bool(args.get("allow_other", True))}
+    elif tc["name"] == "browser_signin":
+        # The site's sign-in page opens in this teammate's browser tab; the card takes the user straight to it.
+        kind = "signin"
+        site = browser.site_of(str(args.get("site", "")))
+        title = f"Sign in to {site}"
+        draft = {"site": site, "reason": str(args.get("reason") or "")[:200], "tab": tm["id"], "teammate": tm["name"]}
+        try:
+            await browser.open_signin(ctx.owner_id, tm["id"], tm["name"], site, str(args.get("url") or ""))
+        except Exception as e:
+            log.warning("sign-in page didn't open for %s: %s", site, e)
     else:
         kind = "connect"
         toolkit = await connectors.resolve(str(args.get("toolkit", ""))) or str(args.get("toolkit", "")).upper()
@@ -802,6 +851,11 @@ def make_tools(ctx: RunCtx):
 
 
 async def _prompt_result(ctx: RunCtx, tm: dict, name: str, args: dict, d: dict) -> str:
+    if name == "browser_signin":
+        site = browser.site_of(str(args.get("site", "")))
+        if d.get("action") == "signed_in":
+            return f"They signed in to {site} in the browser. Carry on: browser_look shows the page."
+        return f"They chose not to sign in to {site} now. Tell them what you can do without it, without asking for passwords."
     if name == "ask_user":
         if d.get("action") == "answer" and d.get("answer"):
             return f"The user answered: {d['answer']}"

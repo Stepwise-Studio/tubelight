@@ -338,3 +338,40 @@ async def test_a_reply_cut_off_mid_stream_is_retried_not_saved(api, env):
     await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "remind me at 1:12"})
     await settle()
     assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Follow-up set for 1:12 PM."]
+
+
+async def test_signin_card_pauses_until_they_sign_in(api, env, monkeypatch):
+    """A site that needs them signed in: a Sign in card (never a password in chat); signed in, the teammate goes on."""
+    from app import browser
+    fdb, fake = env
+    sol = teammate(fdb, "sol", "social")
+    opened: list = []
+
+    async def open_signin(owner, tab, label, site, url=""):
+        opened.append((tab, label, site))
+
+    monkeypatch.setattr(browser, "open_signin", open_signin)
+    fake.script = [ai(calls=[("browser_signin", {"site": "https://www.x.com/home", "reason": "to post for you"})]),
+                   ai("You're in. Posting now.")]
+    r = await api.post(f"/threads/dm:{sol['id']}/messages", json={"text": "log in to my x account"})
+    await settle()
+    [card] = fdb.rows("approvals", kind="signin")
+    assert card["title"] == "Sign in to x.com" and card["draft"]["tab"] == sol["id"] and opened == [(sol["id"], "Sol", "x.com")]
+    assert fdb.rows("messages", kind="signin")[0]["meta"]["approval_id"] == card["id"]
+    assert fdb.rows("runs", id=r.json()["run_id"])[0]["status"] == "waiting_approval"
+    assert (await api.post(f"/approvals/{card['id']}", json={"action": "approve"})).status_code == 400
+    assert (await api.post(f"/approvals/{card['id']}", json={"action": "signed_in"})).json()["status"] == "approved"
+    await settle()
+    tool_msg = [m for m in fake.calls[-1] if isinstance(m, ToolMessage)][-1]
+    assert tool_msg.content.startswith("They signed in to x.com")
+
+
+async def test_a_question_written_as_json_becomes_a_card(api, env):
+    fdb, fake = env
+    sol = teammate(fdb, "sol", "social")
+    fake.script = [ai('{"question": "How should I log in?", "options": ["You sign in", "Cancel"], "allow_other": false}Pick one.')]
+    await api.post(f"/threads/dm:{sol['id']}/messages", json={"text": "log in to x"})
+    await settle()
+    [q] = fdb.rows("approvals", kind="question")
+    assert q["draft"]["options"] == ["You sign in", "Cancel"]
+    assert not [m for m in fdb.rows("messages", sender_type="teammate", kind="text") if "{" in (m["text"] or "")]

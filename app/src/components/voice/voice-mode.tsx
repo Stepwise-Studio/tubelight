@@ -142,7 +142,7 @@ export function useVoiceSession({ enabled, threadId, messages, working, activity
           const poll = setInterval(() => {
             const { messages: ms, working: busy } = latest.current
             const fresh = ms.filter((m) => m.created_at > since && m.sender_type !== 'user').reverse()
-            const blocking = fresh.find((m) => m.kind === 'approval' || m.kind === 'question' || m.kind === 'connect' || m.kind === 'error')
+            const blocking = fresh.find((m) => m.kind === 'approval' || m.kind === 'question' || m.kind === 'connect' || m.kind === 'signin' || m.kind === 'error')
             const texts = fresh.filter((m) => m.kind === 'text' && m.text.trim() && !m.meta?.voice)
             const timedOut = Date.now() - started > TASK_TIMEOUT_MS
             if (!blocking && !(texts.length && !busy) && !timedOut) return

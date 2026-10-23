@@ -72,7 +72,7 @@ INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read",
-    "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
+    "browser_signin": "read", "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
@@ -82,7 +82,7 @@ INTERNAL = {
     "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
-PROMPTS = {"ask_user", "connect_app"}
+PROMPTS = {"ask_user", "connect_app", "browser_signin"}
 LABELS = {
     "browser_use": "Asking to use the browser", "browser_look": "Looking at a web page", "browser_act": "Using a web page",
     "browser_keys": "Pressing keys on a web page", "browser_subtask": "Working on a web page", "browser_commit": "Pressing the button",
@@ -513,6 +513,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
             return await cu.subtask("", "browser", goal, inputs or [], done_when, max_steps, call=call, kind=cu.BROWSER)
 
+        async def browser_signin(site: str, reason: str = "", url: str = "") -> str:
+            return "handled by the graph"
+
         async def browser_commit(snapshot: str, element: str, what: str) -> str:
             return await _b(browser.commit(owner, snapshot, element, tab=tab))
 
@@ -536,6 +539,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "fast helper. It stops with DONE, BLOCKED, NEEDS_INPUT or NEEDS_OK (a ⚑ button is next: call "
                             "browser_commit with that snapshot and element). goal: one outcome. inputs: every text it may "
                             "type, exactly. done_when: what the page shows when it's done."),
+            StructuredTool.from_function(coroutine=browser_signin, name="browser_signin",
+                description="When a site needs them signed in (a sign-in page, or they ask you to log in): this gives "
+                            "them a Sign in card that opens the site's sign-in page in Tubelight's browser, where they "
+                            "sign in themselves. NEVER ask for a password, code or username in chat, and never type one. "
+                            "site: like x.com. reason: one line on why. url: the sign-in page, if you know it."),
             StructuredTool.from_function(coroutine=browser_commit, name="browser_commit",
                 description="Press a ⚑ button (Post, Send, Buy, Delete...) after they approve: they see the screen and the "
                             "text first. snapshot, element: from the latest look. what: what pressing it does, in a line "

@@ -30,7 +30,7 @@ import { FileTile } from '@/components/vault/file-tile'
 import { FileIcon } from '@/components/vault/file-icon'
 import { localCopy } from '@/components/vault/actions'
 import { saveAttachment } from '@/lib/vault'
-import { ConnectCard, QuestionCard } from './prompt-cards'
+import { ConnectCard, QuestionCard, SigninCard } from './prompt-cards'
 import { SwipeToReply } from './swipe-reply'
 
 export type ChatItem =
@@ -141,7 +141,8 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':
     case 'question':
-    case 'connect': {
+    case 'connect':
+    case 'signin': {
       return (
         <TeammateBlock teammate={t} first={first} paused={pauseAvatar} working={working} bleed>
           {/* The card carries the whole ask; the row's text only shows until the approval row loads.
@@ -153,6 +154,8 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
             <QuestionCard approval={approval} onDecided={actions.onDecided} />
           ) : m.kind === 'connect' ? (
             <ConnectCard approval={approval} onDecided={actions.onDecided} />
+          ) : m.kind === 'signin' ? (
+            <SigninCard approval={approval} onDecided={actions.onDecided} />
           ) : (
             <ApprovalCard approval={approval} teammate={t} beam={approval.status === 'pending'} onDecided={actions.onDecided} />
           )}

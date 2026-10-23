@@ -57,7 +57,7 @@ export interface Thread {
   created_at: string
 }
 
-export type MessageKind = 'text' | 'approval' | 'handoff' | 'error' | 'event' | 'question' | 'connect'
+export type MessageKind = 'text' | 'approval' | 'handoff' | 'error' | 'event' | 'question' | 'connect' | 'signin'
 
 export interface Message {
   id: string
@@ -122,7 +122,7 @@ export interface Attachment { path: string; name: string; mime: string; size: nu
 export interface Approval {
   id: string
   /** approval: act tools. question: ask_user options. connect: connect_app. */
-  kind: 'approval' | 'question' | 'connect'
+  kind: 'approval' | 'question' | 'connect' | 'signin'
   answer: string | null
   owner_id: string
   thread_id: string
