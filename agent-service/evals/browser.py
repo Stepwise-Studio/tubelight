@@ -26,7 +26,7 @@ CASES = [
 
 
 async def state() -> dict:
-    b = B._browsers[OWNER]
+    b = B._browsers[OWNER].tabs["main"]
     r = await b.cdp("Runtime.evaluate", {"returnByValue": True, "expression":
         "({posted: window.posted||0, deleted: !!document.body.dataset.deleted, draft: document.getElementById('draft').innerText.trim(),"
         " reply: document.getElementById('reply').value, url: location.href,"

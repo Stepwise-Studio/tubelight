@@ -36,7 +36,8 @@ from . import config
 
 log = logging.getLogger(__name__)
 GRANT_S = 20 * 60
-IDLE_S = 10 * 60
+IDLE_S = 5 * 60
+MAX_TABS = 3  # teammates working at once, each in its own tab (memory: ~150-250 MB a busy tab)
 W, H = 412, 915  # a phone-sized page: mobile sites are lighter to read and fit the phone's live view
 MAX_ELEMENTS = 220
 CROP = 560  # height of the approval card's screenshot, in page pixels
@@ -107,42 +108,58 @@ class Conn:
 
     async def call(self, method: str, params: dict | None = None, session: str | None = None, timeout: float = 30) -> dict:
         self.n += 1
+        n = self.n  # calls overlap (several tabs): each waits for its own id
         fut = asyncio.get_running_loop().create_future()
-        self.waiting[self.n] = fut
-        await self.ws.send(json.dumps({"id": self.n, "method": method, "params": params or {}, **({"sessionId": session} if session else {})}))
+        self.waiting[n] = fut
+        await self.ws.send(json.dumps({"id": n, "method": method, "params": params or {}, **({"sessionId": session} if session else {})}))
         try:
             m = await asyncio.wait_for(fut, timeout)
         finally:
-            self.waiting.pop(self.n, None)
+            self.waiting.pop(n, None)
         if "error" in m:
             raise RuntimeError(f"{method}: {m['error'].get('message')}")
         return m.get("result") or {}
 
 
 # ------------------------------------------------------------------ one browser per user
-class Browser:
-    def __init__(self, owner_id: str, container: Any, conn: Conn) -> None:
-        self.owner_id, self.container, self.conn = owner_id, container, conn
-        self.session = ""  # the work tab's CDP session
-        self.target = ""
+class Tab:
+    """One teammate's tab: its own page, snapshots and element ids. Sign-ins are the browser's, shared by every tab."""
+
+    def __init__(self, browser: "Browser", key: str, label: str, target: str, session: str) -> None:
+        self.browser, self.key, self.label = browser, key, label
+        self.owner_id, self.conn = browser.owner_id, browser.conn
+        self.target, self.session = target, session
         self.lock = asyncio.Lock()
         self.used = time.time()
-        self.takeover = False
+        self.takeover = False  # the user holds this tab from the live view
         self.loading = False
         self.blocked = ""  # the last page refused for being outside the allowed sites
         self.snaps: dict[str, dict] = {}
         self.ids: dict[int, str] = {}
         self.count = [0, 0]  # snapshots, element ids
-        self.viewers: set[Any] = set()  # live-view websockets
 
     async def cdp(self, method: str, params: dict | None = None, timeout: float = 30) -> dict:
-        self.used = time.time()
+        self.used = self.browser.used = time.time()
         return await self.conn.call(method, params, self.session, timeout)
+
+
+class Browser:
+    def __init__(self, owner_id: str, container: Any, conn: Conn) -> None:
+        self.owner_id, self.container, self.conn = owner_id, container, conn
+        self.used = time.time()
+        self.tabs: dict[str, Tab] = {}  # teammate id (or "you") -> its tab
+        self.opening = asyncio.Lock()
+        self.spare = ""  # the blank page Chromium starts with: the first tab takes it
+        self.view = ""  # the tab the live view shows
+        self.viewers: set[Any] = set()  # live-view websockets
+
+    def by_session(self, session: str | None) -> Tab | None:
+        return next((t for t in self.tabs.values() if t.session == session), None)
 
 
 _browsers: dict[str, Browser] = {}
 _grants: dict[str, dict[str, float]] = {}  # owner -> site -> until
-_cleared: dict[tuple[str, str, str], tuple[str, float]] = {}  # (owner, snapshot, element) -> (fingerprint, until)
+_cleared: dict[tuple[str, str, str, str], tuple[str, float]] = {}  # (owner, tab, snapshot, element) -> (fingerprint, until)
 _start = asyncio.Lock()
 ready = False  # set at startup: the image is there and Docker answers
 FAKE: dict[str, str] = {}  # host -> html: evals and tests serve pages without the network
@@ -193,7 +210,7 @@ def _run(owner_id: str) -> tuple[Any, str]:
         args.insert(0, f"--proxy-server={config.BROWSER_PROXY}")
     c = client.containers.run(
         config.BROWSER_IMAGE, args, detach=True, name=_name(owner_id), hostname="tubelight-browser", user=f"{uid}:{uid}",
-        mem_limit="800m", nano_cpus=1_500_000_000, pids_limit=512, cap_drop=["ALL"], security_opt=["no-new-privileges"],
+        mem_limit="1000m", nano_cpus=1_500_000_000, pids_limit=512, cap_drop=["ALL"], security_opt=["no-new-privileges"],
         read_only=True, tmpfs={"/tmp": "rw,size=256m,mode=1777"}, network=config.BROWSER_NETWORK or None,
         volumes={str(profile): {"bind": "/profile", "mode": "rw"}}, labels={"tubelight": "browser"},
     )
@@ -240,15 +257,52 @@ async def _ensure(owner_id: str) -> Browser:
         await b.conn.call("Browser.setDownloadBehavior", {"behavior": "deny"})
         await b.conn.call("Target.setDiscoverTargets", {"discover": True})
         pages = [t for t in (await b.conn.call("Target.getTargets"))["targetInfos"] if t["type"] == "page"]
-        b.target = pages[0]["targetId"] if pages else (await b.conn.call("Target.createTarget", {"url": "about:blank"}))["targetId"]
-        b.session = (await b.conn.call("Target.attachToTarget", {"targetId": b.target, "flatten": True}))["sessionId"]
-        await _setup(b, b.session)
+        b.spare = pages[0]["targetId"] if pages else ""
         _browsers[owner_id] = b
         log.info("browser started for %s", owner_id)
         return b
 
 
-async def _setup(b: Browser, session: str, guard: bool = True) -> None:
+async def _tab(owner_id: str, key: str = "main", label: str = "") -> Tab:
+    """This teammate's tab, opened on first use. Up to MAX_TABS at once; a full browser gives up a tab idle for a
+    minute, else asks the newcomer to wait."""
+    b = await _ensure(owner_id)
+    if t := b.tabs.get(key):
+        t.label = label or t.label
+        return t
+    async with b.opening:
+        if t := b.tabs.get(key):
+            return t
+        if len(b.tabs) >= MAX_TABS:
+            idle = min(b.tabs.values(), key=lambda t: t.used)
+            if time.time() - idle.used < 60 or idle.takeover or (b.viewers and idle.key == b.view):
+                raise Busy(f"{MAX_TABS} teammates are using the browser right now. Try again in a few minutes.")
+            await _close_tab(b, idle)
+        target, b.spare = b.spare or (await b.conn.call("Target.createTarget", {"url": "about:blank"}))["targetId"], ""
+        session = (await b.conn.call("Target.attachToTarget", {"targetId": target, "flatten": True}))["sessionId"]
+        await _setup(b, session)
+        await b.conn.call("Emulation.setFocusEmulationEnabled", {"enabled": True}, session)  # typing works in every tab
+        t = b.tabs[key] = Tab(b, key, label or key, target, session)
+        if b.view not in b.tabs:
+            b.view = key
+            await _cast(b, True)
+        await _announce(b)
+        return t
+
+
+async def _close_tab(b: Browser, t: Tab) -> None:
+    b.tabs.pop(t.key, None)
+    try:
+        await b.conn.call("Target.closeTarget", {"targetId": t.target})
+    except Exception:
+        pass
+    if b.view == t.key:
+        b.view = next(iter(b.tabs), "")
+        await _cast(b, True)
+    await _announce(b)
+
+
+async def _setup(b: Any, session: str, guard: bool = True) -> None:
     c = lambda m, p=None: b.conn.call(m, p, session)  # noqa: E731
     await c("Page.enable")
     await c("Accessibility.enable")
@@ -267,16 +321,20 @@ def _on_event(b: Browser, m: dict) -> Any:
         t = p["targetInfo"]
         if t["type"] == "page" and t.get("openerId"):  # a popup or a new tab: never; links open in the same tab
             return b.conn.call("Target.closeTarget", {"targetId": t["targetId"]})
+    if method == "Target.targetDestroyed":  # a crashed or closed tab: its teammate gets a fresh one next time
+        for t in [t for t in b.tabs.values() if t.target == p.get("targetId")]:
+            b.tabs.pop(t.key, None)
     if method == "Fetch.requestPaused":
         return _guard(b, session, p)
-    if session != b.session:
+    t = b.by_session(session)
+    if t is None:
         return None
-    if method == "Page.frameStartedLoading" and p.get("frameId") == b.target:
-        b.loading = True
-    elif method in ("Page.frameStoppedLoading", "Page.loadEventFired") and p.get("frameId", b.target) == b.target:
-        b.loading = False
+    if method == "Page.frameStartedLoading" and p.get("frameId") == t.target:
+        t.loading = True
+    elif method in ("Page.frameStoppedLoading", "Page.loadEventFired") and p.get("frameId", t.target) == t.target:
+        t.loading = False
     elif method == "Page.screencastFrame":
-        return _frame(b, p)
+        return _frame(b, t, p)
     return None
 
 
@@ -286,7 +344,8 @@ async def _guard(b: Browser, session: str | None, p: dict) -> None:
     host = urlparse(url).hostname or ""
     rid = p["requestId"]
     try:
-        if session != b.session or p.get("frameId") != b.target or b.takeover or allowed(b.owner_id, url):
+        t = b.by_session(session)
+        if t is None or p.get("frameId") != t.target or t.takeover or allowed(b.owner_id, url):
             if host in FAKE:
                 body = base64.b64encode(FAKE[host].encode()).decode()
                 await b.conn.call("Fetch.fulfillRequest", {"requestId": rid, "responseCode": 200, "body": body, "responseHeaders": [
@@ -294,7 +353,7 @@ async def _guard(b: Browser, session: str | None, p: dict) -> None:
             else:
                 await b.conn.call("Fetch.continueRequest", {"requestId": rid}, session)
         else:
-            b.blocked = url
+            t.blocked = url
             await b.conn.call("Fetch.failRequest", {"requestId": rid, "errorReason": "BlockedByClient"}, session)
     except Exception as e:
         log.debug("guard: %s", e)
@@ -340,13 +399,13 @@ def revoke(owner_id: str) -> None:
 
 
 # ------------------------------------------------------------------ reading the page
-async def _url(b: Browser) -> tuple[str, str]:
+async def _url(b: Tab) -> tuple[str, str]:
     r = await b.cdp("Runtime.evaluate", {"expression": "[location.href, document.title]", "returnByValue": True})
     href, title = (r.get("result") or {}).get("value") or ["", ""]
     return href, title
 
 
-async def settle(b: Browser, most: float = 10) -> None:
+async def settle(b: Tab, most: float = 10) -> None:
     await asyncio.sleep(0.35)
     end = time.time() + most
     while b.loading and time.time() < end:
@@ -364,7 +423,7 @@ def _prop(n: dict, key: str) -> Any:
     return next(((p.get("value") or {}).get("value") for p in n.get("properties") or [] if p.get("name") == key), None)
 
 
-async def snapshot(b: Browser) -> dict:
+async def snapshot(b: Tab) -> dict:
     for _ in range(8):  # a page still drawing (a slow server, a heavy app): wait until it shows something
         nodes = (await b.cdp("Accessibility.getFullAXTree"))["nodes"]
         if sum(1 for n in nodes if not n.get("ignored") and n.get("backendDOMNodeId")) > 8:
@@ -459,7 +518,7 @@ def text(snap: dict) -> str:
 
 
 # ------------------------------------------------------------------ acting
-async def _check(b: Browser, sid: str, element: str) -> tuple[dict | None, dict]:
+async def _check(b: Tab, sid: str, element: str) -> tuple[dict | None, dict]:
     """(a fresh snapshot if the page moved on, else None; the element)."""
     if b.takeover:
         raise Busy("They're using the browser themselves right now. Wait for them, then look again.")
@@ -483,27 +542,27 @@ async def _check(b: Browser, sid: str, element: str) -> tuple[dict | None, dict]
     return None, e
 
 
-def _may_act(b: Browser, url: str) -> None:
+def _may_act(b: Tab, url: str) -> None:
     if not allowed(b.owner_id, url):
         raise PermissionError(f"Ask first: call browser_use with {site_of(url) or 'the site'} and the task; they OK it once.")
 
 
-async def _obj(b: Browser, e: dict) -> str:
+async def _obj(b: Tab, e: dict) -> str:
     return (await b.cdp("DOM.resolveNode", {"backendNodeId": e["backend"]}))["object"]["objectId"]
 
 
-async def _js(b: Browser, e: dict, fn: str) -> Any:
+async def _js(b: Tab, e: dict, fn: str) -> Any:
     r = await b.cdp("Runtime.callFunctionOn", {"objectId": await _obj(b, e), "functionDeclaration": fn, "returnByValue": True})
     return (r.get("result") or {}).get("value")
 
 
-async def _submits(b: Browser, e: dict) -> bool:
+async def _submits(b: Tab, e: dict) -> bool:
     """A button that submits a form, whatever it's called (an unnamed arrow can post too)."""
     return bool(await _js(b, e, "function(){const t=(this.getAttribute('type')||'').toLowerCase();"
                                 "return !!(this.form && (t==='submit' || (this.tagName==='BUTTON' && !t) || t==='image'))}"))
 
 
-async def _click(b: Browser, e: dict) -> None:
+async def _click(b: Tab, e: dict) -> None:
     await b.cdp("DOM.scrollIntoViewIfNeeded", {"backendNodeId": e["backend"]})
     quads = (await b.cdp("DOM.getContentQuads", {"backendNodeId": e["backend"]}))["quads"]
     if not quads:
@@ -515,10 +574,10 @@ async def _click(b: Browser, e: dict) -> None:
         await b.cdp("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1})
 
 
-async def act(owner_id: str, sid: str, element: str, action: str, value: str = "") -> dict:
+async def act(owner_id: str, sid: str, element: str, action: str, value: str = "", tab: str = "main") -> dict:
     """Do one thing to one element of a snapshot: CLICK, TYPE (replaces the text) or READ. Returns done | changed |
     stale and a fresh snapshot. Commits raise NeedsOK; password fields refuse."""
-    b = await _ensure(owner_id)
+    b = await _tab(owner_id, tab)
     async with b.lock:
         moved, e = await _check(b, sid, element)
         if moved:
@@ -561,7 +620,7 @@ KEYS = {"enter": ("Enter", 13, "\r"), "return": ("Enter", 13, "\r"), "tab": ("Ta
 MODS = {"alt": 1, "ctrl": 2, "control": 2, "meta": 4, "cmd": 4, "mod": 2, "shift": 8}
 
 
-async def _key(b: Browser, combo: str) -> None:
+async def _key(b: Tab, combo: str) -> None:
     parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
     mods = sum(MODS.get(p, 0) for p in parts[:-1])
     last = parts[-1] if parts else ""
@@ -576,7 +635,7 @@ async def _key(b: Browser, combo: str) -> None:
     await b.cdp("Input.dispatchKeyEvent", {"type": "keyUp", **base})
 
 
-async def _focus_kind(b: Browser) -> str:
+async def _focus_kind(b: Tab) -> str:
     r = await b.cdp("Runtime.evaluate", {"returnByValue": True, "expression": """(()=>{const a=document.activeElement;
       if(!a||a===document.body) return '';
       if(a.isContentEditable||a.tagName==='TEXTAREA') return 'multi';
@@ -601,8 +660,8 @@ def key_commits(combo: str, focus: str) -> bool:
     return False
 
 
-async def keys(owner_id: str, sequence: list[str]) -> dict:
-    b = await _ensure(owner_id)
+async def keys(owner_id: str, sequence: list[str], tab: str = "main") -> dict:
+    b = await _tab(owner_id, tab)
     async with b.lock:
         if b.takeover:
             raise Busy("They're using the browser themselves right now. Wait for them, then look again.")
@@ -616,8 +675,8 @@ async def keys(owner_id: str, sequence: list[str]) -> dict:
         return {"status": "done", "did": "pressed " + ", ".join(sequence[:8]), **await snapshot(b)}
 
 
-async def look(owner_id: str, url: str = "") -> dict:
-    b = await _ensure(owner_id)
+async def look(owner_id: str, url: str = "", tab: str = "main", label: str = "") -> dict:
+    b = await _tab(owner_id, tab, label)
     async with b.lock:
         if url:
             if b.takeover:
@@ -626,7 +685,7 @@ async def look(owner_id: str, url: str = "") -> dict:
         return await snapshot(b)
 
 
-async def goto(b: Browser, url: str) -> None:
+async def goto(b: Tab, url: str) -> None:
     if not re.match(r"https?://", url):
         url = "https://" + url
     if not allowed(b.owner_id, url):
@@ -645,7 +704,7 @@ def _fp(url: str, e: dict, texts: list[str]) -> str:
     return hashlib.sha256(json.dumps([site_of(url), e["role"], e["name"], texts]).encode()).hexdigest()
 
 
-async def _typed(b: Browser) -> list[str]:
+async def _typed(b: Tab) -> list[str]:
     """What's typed on the page (fields and editors, never passwords): the content the user approves."""
     r = await b.cdp("Runtime.evaluate", {"returnByValue": True, "expression": """[...document.querySelectorAll(
       'textarea, input:not([type=password]):not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), [contenteditable=""], [contenteditable=true]')]
@@ -656,12 +715,13 @@ async def _typed(b: Browser) -> list[str]:
 SHOTS = DATA.parent / "browser-shots"
 
 
-async def preview(owner_id: str, args: dict) -> dict:
+async def preview(owner_id: str, args: dict, tab: str = "main") -> dict:
     """For the approval card: the screen as it is, the button and the text. Remembers a fingerprint of exactly this, so
     `commit` clicks only if the page still shows it."""
-    b = _browsers.get(owner_id)
+    br = _browsers.get(owner_id)
+    b = br.tabs.get(tab) if br else None
     if b is None:
-        raise LookupError("no browser")
+        raise LookupError("no browser tab")
     sid, element = str(args.get("snapshot", "")), str(args.get("element", ""))
     async with b.lock:
         moved, e = await _check(b, sid, element)
@@ -680,16 +740,16 @@ async def preview(owner_id: str, args: dict) -> dict:
     key = uuid.uuid4().hex
     (SHOTS / owner_id).mkdir(parents=True, exist_ok=True)
     (SHOTS / owner_id / f"{key}.jpg").write_bytes(base64.b64decode(shot))
-    _cleared[(owner_id, sid, element)] = (_fp(url, e, texts), time.time() + 15 * 60)
+    _cleared[(owner_id, tab, sid, element)] = (_fp(url, e, texts), time.time() + 15 * 60)
     return {"site": site_of(url), "button": e["name"] or e["role"], "text": "\n\n".join(texts)[:2000],
             "what": str(args.get("what") or "")[:200], "image": shot_link(owner_id, key)}
 
 
-async def commit(owner_id: str, sid: str, element: str) -> dict:
-    fp, until = _cleared.pop((owner_id, sid, element), ("", 0))
+async def commit(owner_id: str, sid: str, element: str, tab: str = "main") -> dict:
+    fp, until = _cleared.pop((owner_id, tab, sid, element), ("", 0))
     if not fp or until < time.time():
         raise PermissionError("This wasn't approved (or the approval expired). Call browser_commit again; they'll see it.")
-    b = await _ensure(owner_id)
+    b = await _tab(owner_id, tab)
     async with b.lock:
         moved, e = await _check(b, sid, element)
         url, _ = await _url(b)
@@ -721,7 +781,7 @@ def shot_path(owner_id: str, key: str, exp: int, sig: str) -> Path | None:
 # ------------------------------------------------------------------ read_page's fallback: an incognito tab, no cookies
 async def read(owner_id: str, url: str, budget: float = 25) -> tuple[str, str]:
     """(title, text) of a page that needs a real browser (scripts, or sites that turn away fetchers)."""
-    b = await _ensure(owner_id)
+    b: Any = await _ensure(owner_id)
     ctx = (await b.conn.call("Target.createBrowserContext", {"disposeOnDetach": True}))["browserContextId"]
     try:
         tid = (await b.conn.call("Target.createTarget", {"url": "about:blank", "browserContextId": ctx}))["targetId"]
@@ -746,8 +806,10 @@ async def read(owner_id: str, url: str, budget: float = 25) -> tuple[str, str]:
 
 
 # ------------------------------------------------------------------ live view (the phone watches, or takes over)
-async def _frame(b: Browser, p: dict) -> None:
-    await b.conn.call("Page.screencastFrameAck", {"sessionId": p["sessionId"]}, b.session)
+async def _frame(b: Browser, t: Tab, p: dict) -> None:
+    await b.conn.call("Page.screencastFrameAck", {"sessionId": p["sessionId"]}, t.session)
+    if t.key != b.view:
+        return
     msg = json.dumps({"t": "frame", "data": p["data"]})
     for ws in list(b.viewers):
         try:
@@ -756,49 +818,80 @@ async def _frame(b: Browser, p: dict) -> None:
             b.viewers.discard(ws)
 
 
+async def _cast(b: Browser, on: bool) -> None:
+    """Stream the viewed tab to the phones watching (or stop)."""
+    t = b.tabs.get(b.view)
+    if t is None or (on and not b.viewers):
+        return
+    try:
+        await t.cdp("Page.startScreencast" if on else "Page.stopScreencast",
+                    {"format": "jpeg", "quality": 60, "maxWidth": W * 2, "maxHeight": H * 2} if on else None)
+    except Exception:
+        pass
+
+
+async def _announce(b: Browser) -> None:
+    if b.viewers:
+        msg = json.dumps({"t": "state", **await state(b.owner_id)})
+        for ws in list(b.viewers):
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                b.viewers.discard(ws)
+
+
 async def state(owner_id: str) -> dict:
     b = _browsers.get(owner_id)
-    out = {"running": bool(b and not b.conn.closed), "sites": granted(owner_id), "takeover": bool(b and b.takeover),
-           "available": True, "url": "", "title": ""}
-    if out["running"]:
+    running = bool(b and not b.conn.closed)
+    t = b.tabs.get(b.view) if b and running else None
+    out = {"running": running, "sites": granted(owner_id), "takeover": bool(t and t.takeover), "available": True,
+           "url": "", "title": "", "tab": t.key if t else "", "tabs": [{"key": x.key, "label": x.label} for x in b.tabs.values()] if running else []}
+    if t:
         try:
-            out["url"], out["title"] = await _url(b)
+            out["url"], out["title"] = await _url(t)
         except Exception:
             pass
     return out
 
 
 async def watch(owner_id: str, ws: Any) -> None:
-    """One phone watching: frames out; taps, typing, scrolls, back and go in (only while it holds the browser)."""
+    """One phone watching a tab: frames out; taps, typing, scrolls, back and go in (only while it holds that tab).
+    `tab` switches which teammate's tab it shows."""
     b = await _ensure(owner_id)
+    if not b.tabs:
+        await _tab(owner_id, "you", "You")
     b.viewers.add(ws)
     if len(b.viewers) == 1:
-        await b.cdp("Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": W * 2, "maxHeight": H * 2})
+        await _cast(b, True)
     await ws.send_text(json.dumps({"t": "state", **await state(owner_id)}))
     try:
         while True:
             m = json.loads(await ws.receive_text())
             b.used = time.time()
-            kind = m.get("t")
-            if kind == "takeover":
-                b.takeover = bool(m.get("on"))
+            kind, t = m.get("t"), b.tabs.get(b.view)
+            if kind == "tab" and m.get("key") in b.tabs and m["key"] != b.view:
+                await _cast(b, False)
+                if t:
+                    t.takeover = False
+                b.view = m["key"]
+                await _cast(b, True)
+            elif kind == "takeover" and t:
+                t.takeover = bool(m.get("on"))
             elif kind == "stop":
                 revoke(owner_id)
-            elif b.takeover:
-                await _user_input(b, m)
-            if kind in ("takeover", "stop", "go", "back"):
+            elif t and t.takeover:
+                await _user_input(t, m)
+            if kind in ("takeover", "stop", "go", "back", "tab"):
                 await ws.send_text(json.dumps({"t": "state", **await state(owner_id)}))
     finally:
         b.viewers.discard(ws)
-        b.takeover = False if not b.viewers else b.takeover
         if not b.viewers and not b.conn.closed:
-            try:
-                await b.cdp("Page.stopScreencast")
-            except Exception:
-                pass
+            for t in b.tabs.values():
+                t.takeover = False
+            await _cast(b, False)
 
 
-async def _user_input(b: Browser, m: dict) -> None:
+async def _user_input(b: Tab, m: dict) -> None:
     """The user's own hands on the page: no site limits, no commit checks (it's them)."""
     kind = m.get("t")
     if kind == "tap":
@@ -876,8 +969,12 @@ async def loop() -> None:
     while True:
         await asyncio.sleep(60)
         for owner, b in list(_browsers.items()):
-            if (time.time() - b.used > IDLE_S and not b.viewers) or b.conn.closed:
+            if b.conn.closed or (time.time() - b.used > IDLE_S and not b.viewers):
                 await _stop(owner)
+                continue
+            for t in list(b.tabs.values())[:-1] if len(b.tabs) > 1 else []:  # the last tab closes with the browser
+                if time.time() - t.used > IDLE_S and not t.takeover and not (b.viewers and t.key == b.view):
+                    await _close_tab(b, t)
         for p in SHOTS.glob("*/*.jpg") if SHOTS.exists() else []:
             if time.time() - p.stat().st_mtime > 7 * 86400:
                 p.unlink(missing_ok=True)

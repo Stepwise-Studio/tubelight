@@ -4,7 +4,7 @@
 import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
-import { TextInput, View, type LayoutChangeEvent } from 'react-native'
+import { ScrollView, TextInput, View, type LayoutChangeEvent } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -31,7 +31,11 @@ class Link {
   }
 }
 
-interface State { running: boolean; sites: string[]; takeover: boolean; url: string; title: string }
+interface State {
+  running: boolean; sites: string[]; takeover: boolean; url: string; title: string
+  /** One tab per teammate working in the browser ("you" when you opened it); `tab` is the one shown. */
+  tab: string; tabs: { key: string; label: string }[]
+}
 
 export default function BrowserScreen() {
   const { c } = useTheme()
@@ -103,8 +107,15 @@ export default function BrowserScreen() {
       <ScreenHeader title="Browser" subtitle={!stopped && st?.url ? st.url.replace(/^https?:\/\/(www\.)?/, '') : 'On your server'}
         right={<IconButton icon={Logout01Icon} accessibilityLabel="Sign out of every site" onPress={signOut} />} />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <View style={{ flex: 1, padding: 16, paddingBottom: 8 }} onLayout={(e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width - 32, h: e.nativeEvent.layout.height - 24 })}>
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ flex: 1, padding: 16, paddingBottom: 8 }}>
+          {!stopped && (st?.tabs.length ?? 0) > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ gap: 6 }}>
+              {st!.tabs.map((t) => (
+                <Chip key={t.key} label={t.label} selected={t.key === st!.tab} onPress={() => { haptic.tap(); setFrame(null); send({ t: 'tab', key: t.key }) }} />
+              ))}
+            </ScrollView>
+          )}
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onLayout={(e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
             {scale > 0 && (
               <GestureDetector gesture={Gesture.Exclusive(pan, tap)}>
                 <Squircle style={{ width: W * scale, height: H * scale, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.panel2,

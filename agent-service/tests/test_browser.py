@@ -59,7 +59,7 @@ async def test_guardrails_on_a_real_page(tmp_path, monkeypatch):
         # A popup is closed.
         got = await B.act(OWNER, got["snapshot"], by(got, "Open in new tab")["id"], "CLICK")
         await asyncio.sleep(0.5)
-        b = B._browsers[OWNER]
+        b = B._browsers[OWNER].tabs["main"]
         pages = [t for t in (await b.conn.call("Target.getTargets"))["targetInfos"] if t["type"] == "page"]
         assert len(pages) == 1
 
@@ -116,13 +116,13 @@ async def test_sign_ins_survive_a_restart(tmp_path, monkeypatch):
     owner = OWNER + "-keep"
 
     async def stored() -> str:
-        r = await B._browsers[owner].cdp("Runtime.evaluate", {"expression": "document.cookie + '|' + localStorage.getItem('k')", "returnByValue": True})
+        r = await B._browsers[owner].tabs["main"].cdp("Runtime.evaluate", {"expression": "document.cookie + '|' + localStorage.getItem('k')", "returnByValue": True})
         return r["result"]["value"]
 
     try:
         B.grant(owner, "keep.test")
         await B.look(owner, "https://keep.test/")
-        await B._browsers[owner].cdp("Runtime.evaluate", {"expression": "document.cookie='s=1; max-age=99999; path=/'; localStorage.setItem('k','v')"})
+        await B._browsers[owner].tabs["main"].cdp("Runtime.evaluate", {"expression": "document.cookie='s=1; max-age=99999; path=/'; localStorage.setItem('k','v')"})
         await B.stop(owner)
         B.grant(owner, "keep.test")
         await B.look(owner, "https://keep.test/")
@@ -131,5 +131,34 @@ async def test_sign_ins_survive_a_restart(tmp_path, monkeypatch):
         B.grant(owner, "keep.test")
         await B.look(owner, "https://keep.test/")
         assert await stored() == "|null"
+    finally:
+        await B.stop(owner)
+
+
+@needs_chromium
+async def test_teammates_work_in_parallel_tabs(tmp_path, monkeypatch):
+    """Each teammate gets its own tab: pages, snapshots and typing don't cross; sign-ins are shared; a fourth waits."""
+    monkeypatch.setattr(B, "DATA", tmp_path / "browser")
+    form = "<input aria-label='Note'><p>{}</p>"
+    for host in ("a.test", "b.test", "c.test"):
+        monkeypatch.setitem(B.FAKE, host, form.format(host))
+    owner = OWNER + "-tabs"
+    B.grant(owner, "a.test", "b.test", "c.test")
+    try:
+        snaps = await asyncio.gather(*(B.look(owner, f"https://{k}.test/", tab=k, label=k.upper()) for k in "abc"))
+        assert [s["url"] for s in snaps] == ["https://a.test/", "https://b.test/", "https://c.test/"]
+        note = lambda s: next(e["id"] for e in s["elements"] if e["name"] == "Note")  # noqa: E731
+        done = await asyncio.gather(*(B.act(owner, s["snapshot"], note(s), "TYPE", f"from {k}", tab=k) for k, s in zip("abc", snaps)))
+        for k, d in zip("abc", done):
+            assert d["status"] == "done" and f"from {k}" in B.text(d) and d["url"] == f"https://{k}.test/"
+        b = B._browsers[owner]
+        await b.tabs["a"].cdp("Runtime.evaluate", {"expression": "document.cookie='who=me; max-age=999; path=/'"})
+        await B.look(owner, "https://a.test/x", tab="b")  # b goes to a's site: same sign-ins
+        r = await b.tabs["b"].cdp("Runtime.evaluate", {"expression": "document.cookie", "returnByValue": True})
+        assert r["result"]["value"] == "who=me"
+        with pytest.raises(B.Busy):  # three busy tabs: a fourth teammate waits
+            await B.look(owner, "https://a.test/", tab="d")
+        st = await B.state(owner)
+        assert [t["label"] for t in st["tabs"]] == ["A", "B", "C"] and st["tab"] == "a"
     finally:
         await B.stop(owner)

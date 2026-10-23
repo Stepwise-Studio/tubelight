@@ -468,7 +468,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
     ]
 
     if browser.ready:
-        owner = ctx.owner_id
+        owner, tab = ctx.owner_id, tm["id"]  # each teammate works in its own tab; sign-ins are shared
 
         async def _b(work) -> str:
             try:
@@ -481,19 +481,19 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             sites = browser.grant(owner, *re.split(r"[,\s]+", site))
             if not sites:
                 return "site: the website's address, like x.com."
-            got = await _b(browser.look(owner, sites[0]))
+            got = await _b(browser.look(owner, sites[0], tab=tab, label=tm["name"]))
             return (f"They OK'd the browser on {', '.join(sites)} for: {task} (20 minutes). Work through it with "
                     "browser_act (browser_subtask for a run of simple steps). A ⚑ button (post, send, buy...) goes "
                     "through browser_commit, which shows them the screen first.\n" + got)
 
         async def browser_look(url: str = "") -> str:
-            return await _b(browser.look(owner, url))
+            return await _b(browser.look(owner, url, tab=tab, label=tm["name"]))
 
         async def browser_act(snapshot: str, element: str, action: str, value: str = "") -> str:
-            return await _b(browser.act(owner, snapshot, element, action, value))
+            return await _b(browser.act(owner, snapshot, element, action, value, tab=tab))
 
         async def browser_keys(keys: list[str]) -> str:
-            return await _b(browser.keys(owner, keys))
+            return await _b(browser.keys(owner, keys, tab=tab))
 
         async def browser_subtask(goal: str, inputs: list[str] | None = None, done_when: str = "", max_steps: int = 12) -> str:
             if not browser.granted(owner):
@@ -502,11 +502,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             async def call(op: str, args: dict[str, Any], _timeout: float) -> dict[str, Any]:
                 try:
                     if op == "ui_look":
-                        got = await browser.look(owner)
+                        got = await browser.look(owner, tab=tab, label=tm["name"])
                     elif op == "ui_act":
-                        got = await browser.act(owner, args["snapshot"], args["element"], args["action"], args.get("value", ""))
+                        got = await browser.act(owner, args["snapshot"], args["element"], args["action"], args.get("value", ""), tab=tab)
                     else:
-                        got = await browser.keys(owner, args["keys"])
+                        got = await browser.keys(owner, args["keys"], tab=tab)
                 except browser.NeedsOK as e:
                     return {"status": "needs_ok", "why": str(e)}
                 return {**got, "text": browser.text(got)}
@@ -514,7 +514,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return await cu.subtask("", "browser", goal, inputs or [], done_when, max_steps, call=call, kind=cu.BROWSER)
 
         async def browser_commit(snapshot: str, element: str, what: str) -> str:
-            return await _b(browser.commit(owner, snapshot, element))
+            return await _b(browser.commit(owner, snapshot, element, tab=tab))
 
         tools += [
             StructuredTool.from_function(coroutine=browser_use, name="browser_use",

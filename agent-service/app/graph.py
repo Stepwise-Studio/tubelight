@@ -697,7 +697,7 @@ def make_gate(ctx: RunCtx):
                 continue  # the user turned off "ask before commands" for this computer's chat
             if tc["name"] == "browser_commit":
                 try:  # the screen, the button and the text as they are now: what they approve is what gets pressed
-                    draft = await browser.preview(ctx.owner_id, tc["args"])
+                    draft = await browser.preview(ctx.owner_id, tc["args"], tab=tm["id"])
                 except Exception:
                     continue  # nothing to show (old snapshot): the tool says to look again, and nothing is pressed
                 tool_name, title = "browser_commit", f"Press “{draft['button']}” on {draft['site']}"[:80]
