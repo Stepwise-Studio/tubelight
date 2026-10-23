@@ -4,7 +4,7 @@
 import { Image } from 'expo-image'
 import { useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
-import { ScrollView, TextInput, View, type LayoutChangeEvent } from 'react-native'
+import { TextInput, View, type LayoutChangeEvent } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -14,7 +14,7 @@ import { ScreenHeader } from '@/components/screen-header'
 import { BASE, api } from '@/lib/api'
 import { supabase } from '@/lib/supabase'
 import { radius, type as typeScale, useTheme } from '@/theme'
-import { Button, Chip, IconButton, Skeleton, Squircle, Text, confirm, haptic, toast } from '@/ui'
+import { Button, Chip, IconButton, Segment, Skeleton, Squircle, Text, confirm, haptic, toast } from '@/ui'
 
 const W = 412
 const H = 915
@@ -109,11 +109,11 @@ export default function BrowserScreen() {
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <View style={{ flex: 1, padding: 16, paddingBottom: 8 }}>
           {!stopped && (st?.tabs.length ?? 0) > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ gap: 6 }}>
-              {st!.tabs.map((t) => (
-                <Chip key={t.key} label={t.label} selected={t.key === st!.tab} onPress={() => { haptic.tap(); setFrame(null); send({ t: 'tab', key: t.key }) }} />
-              ))}
-            </ScrollView>
+            <View style={{ marginBottom: 10 }}>
+              <Segment value={st!.tab} accessibilityLabel="Whose tab"
+                options={st!.tabs.map((t) => ({ value: t.key, label: t.label }))}
+                onChange={(key) => { haptic.tap(); setFrame(null); send({ t: 'tab', key }) }} />
+            </View>
           )}
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} onLayout={(e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
             {scale > 0 && (
