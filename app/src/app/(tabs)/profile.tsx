@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Platform, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, PencilEdit02Icon, Plug01Icon, RepeatIcon,
+  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RepeatIcon,
   Settings02Icon, SmartPhone01Icon,
 } from '@hugeicons/core-free-icons'
 
@@ -33,7 +33,7 @@ import { supabase } from '@/lib/supabase'
 import type { MemoryOverview, Profile } from '@/lib/types'
 import { isPhone, useWorkspace } from '@/lib/workspace'
 import { useTheme, type ThemePreference } from '@/theme'
-import { AvatarStack, Button, ChoiceRow, Divider, IconButton, ListRow, Press, Sheet, Surface, Text, TextField, Toggle, confirm, haptic, toast } from '@/ui'
+import { AvatarGroup, AvatarStack, Button, ChoiceRow, Divider, ListRow, Press, Sheet, Surface, Text, TextField, Toggle, confirm, haptic, toast } from '@/ui'
 
 const TOKEN_KEY = 'tubelight.pushToken'
 const FCM_KEY = 'tubelight.fcmToken'
@@ -69,11 +69,11 @@ export default function ProfileScreen() {
       <View style={{ paddingHorizontal: 16, gap: 28, marginTop: 28 }}>
         <Group title="Teammates use">
           <AppsRow />
-          <Divider inset={56} />
+          <Divider />
           <MemoryRow />
-          <Divider inset={56} />
+          <Divider />
           <AutomationsRow />
-          <Divider inset={56} />
+          <Divider />
           <UsageRow />
         </Group>
         <Group title="Where they work">
@@ -89,7 +89,7 @@ export default function ProfileScreen() {
         </Group>
         <Surface style={{ overflow: 'hidden' }}>
           <ListRow title="Advanced" subtitle="Webhook URL, service status" icon={Settings02Icon} chevron onPress={() => router.push('/advanced')} />
-          <Divider inset={56} />
+          <Divider />
           <ListRow title="Sign out" icon={Logout01Icon} destructive onPress={signOut} />
         </Surface>
       </View>
@@ -112,14 +112,14 @@ function Hero() {
   const { c } = useTheme()
   const top = useSafeAreaInsets().top
   const ws = useWorkspace()
+  const crew = ws.teammates
   const { session } = useSession()
   const meta = session?.user.user_metadata ?? {}
   const [g, setG] = useState<{ name: string | null; picture: string | null; email: string | null } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [focused, setFocused] = useState(true)
   const [editing, setEditing] = useState(false)
-  const [look, setLook] = useState<{ banner?: string; dither?: boolean; avatar_path?: string | null }>(
-    { banner: meta.banner as string | undefined, dither: !!meta.dither, avatar_path: (meta.avatar_path as string | undefined) ?? null })
+  const [look, setLook] = useState<Look>({ banner: meta.banner as string | undefined, avatar_path: (meta.avatar_path as string | undefined) ?? null })
   const own = useSignedUrl(look.avatar_path ?? null)
 
   useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false) }, []))
@@ -129,7 +129,7 @@ function Hero() {
   }, [])
 
   /** Banner, dither and your own photo live on the account (auth metadata), so every phone shows the same. */
-  const change = (next: Partial<typeof look>) => {
+  const change = (next: Partial<Look>) => {
     setLook((l) => ({ ...l, ...next }))
     supabase.auth.updateUser({ data: next }).then(({ error }) => {
       if (error) toast({ title: 'Unable to save that', body: 'Check your connection and try again.', tone: 'error' })
@@ -139,15 +139,11 @@ function Hero() {
   const name = profile?.display_name || g?.name || 'You'
   const email = g?.email ?? session?.user.email ?? ''
   const picture = look.avatar_path ? own : g?.picture ?? (meta.avatar_url as string | undefined) ?? null
-  const crew = ws.teammates
 
   return (
     <View>
-      <Banner id={look.banner} dither={look.dither} live={focused && !editing} style={{ height: BANNER_H + top }} />
+      <Banner id={look.banner} live={focused && !editing} style={{ height: BANNER_H + top }} />
       <LinearGradient colors={[`${c.canvas}00`, c.canvas]} style={{ position: 'absolute', left: 0, right: 0, top: BANNER_H + top - 90, height: 90 }} pointerEvents="none" />
-      <View style={{ position: 'absolute', right: 12, top: top + 8 }}>
-        <IconButton icon={PencilEdit02Icon} accessibilityLabel="Edit profile" variant="soft" size={38} iconSize={18} round onPress={() => { haptic.tap(); setEditing(true) }} />
-      </View>
       <View style={{ alignItems: 'center', paddingHorizontal: 24, marginTop: -AVATAR / 2 - 4, gap: 14 }}>
         <Press static radius={(AVATAR + 8) / 2} onPress={() => { haptic.tap(); setEditing(true) }} accessibilityLabel="Your picture. Edit profile">
           <View style={{ width: AVATAR + 8, height: AVATAR + 8, borderRadius: (AVATAR + 8) / 2, backgroundColor: c.canvas, padding: 4 }}>
@@ -161,7 +157,7 @@ function Hero() {
         {crew.length > 0 && (
           <Press radius={18} onPress={() => router.push('/crew')} accessibilityLabel={`Your crew: ${crew.map((t) => t.name).join(', ')}`}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingLeft: 6, paddingRight: 14, borderRadius: 18, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
-            <AvatarStack teammates={crew} size={26} max={5} />
+            <AvatarStack teammates={crew} size={26} max={5} ring={c.panel} />
             <Text variant="footnote" color="ink2">Your crew</Text>
           </Press>
         )}
@@ -188,9 +184,9 @@ function useSignedUrl(path: string | null) {
   return path ? url : null
 }
 
-type Look = { banner?: string; dither?: boolean; avatar_path?: string | null }
+type Look = { banner?: string; avatar_path?: string | null }
 
-/** Everything about how you look, in one sheet: photo, name, banner and its dither. */
+/** Everything about how you look, in one sheet: photo, name and banner. */
 function EditProfile({ open, onClose, profile, name, picture, google, look, onLook, onSaved }: {
   open: boolean; onClose: () => void; profile: Profile | null; name: string; picture: string | null; google: string | null
   look: Look; onLook: (l: Look) => void; onSaved: (p: Profile) => void
@@ -248,7 +244,6 @@ function EditProfile({ open, onClose, profile, name, picture, google, look, onLo
               )
             })}
           </ScrollView>
-          <Toggle label="Dither" description="Draw it in small pixels, like a print" value={!!look.dither} onChange={(dither) => { haptic.tap(); onLook({ dither }) }} />
         </View>
       </View>
     </Sheet>
@@ -257,7 +252,7 @@ function EditProfile({ open, onClose, profile, name, picture, google, look, onLo
 
 // ------------------------------------------------------------------ rows
 
-/** Connected apps, their marks stacked on the right; everything about apps lives on its own page. */
+/** Connected apps, their logos stacked on the right; everything about apps lives on its own page. */
 function AppsRow() {
   const { c } = useTheme()
   const { connections } = useConnections()
@@ -265,13 +260,8 @@ function AppsRow() {
   return (
     <ListRow title="Apps" subtitle={connections === null ? 'Loading…' : on.length ? `${on.length} connected` : 'Connect Gmail, GitHub, Linear and more'}
       icon={Plug01Icon} chevron onPress={() => router.push('/connections')}
-      accessory={on.length > 0 && (
-        <View style={{ flexDirection: 'row' }}>
-          {on.slice(0, 4).map((x, i) => (
-            <View key={x.toolkit} style={{ marginLeft: i ? -8 : 0, borderRadius: 9, borderWidth: 2, borderColor: c.panel }}><BrandTile toolkit={x.toolkit} size={22} /></View>
-          ))}
-        </View>
-      )} />
+      accessory={on.length > 0 && <AvatarGroup size={24} max={4} ring={c.panel} items={on.map((x) => (
+        { key: x.toolkit, name: x.name, render: (s) => <BrandTile toolkit={x.toolkit} size={s} /> }))} />} />
   )
 }
 
@@ -327,7 +317,7 @@ function BrowserRow() {
   const summary = b?.sites.length ? `May act on ${b.sites.join(', ')}` : b?.running ? 'Open: teammates only read pages' : 'Sign in to sites teammates use'
   return (
     <>
-      <Divider inset={56} />
+      <Divider />
       <ListRow title="Browser" subtitle={summary} icon={BrowserIcon} chevron onPress={() => router.push('/browser')} />
     </>
   )
@@ -339,7 +329,7 @@ function PhoneRow() {
   if (Platform.OS !== 'android' || !mate) return null
   return (
     <>
-      <Divider inset={56} />
+      <Divider />
       <ListRow title="Phone assistant" subtitle={`${mate.name}: side key, calls, what it may use`} icon={SmartPhone01Icon} chevron onPress={() => router.push('/phone-assistant')} />
     </>
   )

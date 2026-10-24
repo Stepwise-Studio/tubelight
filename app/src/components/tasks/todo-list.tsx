@@ -6,7 +6,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Pressable, View, type LayoutChangeEvent } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
-  FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming, type SharedValue,
+  FadeIn, FadeOut, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming, type LayoutAnimationsValues, type SharedValue,
 } from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
@@ -23,14 +23,17 @@ const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
 const LAND = { duration: 280, easing: motion.ease.smoothOut }
-const layout = LinearTransition.duration(LAND.duration).easing(LAND.easing)
 /** Rows that appear (a group opened, the first load) fade in together: one native fade, no per-row timing. */
 const ENTER = FadeIn.duration(200)
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
 /** The view being dragged (key '' = none): where it started, its height, how far it has moved, and the middle the
- * others step aside for (held still while it settles into its slot). */
-interface Drag { key: SharedValue<string>; y0: SharedValue<number>; h: SharedValue<number>; dy: SharedValue<number>; cy: SharedValue<number> }
+ * others step aside for (held still while it settles into its slot). `landing`: it's in its slot and the new order is
+ * being committed. `spots`: every view's place in the list, for working out the landing slot on the UI thread. */
+interface Drag {
+  key: SharedValue<string>; y0: SharedValue<number>; h: SharedValue<number>; dy: SharedValue<number>; cy: SharedValue<number>
+  landing: SharedValue<boolean>; spots: SharedValue<Record<string, Spot>>
+}
 type Spot = { y: number; h: number }
 type Item = { k: string; group: string; todo?: Todo }
 
@@ -38,34 +41,37 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
   todos: Todo[]; labels: Label[]; groupBy: GroupBy; teammate: (id: string) => Teammate | undefined; projects: Project[]
   onOpen: (t: Todo) => void
 }) {
+  const { c } = useTheme()
   // Folded by default: canceled (by status), finished ones stay in their label's group, dimmed, at the end.
   const [fold, setFold] = useState<Record<string, boolean>>({ canceled: true })
   const [since] = useState(() => new Date(Date.now() - MONTH_MS).toISOString())
   // Done more than a month ago drops off the board.
   const live = todos.filter((t) => t.status !== 'done' || (t.completed_at ?? t.updated_at) >= since)
   const byLabel = new Map(labels.map((l) => [l.id, l]))
-  const d: Drag = { key: useSharedValue(''), y0: useSharedValue(0), h: useSharedValue(0), dy: useSharedValue(0), cy: useSharedValue(0) }
+  const d: Drag = { key: useSharedValue(''), y0: useSharedValue(0), h: useSharedValue(0), dy: useSharedValue(0), cy: useSharedValue(0),
+    landing: useSharedValue(false), spots: useSharedValue<Record<string, Spot>>({}) }
   const [spots] = useState(() => new Map<string, Spot>())
   const items: Item[] = []
   const itemsRef = useRef<Item[]>([])
-  // A drop commits the new order; as the layout glides every row to its new place, the drag's offsets ease back to 0
-  // on the same curve and timing, so the two cancel out and nothing moves on screen.
+  // A drop commits the new order while `landing`: each view's layout transition (useSlot) then puts it straight in
+  // its new place and zeroes its offset in the same frame, so nothing moves. The drag ends once that has gone through.
   const [landed, setLanded] = useState(0)
-  useLayoutEffect(() => { if (landed) d.key.set('') }, [landed, d.key])
+  useLayoutEffect(() => {
+    if (!landed) return
+    const t = setTimeout(() => { d.key.set(''); d.landing.set(false) }, 120)
+    return () => clearTimeout(t)
+  }, [landed, d.key, d.landing])
 
-  // Let go: the row glides into the slot the others opened for it, then the list takes the new order.
-  const settle = (k: string, center: number) => {
-    const s0 = spots.get(k)
-    if (!s0) { drop(k, center); return }
-    let top = s0.y
-    for (const i of itemsRef.current) {
-      const s = i.k !== k && spots.get(i.k)
-      if (!s) continue
-      if (s.y > s0.y && center > s.y + s.h / 2) top = Math.max(top, s.y + s.h - s0.h)
-      if (s.y < s0.y && center < s.y + s.h / 2) top = Math.min(top, s.y)
-    }
-    d.dy.set(withTiming(top - s0.y, { duration: 220, easing: motion.ease.smoothOut }, (done) => { if (done) runOnJS(drop)(k, center) }))
-  }
+  // The drop line: where the dragged view would land if let go now.
+  const lineY = useSharedValue(0)
+  useAnimatedReaction(() => (d.key.get() && !d.landing.get() ? landingTop(d) : -1), (y, was) => {
+    if (y < 0 || y === was) return
+    lineY.set(was === null || was < 0 ? y : withTiming(y, { duration: 160, easing: motion.ease.smoothOut }))
+  })
+  const lineStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(d.key.get() && !d.landing.get() ? 1 : 0, { duration: 120 }),
+    transform: [{ translateY: lineY.get() - 1 }],
+  }))
 
   // Where the dragged view lands: before the first other view whose middle is below its middle. It joins that
   // spot's group, its sort halfway between its new neighbours.
@@ -78,8 +84,15 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
     let at = rest.findIndex((i) => { const s = spots.get(i.k); return !!s && center < s.y + s.h / 2 })
     if (at < 0) at = rest.length
     const group = (at > 0 ? rest[at - 1] : rest[0])?.group ?? from
-    const prev = rest[at - 1]?.group === group ? rest[at - 1].todo : undefined
-    const next = rest[at]?.group === group ? rest[at].todo : undefined
+    // Neighbours in the same group (and, grouped by label, the same status: rows sort by status first there).
+    const near = (step: number) => {
+      for (let j = step < 0 ? at - 1 : at; j >= 0 && j < rest.length && rest[j].group === group; j += step) {
+        const x = rest[j].todo
+        if (x && (groupBy === 'status' || x.status === t.status)) return x
+      }
+    }
+    const prev = near(-1)
+    const next = near(1)
     const sort = prev && next ? (prev.sort + next.sort) / 2 : prev ? prev.sort + 1 : next ? next.sort - 1 : t.sort
     const changes: Partial<Todo> = {}
     if (sort !== t.sort) changes.sort = sort
@@ -129,7 +142,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
       const k = groupBy === 'status' ? t.id : `${g.key}:${t.id}`
       items.push({ k, group: g.key, todo: t })
       views.push(
-      <TodoRow key={k} k={k} d={d} spots={spots} onDrop={settle} todo={t} onOpen={onOpen} labels={labels} group={g.key}
+      <TodoRow key={k} k={k} d={d} spots={spots} onDrop={drop} todo={t} onOpen={onOpen} labels={labels} group={g.key}
         who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
         project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />,
       )
@@ -144,7 +157,32 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
     }
   }
   useLayoutEffect(() => { itemsRef.current = items })
-  return <View>{views}</View>
+  return (
+    <View>
+      {views}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 48, right: 16, top: 0, height: 2, borderRadius: 1, backgroundColor: c.tube, zIndex: 5 }, lineStyle]} />
+    </View>
+  )
+}
+
+/** A view of the list that steps aside while another is dragged past it: up by the dragged view's height when that
+ * came from above and its middle is now below this one's middle, down for the mirror case. Each view animates only
+ * when its own place changes (a tick of haptics then), never per finger move; the dragged one rides the finger. */
+/** Top of the slot the dragged view would land in: past every view whose middle it has crossed. */
+function landingTop(d: Drag) {
+  'worklet'
+  const all = d.spots.get()
+  const s0 = all[d.key.get()]
+  if (!s0) return -1
+  const center = d.cy.get()
+  let top = s0.y
+  for (const key in all) {
+    const s = all[key]
+    if (key === d.key.get()) continue
+    if (s.y > s0.y && center > s.y + s.h / 2) top = Math.max(top, s.y + s.h - s0.h)
+    if (s.y < s0.y && center < s.y + s.h / 2) top = Math.min(top, s.y)
+  }
+  return top
 }
 
 /** A view of the list that steps aside while another is dragged past it: up by the dragged view's height when that
@@ -158,7 +196,9 @@ function useSlot(k: string, d: Drag, spots: Map<string, Spot>) {
   const onLayout = (e: LayoutChangeEvent) => {
     const l = e.nativeEvent.layout
     y.set(l.y); h.set(l.height); spots.set(k, { y: l.y, h: l.height })
+    d.spots.modify((m) => { 'worklet'; m[k] = { y: l.y, h: l.height }; return m })
   }
+  useEffect(() => () => { spots.delete(k); d.spots.modify((m) => { 'worklet'; delete m[k]; return m }) }, [k, spots, d.spots])
   useAnimatedReaction(() => {
     const key = d.key.get()
     if (!key || key === k) return 0
@@ -166,26 +206,40 @@ function useSlot(k: string, d: Drag, spots: Map<string, Spot>) {
     const center = d.cy.get()
     return d.y0.get() < y.get() && center > mid ? -d.h.get() : d.y0.get() > y.get() && center < mid ? d.h.get() : 0
   }, (to, was) => {
-    if (was === null || to === was) return
-    if (!d.key.get()) { off.set(withTiming(0, LAND)); return } // the new order is in: undo the offset as the layout glides
+    if (was === null || to === was || d.landing.get()) return
     off.set(withTiming(to, { duration: 200, easing: motion.ease.smoothOut }))
-    runOnJS(haptic.tap)()
+    if (d.key.get()) runOnJS(haptic.tap)()
   })
   useAnimatedReaction(() => d.key.get() === k, (on, was) => {
     if (was === null || on === was) return
     lift.set(on ? withSpring(1, { damping: 18, stiffness: 320 }) : withTiming(0, { duration: 160 }))
-    if (!on) { off.set(d.dy.get()); off.set(withTiming(0, LAND)) } // the dragged one hands its offset over the same way
+    // Let go without a new place (cancelled, or dropped where it was): glide back.
+    if (!on && d.dy.get() !== 0) { off.set(d.dy.get()); off.set(withTiming(0, LAND)) }
+    if (!on) d.dy.set(0)
   })
   const style = useAnimatedStyle(() => {
     const mine = d.key.get() === k
     return { transform: [{ translateY: mine ? d.dy.get() : off.get() }, { scale: 1 + 0.03 * lift.get() }], zIndex: mine ? 10 : 0, elevation: 8 * lift.get() }
   })
   const card = useAnimatedStyle(() => ({ opacity: lift.get() }))
-  return { y, h, onLayout, style, card }
+  // Moves glide (a status change, rows coming and going); a drop's new order lands in place at once, its offsets
+  // zeroed in the same frame: the views already stand where the new layout puts them.
+  const layout = (v: LayoutAnimationsValues) => {
+    'worklet'
+    const now = d.landing.get()
+    if (now) { off.set(0); if (d.key.get() === k) d.dy.set(0) }
+    const cfg = now ? { duration: 0 } : LAND
+    return {
+      initialValues: now ? { originX: v.targetOriginX, originY: v.targetOriginY, width: v.targetWidth, height: v.targetHeight }
+        : { originX: v.currentOriginX, originY: v.currentOriginY, width: v.currentWidth, height: v.currentHeight },
+      animations: { originX: withTiming(v.targetOriginX, cfg), originY: withTiming(v.targetOriginY, cfg), width: withTiming(v.targetWidth, cfg), height: withTiming(v.targetHeight, cfg) },
+    }
+  }
+  return { y, h, onLayout, style, card, layout }
 }
 
 function Slot({ k, d, spots, fade, children }: { k: string; d: Drag; spots: Map<string, Spot>; fade?: boolean; children: React.ReactNode }) {
-  const { onLayout, style } = useSlot(k, d, spots)
+  const { onLayout, style, layout } = useSlot(k, d, spots)
   return (
     <Animated.View layout={layout} entering={fade ? ENTER : undefined} exiting={fade ? FadeOut.duration(motion.duration.quick) : undefined} onLayout={onLayout}>
       <Animated.View style={style}>{children}</Animated.View>
@@ -268,7 +322,14 @@ const TodoRow = memo(function TodoRow({ k, d, spots, onDrop, todo: t, labels: al
           d.dy.set(e.translationY)
           d.cy.set(d.y0.get() + d.h.get() / 2 + e.translationY)
         })
-        .onEnd(() => { if (d.key.get() === k) runOnJS(onDrop)(k, d.cy.get()) })
+        // Let go: glide into the slot the others opened, then commit the new order.
+        .onEnd(() => {
+          if (d.key.get() !== k) return
+          const center = d.cy.get()
+          d.dy.set(withTiming(landingTop(d) - d.y0.get(), { duration: 220, easing: motion.ease.smoothOut }, (done) => {
+            if (done) { d.landing.set(true); runOnJS(onDrop)(k, center) }
+          }))
+        })
         .onFinalize((_, ok) => { press.onFinalize(); if (!ok && d.key.get() === k) d.key.set('') }),
       Gesture.Tap().numberOfTaps(2).maxDelay(250).onEnd(() => runOnJS(move)(nextStatus(t.status))),
       Gesture.Tap().onBegin(press.onBegin).onFinalize(press.onFinalize).onEnd(() => runOnJS(onOpen)(t)),
@@ -311,7 +372,7 @@ const TodoRow = memo(function TodoRow({ k, d, spots, onDrop, todo: t, labels: al
   )
 
   return (
-    <Animated.View layout={layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)} onLayout={slot.onLayout}>
+    <Animated.View layout={slot.layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)} onLayout={slot.onLayout}>
       <Animated.View style={slot.style}>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 16, backgroundColor: c.panel }, slot.card]} />
       <GestureDetector gesture={gesture}>

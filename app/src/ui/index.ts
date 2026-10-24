@@ -1,4 +1,4 @@
-export { AvatarStack } from './avatar-stack'
+export { AvatarGroup, AvatarStack, type AvatarGroupItem } from './avatar-group'
 export { FACE_SEEDS, TeammateAvatar, faceSeed, type AvatarState } from './avatar'
 export { Badge } from './badge'
 export { Beam } from './beam'
