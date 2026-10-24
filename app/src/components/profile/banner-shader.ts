@@ -34,7 +34,7 @@ float bayer8(float2 a) { return bayer4(0.5 * a) * 0.25 + bayer2(a); }
 // Brightness of each scene at uv (0..1, y down), aspect k = width / height.
 float canopy(float2 uv, float k) {
   float2 p = float2(uv.x * k, uv.y);
-  float2 c = float2(k * 0.68, 0.36);
+  float2 c = float2(k * 0.68, 0.46);
   float2 d = p - c;
   float warp = fbm(p * 3.0 + float2(t * 0.05, -t * 0.03));
   float blob = min(min(length(d * float2(0.9, 1.3)), length((d - float2(-0.2, 0.07)) * float2(1.2, 1.5)) + 0.04),
@@ -42,14 +42,13 @@ float canopy(float2 uv, float k) {
   float crown = smoothstep(0.4, 0.14, blob + (warp - 0.5) * 0.45);
   float leaves = fbm(p * 9.0 + float2(t * 0.12, t * 0.04));
   float trunk = smoothstep(0.035, 0.0, abs(p.x - c.x - (uv.y - 0.6) * 0.06)) * step(0.5, uv.y);
-  float ground = smoothstep(0.78, 1.0, uv.y) * (0.25 + 0.3 * fbm(p * 5.0));
   float sky = 0.06 * fbm(p * 2.0 + t * 0.02);
-  return max(max(crown * (0.25 + 0.85 * leaves), trunk * 0.55), max(ground, sky));
+  return max(max(crown * (0.25 + 0.85 * leaves), trunk * 0.55), sky);
 }
 float tide(float2 uv, float k) {
   float2 p = float2(uv.x * k, uv.y);
-  float horizon = 0.5;
-  float2 moon = float2(k * 0.74, 0.22);
+  float horizon = 0.6;
+  float2 moon = float2(k * 0.74, 0.36);
   float disc = smoothstep(0.1, 0.085, length(p - moon));
   float halo = 0.35 * exp(-length(p - moon) * 5.0);
   float sky = disc + halo;
@@ -76,7 +75,7 @@ float aurora(float2 uv, float k) {
   float v = 0.0;
   for (int i = 0; i < 3; i++) {
     float fi = float(i);
-    float y = 0.3 + fi * 0.12 + 0.14 * sin(p.x * (1.4 + fi * 0.5) + t * (0.12 + fi * 0.05) + fi * 2.0) + 0.06 * (fbm(float2(p.x * 2.0 + fi, t * 0.05)) - 0.5);
+    float y = 0.42 + fi * 0.11 + 0.14 * sin(p.x * (1.4 + fi * 0.5) + t * (0.12 + fi * 0.05) + fi * 2.0) + 0.06 * (fbm(float2(p.x * 2.0 + fi, t * 0.05)) - 0.5);
     float band = exp(-abs(uv.y - y) * (14.0 - fi * 3.0));
     float rays = 0.45 + 0.55 * fbm(float2(p.x * 22.0 + fi * 7.0, t * 0.15));
     v += band * rays * (0.9 - fi * 0.2);
