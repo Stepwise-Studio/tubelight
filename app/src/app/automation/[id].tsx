@@ -5,15 +5,16 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller'
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  AlertCircleIcon, ArrowDown01Icon, ArrowUp01Icon, BubbleChatIcon, CheckmarkCircle02Icon, Delete02Icon, FilterHorizontalIcon, Loading03Icon,
-  MinusSignCircleIcon, Moon02Icon, MoreHorizontalIcon, PlayIcon, SparklesIcon, Stamp01Icon, Time04Icon,
+  AlertCircleIcon, BubbleChatIcon, CheckmarkCircle02Icon, Delete02Icon, FilterHorizontalIcon, Loading03Icon,
+  MinusSignCircleIcon, Moon02Icon, MoreHorizontalIcon, PlayIcon, Stamp01Icon, Time04Icon,
 } from '@hugeicons/core-free-icons'
 import type { IconSvgElement } from '@hugeicons/react-native'
 
 import {
-  AutomationForm, DescribeStep, Understood, checkDraft, draftFromText, createBody, draftOf, emptyDraft, patchBody, useAppEvents,
+  AutomationForm, DescribeStep, checkDraft, draftFromText, createBody, draftOf, emptyDraft, patchBody, useAppEvents,
   type AutomationDraft, type AutomationErrors,
 } from '@/components/automation-form'
 import { AutomationGlyph } from '@/components/automation-rows'
@@ -26,9 +27,9 @@ import {
 } from '@/lib/automations'
 import { whenLabel } from '@/lib/format'
 import { useWorkspace } from '@/lib/workspace'
-import { useTheme } from '@/theme'
+import { motion, radius, useTheme } from '@/theme'
 import {
-  Button, Checkbox, Collapse, Divider, EmptyState, Icon, IconButton, Notice, Press, Skeleton, Surface, TeammateAvatar, Text,
+  Button, Checkbox, Divider, EmptyState, Icon, IconButton, Notice, Press, Skeleton, Surface, TeammateAvatar, Text,
   haptic, showMenu, toast,
 } from '@/ui'
 
@@ -242,6 +243,7 @@ function RunRow({ r, onOpen }: { r: AutomationRun; onOpen: () => void }) {
 function NewAutomation({ thread, teammate }: { thread?: string; teammate?: string }) {
   const insets = useSafeAreaInsets()
   const ws = useWorkspace()
+  const { c } = useTheme()
   const project = thread?.startsWith('proj:') ? thread.slice(5) : null
   const first = teammate ?? (thread?.startsWith('dm:') ? thread.split(':')[1] : project ? ws.membersOf(project)[0]?.id : undefined) ?? ws.teammates[0]?.id
   const [d, setD] = useState<AutomationDraft>(() => emptyDraft(first ?? null, project))
@@ -250,9 +252,9 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
   const [tryNow, setTryNow] = useState(true)
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
-  const [filled, setFilled] = useState(false)
+  // Two steps on one screen: say what should happen, then check the form it filled in (or fill it yourself).
+  const [step, setStep] = useState<'describe' | 'review'>('describe')
   const [reading, setReading] = useState(false)
-  const [advanced, setAdvanced] = useState(false)
   const { events, error: eventsError } = useAppEvents(d.kind === 'app' ? d.app : null)
 
   const read = async () => {
@@ -260,12 +262,12 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
     setReading(true)
     try {
       const got = await draftFromText(text, d, ws.teammate(d.teammateId)?.allowed_toolkits ?? [])
-      setD(got.draft); setErrors({}); setNote(got.note); setFilled(true)
-      if (got.note) setAdvanced(true)
+      setD(got.draft); setErrors({}); setNote(got.note)
       haptic.success()
     } catch (e) {
-      toast({ title: 'Couldn’t read that', body: (e as Error).message, tone: 'error' })
-    } finally { setReading(false) }
+      // Still go on: the form is there to fill in by hand.
+      setNote(`Couldn’t read that (${(e as Error).message}). Fill it in below.`)
+    } finally { setReading(false); setStep('review') }
   }
 
   const create = async () => {
@@ -286,29 +288,38 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
   return (
     <>
       <ScreenHeader title="New automation" />
-      <KeyboardAwareScrollView bottomOffset={96} keyboardShouldPersistTaps="handled"
+      <KeyboardAwareScrollView key={step} bottomOffset={96} keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 40, gap: 28 }}>
-        <DescribeStep text={text} onText={(t) => { setText(t); if (filled) setFilled(false) }} teammateId={d.teammateId}
-          onTeammate={(id) => { setD({ ...emptyDraft(id, project), name: d.name, instructions: d.instructions }); setFilled(false) }} />
-        {filled && <Understood draft={d} events={events} />}
-        {!!note && <Notice tone="info" title="Check this part" body={note} onDismiss={() => setNote('')} />}
-        <View style={{ gap: 12 }}>
-          <Press radius={12} static onPress={() => { haptic.tap(); setAdvanced((o) => !o) }} accessibilityState={{ expanded: advanced }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 }}>
-            <Text variant="headline" style={{ flex: 1 }}>Advanced</Text>
-            <Text variant="caption" color="ink3">{advanced ? 'Hide' : 'Name, schedule, apps, where it posts'}</Text>
-            <Icon icon={advanced ? ArrowUp01Icon : ArrowDown01Icon} size={16} color="ink3" />
-          </Press>
-          <Collapse open={advanced}>
-            <AutomationForm draft={d} onChange={setD} errors={errors} events={events} eventsError={eventsError} isNew hideWho />
-          </Collapse>
-        </View>
-        <View style={{ gap: 14 }}>
-          {(filled || advanced) && d.kind === 'schedule' && <Checkbox value={tryNow} onChange={setTryNow} label="Run it once now, so I can see what it does" />}
-          {filled || (advanced && !text.trim())
-            ? <Button label="Set up automation" size="lg" fullWidth loading={busy} onPress={create} />
-            : <Button label="Set it up" icon={SparklesIcon} size="lg" fullWidth loading={reading} disabled={text.trim().length < 3 || !d.teammateId} onPress={read} />}
-        </View>
+        {step === 'describe' ? (
+          <Animated.View entering={FadeIn.duration(motion.duration.fast)} style={{ gap: 28 }}>
+            <DescribeStep text={text} onText={setText} teammateId={d.teammateId}
+              onTeammate={(id) => setD({ ...emptyDraft(id, project), name: d.name, instructions: d.instructions })} />
+            <View style={{ gap: 4 }}>
+              <Button label="Continue" size="lg" fullWidth loading={reading} disabled={text.trim().length < 3 || !d.teammateId} onPress={read} />
+              <Button label="Fill it in yourself" variant="ghost" fullWidth disabled={reading} onPress={() => setStep('review')} />
+            </View>
+          </Animated.View>
+        ) : (
+          <Animated.View entering={FadeInDown.duration(motion.duration.medium).easing(motion.ease.smoothOut)} style={{ gap: 28 }}>
+            {!!text.trim() && (
+              <Press radius={radius.lg} onPress={() => setStep('describe')} accessibilityLabel="Change what you said"
+                style={{ flexDirection: 'row', gap: 12, padding: 14, borderRadius: radius.lg, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
+                <Text variant="body" color="ink2" numberOfLines={3} style={{ flex: 1 }}>“{text.trim()}”</Text>
+                <Text variant="label" color="tube">Edit</Text>
+              </Press>
+            )}
+            <View style={{ gap: 4 }}>
+              <Text variant="title">Check the details</Text>
+              <Text variant="body" color="ink2">{text.trim() ? 'Filled in from what you said. Change anything you like.' : 'Fill in what it should do and when.'}</Text>
+            </View>
+            {!!note && <Notice tone="info" title="Check this part" body={note} onDismiss={() => setNote('')} />}
+            <AutomationForm draft={d} onChange={setD} errors={errors} events={events} eventsError={eventsError} isNew />
+            <View style={{ gap: 14 }}>
+              {d.kind === 'schedule' && <Checkbox value={tryNow} onChange={setTryNow} label="Run it once now, so I can see what it does" />}
+              <Button label="Set up automation" size="lg" fullWidth loading={busy} onPress={create} />
+            </View>
+          </Animated.View>
+        )}
       </KeyboardAwareScrollView>
     </>
   )

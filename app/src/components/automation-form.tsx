@@ -1,6 +1,7 @@
 // The automation form, shared by /automation/new and each automation's page. Top to bottom it asks what people
 // think about first: what to call it and what to do, who does it and with which apps, when, and where it posts.
-import { useEffect, useMemo, useState } from 'react'
+import { useNavigation } from 'expo-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ScrollView, TextInput, View } from 'react-native'
 import { AlertCircleIcon } from '@hugeicons/core-free-icons'
 
@@ -414,17 +415,23 @@ export function DescribeStep({ text, onText, teammateId, onTeammate }: {
 }) {
   const { c } = useTheme()
   const ws = useWorkspace()
+  const input = useRef<TextInput>(null)
+  // The keyboard opens once the screen has slid in: both animating at once drops frames.
+  const nav = useNavigation()
+  useEffect(() => {
+    const focus = () => input.current?.focus()
+    const t = setTimeout(focus, 700) // in case the transition event never comes (no animation)
+    const off = nav.addListener('transitionEnd' as never, (e: { data?: { closing?: boolean } }) => { if (!e.data?.closing) { clearTimeout(t); focus() } })
+    return () => { clearTimeout(t); off() }
+  }, [nav])
   return (
     <View style={{ gap: 22 }}>
-      <View style={{ gap: 6 }}>
-        <Text variant="title">What should happen?</Text>
-        <Text variant="body" color="ink2">Say it like you’d tell a person: when, what to look at, and what you want back.</Text>
-      </View>
+      <Text variant="title">What should happen?</Text>
       <TextInput
+        ref={input}
         value={text}
         onChangeText={onText}
         multiline
-        autoFocus
         maxLength={1000}
         placeholder="Every 2 hours, check my inbox and tell me what needs me"
         placeholderTextColor={c.ink4}
@@ -451,32 +458,6 @@ export function DescribeStep({ text, onText, teammateId, onTeammate }: {
         </ScrollView>
       </View>
     </View>
-  )
-}
-
-/** What the teammate understood, in one sentence, before the form's details. */
-export function Understood({ draft, events }: { draft: AutomationDraft; events: AppEvent[] | null }) {
-  const ws = useWorkspace()
-  const tm = ws.teammate(draft.teammateId)
-  const where = draft.projectId ? ws.projects.find((p) => p.id === draft.projectId)?.name ?? 'the project' : `your chat with ${tm?.name ?? 'them'}`
-  const apps = draft.toolkits === null ? (tm?.allowed_toolkits ?? []) : draft.toolkits
-  return (
-    <Surface padding={16} style={{ gap: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        {tm && <TeammateAvatar teammate={tm} size={32} interactive={false} paused />}
-        <Text variant="headline" style={{ flex: 1 }}>{draft.name || 'New automation'}</Text>
-      </View>
-      <Text variant="body" color="ink2">
-        {tm?.name ?? 'Your teammate'} runs it {whenOf(draft, events)} and posts what it finds in {where}. With nothing new, it stays quiet.
-      </Text>
-      {apps.length > 0 && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Text variant="footnote" color="ink3">Uses</Text>
-          {apps.map((t) => <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><BrandTile toolkit={t} size={18} /><Text variant="footnote" color="ink2">{toolkitName(t)}</Text></View>)}
-        </View>
-      )}
-      <Text variant="footnote" color="ink3">Change any of it under Advanced.</Text>
-    </Surface>
   )
 }
 

@@ -79,11 +79,13 @@ export async function openAutomationOfRun(runId: string) {
 /** Every automation, reloaded whenever the screen comes into focus. */
 export function useAutomations() {
   const [list, setList] = useState<Automation[] | null>(null)
-  const load = useCallback(() => api<Automation[]>('/automations').then(setList, (e: Error) => {
+  // Same list: keep the old array, so screens don't re-render for nothing.
+  const load = useCallback(() => api<Automation[]>('/automations').then((next) => setList((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next)), (e: Error) => {
     setList((l) => l ?? [])
     toast({ title: 'Unable to load automations', body: e.message, tone: 'error' })
   }), [])
-  useFocusEffect(useCallback(() => { load() }, [load]))
+  // After the screen has slid in: a reload mid-transition drops frames.
+  useFocusEffect(useCallback(() => { const t = setTimeout(load, 400); return () => clearTimeout(t) }, [load]))
   const toggle = async (a: Automation, enabled: boolean) => {
     setList((l) => l?.map((x) => (x.id === a.id ? { ...x, enabled } : x)) ?? l)
     await setEnabled(a, enabled)

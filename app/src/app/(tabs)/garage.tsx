@@ -6,13 +6,13 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { setStatusBarStyle } from 'expo-status-bar'
 import { LinearGradient } from 'expo-linear-gradient'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Text as RNText, RefreshControl, ScrollView, View } from 'react-native'
 import Animated, { interpolate, runOnJS, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, AlertCircleIcon, ArrowDown01Icon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
-  CodeIcon, Globe02Icon, LaptopIcon, RepeatIcon, Tick02Icon, WorkHistoryIcon,
+  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
+  CodeIcon, Globe02Icon, LaptopIcon, RepeatIcon, WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -65,6 +65,7 @@ const BLUE = ['#3f7cff', '#1f50e3'] as const
 const BLUE_MID = '#2f66f1' // behind inline faces, so their rings melt into the card
 const DIM = 'rgba(255,255,255,0.6)'
 const SHOWN = 4 // receipts before "Show more"
+const NONE: Receipt[] = []
 
 const midnight = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
 const newAutomation = () => router.push({ pathname: '/automation/[id]', params: { id: 'new' } })
@@ -125,6 +126,9 @@ export default function GarageTab() {
   const [jobs, setJobs] = useState<Jobs | null>(null)
   const [one, setOne] = useState<Receipt | null>(null)
   const [later, setLater] = useState<Upcoming | null>(null)
+  const closeJobs = useCallback(() => setJobs(null), [])
+  const closeOne = useCallback(() => setOne(null), [])
+  const closeLater = useCallback(() => setLater(null), [])
 
   // Past the blue card the page shows under the clock: a canvas-coloured strip fades in there and the status bar
   // icons go back to the theme's.
@@ -141,14 +145,18 @@ export default function GarageTab() {
   })
   const scrim = useAnimatedStyle(() => ({ opacity: interpolate(y.get(), [heroH.get() - insets.top - 24, heroH.get() - insets.top], [0, 1], 'clamp') }))
 
+  // Unchanged runs keep the same array, so nothing re-renders when a refresh finds nothing new.
   const loadReceipts = useCallback(() => api<Receipt[]>(`/garage/runs?since=${encodeURIComponent(midnight())}`)
-    .then((rs) => setReceipts(rs.map((r) => ({ ...r, apps: r.apps ?? [], text: r.text ?? '', headline: r.headline ?? null }))),
-      () => setReceipts((r) => r ?? [])), [])
+    .then((rs) => {
+      const next = rs.map((r) => ({ ...r, apps: r.apps ?? [], text: r.text ?? '', headline: r.headline ?? null }))
+      setReceipts((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    }, () => setReceipts((r) => r ?? [])), [])
+  // Refresh after the tab has slid in: work during the slide drops its frames.
   useFocusEffect(useCallback(() => {
-    loadReceipts()
+    const t = setTimeout(loadReceipts, 400)
     setFocused(true)
     setStatusBarStyle(past.get() && scheme !== 'dark' ? 'dark' : 'light')
-    return () => { setFocused(false); setStatusBarStyle(scheme === 'dark' ? 'light' : 'dark') }
+    return () => { clearTimeout(t); setFocused(false); setStatusBarStyle(scheme === 'dark' ? 'light' : 'dark') }
   }, [loadReceipts, scheme, past]))
 
   useEffect(() => {
@@ -164,7 +172,7 @@ export default function GarageTab() {
   }, [])
 
   // A run that just finished becomes a receipt (and may have changed an automation's last run).
-  const running = ws.liveRuns.filter((r) => r.status === 'running')
+  const running = useMemo(() => ws.liveRuns.filter((r) => r.status === 'running'), [ws.liveRuns])
   const count = useRef(running.length)
   useEffect(() => {
     if (running.length < count.current) { loadReceipts(); autos.load() }
@@ -180,16 +188,20 @@ export default function GarageTab() {
 
   const mode = demo === 'calm' ? 'calm' : demo ? 'busy' : null
   const sample = useMemo(() => (mode ? sampleData(ws.teammates, mode) : null), [mode, ws.teammates])
-  const d = sample ?? {
-    receipts, automations: autos.list, followups: follow.pending, approvals: ws.pendingApprovals,
-    live: running.map((run) => ({ run, doing: doing[run.id] })), todos: todos ?? [],
-  }
+  const live = useMemo(() => running.map((run) => ({ run, doing: doing[run.id] })), [running, doing])
+  const real = useMemo(() => ({
+    receipts, automations: autos.list, followups: follow.pending, approvals: ws.pendingApprovals, live, todos: todos ?? [],
+  }), [receipts, autos.list, follow.pending, ws.pendingApprovals, live, todos])
+  const d = sample ?? real
 
   // Automations that can't work or stopped on their own need you as much as an approval does.
-  const broken = (d.automations ?? []).filter((a) => a.problems.length
-    || (!a.enabled && (a.recent ?? []).length >= 3 && a.recent!.slice(0, 3).every((o) => o === 'failed')))
-  const upcoming = useMemo(() => comingUp(d.automations, d.followups, ws.threadTitle), [d.automations, d.followups, ws.threadTitle])
-  const due = (d.todos as Todo[]).filter((t) => t.due && t.status !== 'done' && t.status !== 'canceled' && t.due <= isoDay(new Date()))
+  const broken = useMemo(() => (d.automations ?? []).filter((a) => a.problems.length
+    || (!a.enabled && (a.recent ?? []).length >= 3 && a.recent!.slice(0, 3).every((o) => o === 'failed'))), [d.automations])
+  const upcoming = useMemo(() => comingUp(d.automations, d.followups), [d.automations, d.followups])
+  const due = useMemo(() => (d.todos as Todo[]).filter((t) => t.due && t.status !== 'done' && t.status !== 'canceled' && t.due <= isoDay(new Date())), [d.todos])
+  const onHeight = useCallback((h: number) => heroH.set(h), [heroH])
+  const onNeeds = useCallback(() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true }), [scroller, insets.top])
+  const onChanged = useCallback(() => { autos.load(); follow.refresh() }, [autos, follow])
   const needs = d.approvals.length + broken.length
 
   return (
@@ -202,7 +214,7 @@ export default function GarageTab() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
       >
         <Hero
-          onHeight={(h) => heroH.set(h)}
+          onHeight={onHeight}
           name={name}
           receipts={d.receipts}
           needs={needs}
@@ -212,7 +224,7 @@ export default function GarageTab() {
           mode={mode}
           onJobs={setJobs}
           onReceipt={setOne}
-          onNeeds={() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true })}
+          onNeeds={onNeeds}
           onNext={setLater}
         />
 
@@ -287,11 +299,11 @@ export default function GarageTab() {
       </Animated.ScrollView>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: c.canvas }, scrim]} />
 
-      <JobsSheet which={jobs} receipts={d.receipts ?? []} onClose={() => setJobs(null)} />
-      <Sheet open={!!one} onClose={() => setOne(null)} title={one?.title ?? 'Run'}>
+      <JobsSheet which={jobs} receipts={d.receipts ?? NONE} onClose={closeJobs} />
+      <Sheet open={!!one} onClose={closeOne} title={one?.title ?? 'Run'}>
         {one && <ReceiptRow r={one} startOpen />}
       </Sheet>
-      <UpcomingSheet item={later} receipts={d.receipts ?? []} sample={!!sample} onClose={() => setLater(null)} onChanged={() => { autos.load(); follow.refresh() }} />
+      <UpcomingSheet item={later} receipts={d.receipts ?? NONE} sample={!!sample} onClose={closeLater} onChanged={onChanged} />
     </View>
   )
 }
@@ -304,7 +316,7 @@ function B({ children, onPress }: { children: ReactNode; onPress?: () => void })
 }
 
 /** The day in one sentence, its highlights, and the outcome counts; every number opens what's behind it. */
-function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, onReceipt, onNeeds, onNext }: {
+const Hero = memo(function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, onReceipt, onNeeds, onNext }: {
   name: string | null; receipts: Receipt[] | null; needs: number; live: Live[]; next?: Upcoming; due: Todo[]
   mode: 'busy' | 'calm' | null; onHeight: (h: number) => void; onJobs: (j: Jobs) => void; onReceipt: (r: Receipt) => void
   onNeeds: () => void; onNext: (u: Upcoming) => void
@@ -326,8 +338,9 @@ function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, 
   const overdue = due.filter((t) => dueLabel(t.due!).overdue)
 
   return (
-    <View onLayout={(e) => onHeight(e.nativeEvent.layout.height)} style={{ borderBottomLeftRadius: 32, borderBottomRightRadius: 32, overflow: 'hidden', marginBottom: 20 }}>
-      <LinearGradient colors={BLUE} start={{ x: 0, y: 0 }} end={{ x: 0.4, y: 1 }} style={{ paddingTop: insets.top + 10, paddingHorizontal: 20, paddingBottom: 16 }}>
+    <View onLayout={(e) => onHeight(e.nativeEvent.layout.height)} style={{ marginBottom: 20 }}>
+      {/* The gradient rounds its own corners: clipping a wrapper (overflow hidden) costs a layer on every frame. */}
+      <LinearGradient colors={BLUE} start={{ x: 0, y: 0 }} end={{ x: 0.4, y: 1 }} style={{ paddingTop: insets.top + 10, paddingHorizontal: 20, paddingBottom: 16, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 40, marginBottom: 14, gap: 6 }}>
           <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 17, color: '#fff' }} accessibilityRole="header">Garage</Text>
           {mode && (['busy', 'calm', 'hide'] as const).map((m) => (
@@ -363,16 +376,16 @@ function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, 
 
         <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 16, marginBottom: 10 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 }}>
-          <Stat icon={Tick02Icon} n={counts.posted} label="posted" onPress={() => onJobs('posted')} />
+          <Stat n={counts.posted} label="posted" onPress={() => onJobs('posted')} />
           <Stat n={counts.quiet} label="quiet" onPress={() => onJobs('quiet')} />
-          {counts.failed > 0 && <Stat icon={AlertCircleIcon} n={counts.failed} label="failed" onPress={() => onJobs('failed')} />}
+          {counts.failed > 0 && <Stat n={counts.failed} label="failed" onPress={() => onJobs('failed')} />}
           <View style={{ flex: 1 }} />
           {worked.length > 0 && places(worked, 20, BLUE[1])}
         </View>
       </LinearGradient>
     </View>
   )
-}
+})
 
 function Faces({ people }: { people: Teammate[] }) {
   return (
@@ -398,11 +411,10 @@ function Dot() {
 }
 
 /** An outcome count; tap to see those runs. */
-function Stat({ icon, n, label, onPress }: { icon?: typeof Tick02Icon; n: number; label: string; onPress: () => void }) {
+function Stat({ n, label, onPress }: { n: number; label: string; onPress: () => void }) {
   return (
     <Press radius={radius.pill} static onPress={onPress} disabled={!n} accessibilityLabel={`${n} ${label}. Show them`}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, minHeight: 30, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' }}>
-      {icon && <Icon icon={icon} size={14} color="#fff" strokeWidth={2} />}
+      style={{ justifyContent: 'center', paddingHorizontal: 12, minHeight: 30, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' }}>
       <Text variant="label" style={{ color: '#fff' }}>{n} {label}</Text>
     </Press>
   )
@@ -449,7 +461,7 @@ function Hairline({ inset }: { inset: number }) {
 }
 
 /** Today's finished runs, newest first, in one card. */
-function Today({ receipts }: { receipts: Receipt[] | null }) {
+const Today = memo(function Today({ receipts }: { receipts: Receipt[] | null }) {
   const [all, setAll] = useState(false)
   if (receipts === null) {
     return <View style={{ paddingHorizontal: 20, gap: 14 }}><Skeleton width="70%" /><Skeleton width="50%" /></View>
@@ -471,7 +483,7 @@ function Today({ receipts }: { receipts: Receipt[] | null }) {
       )}
     </Surface>
   )
-}
+})
 
 function ReceiptList({ receipts }: { receipts: Receipt[] }) {
   return receipts.map((r, i) => (
@@ -500,9 +512,10 @@ function JobsSheet({ which, receipts, onClose }: { which: Jobs | null; receipts:
 }
 
 /** One run: what woke them, who, what came of it and where they worked. Opens into the full reply and what to do next. */
-function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean }) {
+const ReceiptRow = memo(function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean }) {
   const ws = useWorkspace()
   const [open, setOpen] = useState(startOpen)
+  const [seen, setSeen] = useState(startOpen) // the reply mounts on first open (Markdown is the costly part)
   const flip = useFlip(open)
   const tm = ws.teammate(r.teammate_id)
   const what = r.title ?? (r.trigger === 'schedule' ? 'Scheduled' : r.trigger === 'event' ? 'Event'
@@ -518,7 +531,7 @@ function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean 
     <View>
       <Press
         static
-        onPress={() => setOpen((o) => !o)}
+        onPress={() => { setSeen(true); setOpen((o) => !o) }}
         accessibilityLabel={`${what}, ${tm?.name ?? 'a teammate'}. ${summary}`}
         accessibilityHint={open ? 'Hides the reply' : 'Shows the whole reply'}
         accessibilityState={{ expanded: open }}
@@ -546,7 +559,7 @@ function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean 
         </View>
       </Press>
       <Collapse open={open}>
-        <View style={{ paddingLeft: 62, paddingRight: 14, paddingBottom: 14, gap: 12 }}>
+        {seen && <View style={{ paddingLeft: 62, paddingRight: 14, paddingBottom: 14, gap: 12 }}>
           {r.outcome === 'posted' ? <Markdown value={r.text} /> : (
             <Text variant="body" color={r.outcome === 'failed' ? 'danger' : 'ink2'}>{summary}</Text>
           )}
@@ -560,11 +573,11 @@ function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean 
               <Button label="Try again" size="sm" variant="ghost" onPress={() => runNow({ id: r.automation_id!, name: r.title ?? 'it' } as Automation)} />
             )}
           </View>
-        </View>
+        </View>}
       </Collapse>
     </View>
   )
-}
+})
 
 /** What each running run is doing this moment: its latest step, live. */
 function useDoing(runs: Run[], teammate: (id: string | null | undefined) => Teammate | undefined) {
@@ -592,7 +605,7 @@ function useDoing(runs: Run[], teammate: (id: string | null | undefined) => Team
 }
 
 /** Who is working: their face, where, and their latest step with a light sweeping through it while on screen. */
-function WorkingNow({ live, animate }: { live: Live[]; animate: boolean }) {
+const WorkingNow = memo(function WorkingNow({ live, animate }: { live: Live[]; animate: boolean }) {
   const ws = useWorkspace()
   if (!live.length) return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Everyone’s free. Runs show here, step by step, while they happen.</Text>
   return (
@@ -618,12 +631,12 @@ function WorkingNow({ live, animate }: { live: Live[]; animate: boolean }) {
       })}
     </Surface>
   )
-}
+})
 
 interface Upcoming { key: string; at: string; day: string; time: string; title: string; sub: string; teammate?: string; auto?: Automation; follow?: Followup }
 
 /** The next automation runs and follow-ups, soonest first. */
-function comingUp(automations: Automation[] | null, followups: Followup[] | null, threadTitle: (id: string) => string): Upcoming[] {
+function comingUp(automations: Automation[] | null, followups: Followup[] | null): Upcoming[] {
   const out: Upcoming[] = []
   const at = (iso: string) => { const [day, time] = whenLabel(iso).split(', '); return { day, time } }
   for (const a of automations ?? []) {
@@ -633,7 +646,7 @@ function comingUp(automations: Automation[] | null, followups: Followup[] | null
     const when = f.at ?? f.check_by
     if (!when) continue
     out.push({
-      key: f.id, at: when, ...at(when), title: f.what, sub: `Follow-up · ${threadTitle(f.thread_id)}`,
+      key: f.id, at: when, ...at(when), title: f.what, sub: 'Follow-up',
       teammate: f.owner === 'group' ? undefined : f.owner, follow: f,
     })
   }
@@ -641,7 +654,7 @@ function comingUp(automations: Automation[] | null, followups: Followup[] | null
 }
 
 /** A short timeline: the time on the left, what and who on the right. Each opens its summary sheet. */
-function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: boolean; onOpen: (u: Upcoming) => void }) {
+const ComingUp = memo(function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: boolean; onOpen: (u: Upcoming) => void }) {
   const ws = useWorkspace()
   if (loading) return <View style={{ paddingHorizontal: 20, gap: 14 }}><Skeleton width="65%" /><Skeleton width="45%" /></View>
   if (!items.length) return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Nothing scheduled. Automations and follow-ups show up here before they run.</Text>
@@ -660,7 +673,7 @@ function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: bool
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text variant="bodyMedium" numberOfLines={1}>{u.title}</Text>
-                <Text variant="caption" color="ink3" numberOfLines={1}>{[tm?.name, u.sub].filter(Boolean).join(' · ')}</Text>
+                <Text variant="caption" color="ink3" numberOfLines={1}>{[tm?.name, u.sub, u.follow && ws.threadTitle(u.follow.thread_id)].filter(Boolean).join(' · ')}</Text>
               </View>
               {tm && <TeammateAvatar teammate={tm} size={28} interactive={false} paused />}
             </Press>
@@ -669,7 +682,7 @@ function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: bool
       })}
     </Surface>
   )
-}
+})
 
 function Line({ label, value }: { label: string; value: string }) {
   return (
