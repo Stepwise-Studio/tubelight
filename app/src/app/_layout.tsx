@@ -81,6 +81,7 @@ function Root() {
               <Stack.Screen name="memory" />
               <Stack.Screen name="automations" />
               <Stack.Screen name="activity" />
+              <Stack.Screen name="followups" />
               <Stack.Screen name="crew" />
               <Stack.Screen name="automation/[id]" />
               <Stack.Screen name="usage" />

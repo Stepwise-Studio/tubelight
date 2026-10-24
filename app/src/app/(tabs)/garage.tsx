@@ -11,7 +11,7 @@ import { Text as RNText, RefreshControl, ScrollView, View } from 'react-native'
 import Animated, { interpolate, runOnJS, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, ArrowDown01Icon, ArrowUp01Icon, BellRingIcon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
+  Add01Icon, ArrowDown01Icon, ArrowUp01Icon, BellRingIcon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkCircle02Icon,
   CodeIcon, Globe02Icon, LaptopIcon, WorkflowIcon, WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 
@@ -19,24 +19,22 @@ import { ApprovalCard } from '@/components/approval-card'
 import { AutomationRows, lastRun } from '@/components/automation-rows'
 import { BrandTile } from '@/components/brand-mark'
 import { useTabBarInset } from '@/components/tab-bar'
-import { FollowupList, FollowupSheet } from '@/components/tasks/followups'
-import { StatusGlyph } from '@/components/tasks/glyphs'
 import { describe, isShown } from '@/lib/activity'
 import { api } from '@/lib/api'
-import { openAutomation, runNow, setEnabled, useAutomations, whenText, type Automation } from '@/lib/automations'
+import { openAutomation, runNow, useAutomations, whenText, type Automation } from '@/lib/automations'
 import { useTodayEvents, type PhoneEvent } from '@/lib/calendar'
 import { finishReminder, reminderNext, REPEATS, useReminders, type Reminder } from '@/lib/clock'
 import { ago, clock, whenLabel } from '@/lib/format'
 import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
-import { cancelFollowup, dueLabel, followupNow, isoDay, useFollowups, useTodos, type Followup, type Todo } from '@/lib/tasks'
+import { dueLabel, isoDay, useFollowups, useTodos, type Followup, type Todo } from '@/lib/tasks'
 import type { Activity, Approval, Run, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { fonts, radius, useTheme } from '@/theme'
 import { ShimmerText } from '@/ui/shimmer-text'
 import {
-  AvatarGroup, Button, Icon, ListRow, Markdown, Press, Sheet, Skeleton, Surface, TeammateAvatar, Text,
-  confirm, haptic,
+  AvatarGroup, Button, Icon, Squircle, ListRow, Markdown, Press, Sheet, Skeleton, Surface, TeammateAvatar, Text,
+  haptic,
 } from '@/ui'
 
 /** GET /garage/runs: a finished run. */
@@ -104,9 +102,9 @@ function PlaceTile({ place, size, onBlue }: { place: string; size: number; onBlu
   const p = PLACE[place]
   if (!p) return <BrandTile toolkit={place} size={size} />
   return (
-    <View style={{ width: size, height: size, borderRadius: size * 0.3, backgroundColor: onBlue ? '#fff' : c.panel2, borderWidth: 1, borderColor: onBlue ? 'transparent' : c.line, alignItems: 'center', justifyContent: 'center' }}>
+    <Squircle style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: onBlue ? '#fff' : c.panel2, borderWidth: 1, borderColor: onBlue ? 'transparent' : c.line, alignItems: 'center', justifyContent: 'center' }}>
       <Icon icon={p.icon} size={Math.round(size * 0.58)} color={onBlue ? BLUE[1] : 'ink2'} />
-    </View>
+    </Squircle>
   )
 }
 
@@ -137,13 +135,9 @@ export default function GarageTab() {
   const closeLater = useCallback(() => setLater(null), [])
   const [watching, setWatching] = useState<Live | null>(null)
   const closeWatching = useCallback(() => setWatching(null), [])
-  const [allFollow, setAllFollow] = useState(false)
   const [cal, setCal] = useState(false)
   const openRun = useCallback((r: Receipt) => { setJobs(null); setOne(r) }, [])
-  const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
-  const openFollow = useCallback((f: Followup) => setFsheet((x) => ({ open: true, f, n: x.n + 1 })), [])
-  const closeFollow = useCallback(() => setFsheet((x) => ({ ...x, open: false })), [])
-  const onUpcoming = useCallback((u: Upcoming) => (u.follow ? openFollow(u.follow) : setLater(u)), [openFollow])
+  const onUpcoming = useCallback((u: Upcoming) => setLater(u), [])
 
   // Past the blue card the page shows under the clock: a canvas-coloured strip fades in there and the status bar
   // icons go back to the theme's.
@@ -279,7 +273,7 @@ export default function GarageTab() {
         </Section>
 
         <Section title="Coming up">
-          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={onUpcoming} onFollowups={() => setAllFollow(true)} />
+          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={onUpcoming} onFollowups={() => router.push('/followups')} />
         </Section>
 
         <Section
@@ -319,10 +313,7 @@ export default function GarageTab() {
       <JobsSheet which={jobs} receipts={d.receipts ?? NONE} onClose={closeJobs} onOpen={openRun} />
       <RunSheet r={one} onClose={closeOne} />
       <WorkingSheet l={watching} sample={!!sample} onClose={closeWatching} />
-      <FollowupsSheet open={allFollow} pending={d.followups ?? []} done={d.done} onClose={() => setAllFollow(false)}
-        onOpen={(f) => { setAllFollow(false); openFollow(f) }} />
       <EventsSheet open={cal} events={d.events} onClose={() => setCal(false)} />
-      <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={closeFollow} />
       <UpcomingSheet item={later} receipts={d.receipts ?? NONE} sample={!!sample} onClose={closeLater} onChanged={onChanged} />
     </View>
   )
@@ -390,7 +381,7 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, due, events
               <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={WorkflowIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
             ))}
             {due.length > 0 && (
-              <> <Chip icon={CheckmarkSquare02Icon} tile={<StatusGlyph status="todo" size={18} />} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
+              <> <Chip icon={CheckmarkCircle02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
             )}
             {events.length > 0 && (events.length === 1
               ? <> <Chip icon={Calendar03Icon} /> <B onPress={onEvents}>{events[0].title || 'An event'}</B> {events[0].allDay ? 'is on your calendar today' : <>is on your calendar at <B onPress={onEvents}>{clock(new Date(events[0].start))}</B></>}.</>
@@ -422,8 +413,10 @@ function Faces({ people }: { people: Teammate[] }) {
 /** A white tile sitting inline in the hero sentence: an icon, or an app's logo. */
 function Chip({ icon, tile }: { icon: typeof Calendar03Icon; tile?: ReactNode }) {
   return (
-    <View style={{ transform: [{ translateY: 5 }], width: 28, height: 28, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-      {tile ?? <Icon icon={icon} size={17} color={BLUE[1]} strokeWidth={2} />}
+    <View style={{ transform: [{ translateY: 5 }] }}>
+      <Squircle style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {tile ?? <Icon icon={icon} size={17} color={BLUE[1]} strokeWidth={2} />}
+      </Squircle>
     </View>
   )
 }
@@ -805,19 +798,6 @@ const ComingUp = memo(function ComingUp({ items, loading, onOpen, onFollowups }:
   )
 })
 
-/** Every follow-up by state: upcoming, waiting on something, done, cancelled. */
-function FollowupsSheet({ open, pending, done, onClose, onOpen }: {
-  open: boolean; pending: Followup[]; done: Followup[]; onClose: () => void; onOpen: (f: Followup) => void
-}) {
-  return (
-    <Sheet open={open} onClose={onClose} title="Follow-ups">
-      <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ paddingBottom: 8 }}>
-        <FollowupList pending={pending} done={done} onOpen={onOpen} />
-      </ScrollView>
-    </Sheet>
-  )
-}
-
 /** Today's calendar, as the Calendar tab shows it. */
 function EventsSheet({ open, events, onClose }: { open: boolean; events: PhoneEvent[]; onClose: () => void }) {
   const { c } = useTheme()
@@ -855,11 +835,13 @@ function Line({ label, value }: { label: string; value: string }) {
   )
 }
 
-/** What's coming, summed up in place: when, who, what it will do, how it went last time; run, pause or cancel here. */
+/** What's coming, to look at: who, when, what it will do and how it went last time. One clear thing to do with it
+ * (run it now, mark it done, open it where it lives); changing it happens where it lives, not here. */
 function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
   item: Upcoming | null; receipts: Receipt[]; sample: boolean; onClose: () => void; onChanged: () => void
 }) {
   const ws = useWorkspace()
+  const { c } = useTheme()
   const [last, setLast] = useState<Upcoming | null>(null)
   if (item && item !== last) setLast(item)
   const u = item ?? last
@@ -870,54 +852,64 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
   const ev = u?.event
   const prev = a ? receipts.find((r) => r.automation_id === a.id) : undefined
   const health = a ? lastRun(a) : null
+  const go = (to: () => void) => { onClose(); to() }
   const act = async (work: () => Promise<unknown>) => { if (!sample) { await work(); onChanged() } onClose() }
-  const day = u ? (u.day.toLowerCase() === 'today' ? 'today' : u.day.toLowerCase()) : ''
+  const kind = a ? `Automation · ${tm?.name ?? 'a teammate'}` : f ? `Follow-up · ${tm?.name ?? 'the group'}` : rem ? 'Reminder' : 'Calendar'
+  const when = !u ? '' : ev ? `${u.day}, ${clock(new Date(ev.start))} – ${clock(new Date(ev.end))}` : `${u.day}, ${u.time}`
+  const glyph = rem ? BellRingIcon : Calendar03Icon
   return (
-    <Sheet open={!!item} onClose={onClose} title={u?.title}>
+    <Sheet open={!!item} onClose={onClose} accessibilityLabel={u?.title}>
       {u && (
-        <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 8, gap: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            {tm && <TeammateAvatar teammate={tm} size={32} interactive={false} paused />}
-            <Text variant="body" color="ink2" style={{ flex: 1 }}>
-              {ev ? `${day === 'today' ? 'Today' : u.day}, ${clock(new Date(ev.start))} – ${clock(new Date(ev.end))}` : rem ? `Reminds you ${day} at ${u.time}` : `${tm ? `${tm.name} ` : ''}${a ? `runs it ${day} at ${u.time}` : `checks back ${day} at ${u.time}`}`}
-            </Text>
-          </View>
-          <View>
-            {a && <Line label="Repeats" value={whenText(a)} />}
-            {a && a.upcoming.length > 1 && <Line label="After that" value={a.upcoming.slice(1).map((x) => whenLabel(x)).join(' · ')} />}
-            {f && <Line label="In" value={ws.threadTitle(f.thread_id)} />}
-            {rem && <Line label="Repeats" value={REPEATS.find((x) => x.value === rem.repeat)?.label ?? 'Once'} />}
-            {!!rem?.notes && <Line label="Notes" value={rem.notes} />}
-            {!!ev?.place && <Line label="Where" value={ev.place} />}
-            {!!ev?.notes && <Line label="Notes" value={ev.notes} />}
-            {health && <Line label="Last time" value={health.text} />}
-          </View>
-          {a?.instructions ? (
-            <View style={{ gap: 4 }}>
-              <Text variant="overline" color="ink3">What it does</Text>
-              <Text variant="body" color="ink2" numberOfLines={6}>{a.instructions}</Text>
+        <View style={{ paddingHorizontal: 20, gap: 18 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 4 }}>
+            {tm ? <TeammateAvatar teammate={tm} size={40} interactive={false} paused /> : (
+              <Squircle style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: ev?.color || c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon icon={glyph} size={20} color={ev?.color ? '#fff' : 'ink2'} />
+              </Squircle>
+            )}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text variant="headline" numberOfLines={2}>{u.title}</Text>
+              <Text variant="caption" color="ink3" numberOfLines={1}>{kind}</Text>
             </View>
-          ) : null}
-          {prev?.headline && (
-            <View style={{ gap: 4 }}>
-              <Text variant="overline" color="ink3">Today it found</Text>
-              <Text variant="body" color="ink2">{prev.headline}</Text>
-            </View>
-          )}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
-            {ev && <Button label="Open in calendar" size="sm" variant="soft" onPress={() => { onClose(); router.push({ pathname: '/event/[id]', params: { id: ev.id, start: String(ev.start) } }) }} />}
-            {rem && <Button label="Mark done" size="sm" variant="soft" onPress={() => act(async () => finishReminder(rem))} />}
-            {rem && <Button label="Edit" size="sm" variant="ghost" onPress={() => { onClose(); router.push({ pathname: '/reminder/[id]', params: { id: rem.id } }) }} />}
-            {a && <Button label="Run now" size="sm" variant="soft" onPress={() => act(() => runNow(a))} />}
-            {a && <Button label="Pause" size="sm" variant="ghost" onPress={() => act(() => setEnabled(a, false))} />}
-            {a && <Button label="Edit" size="sm" variant="ghost" onPress={() => { onClose(); openAutomation(a.id) }} />}
-            {f && <Button label="Do it now" size="sm" variant="soft" onPress={() => act(() => followupNow(f.id))} />}
-            {f && <Button label="Cancel it" size="sm" variant="ghost" onPress={() => act(async () => {
-              if (await confirm({ title: 'Cancel this follow-up?', body: f.what, confirmLabel: 'Cancel it', cancelLabel: 'Keep it', destructive: true })) await cancelFollowup(f.id)
-            })} />}
-            {f && <Button label="Open chat" size="sm" variant="ghost" onPress={() => { onClose(); openChat(f.thread_id) }} />}
           </View>
-        </ScrollView>
+          <Squircle style={{ borderRadius: 16, backgroundColor: c.panel2, paddingHorizontal: 16, paddingVertical: 12, gap: 2 }}>
+            <Text variant="footnote" color="ink3">{a ? 'Next run' : f ? 'Checks back' : rem ? 'Reminds you' : 'When'}</Text>
+            <Text variant="headline" tabular>{when}</Text>
+            {!!f?.until && <Text variant="caption" color="ink2">or as soon as {f.until}</Text>}
+          </Squircle>
+          <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ gap: 14 }}>
+            <View>
+              {a && <Line label="Repeats" value={whenText(a)} />}
+              {a && a.upcoming.length > 1 && <Line label="After that" value={a.upcoming.slice(1).map((x) => whenLabel(x)).join(' · ')} />}
+              {health && <Line label="Last time" value={health.text} />}
+              {f && <Line label="In" value={ws.threadTitle(f.thread_id)} />}
+              {rem && <Line label="Repeats" value={REPEATS.find((x) => x.value === rem.repeat)?.label ?? 'Once'} />}
+              {!!rem?.notes && <Line label="Notes" value={rem.notes} />}
+              {!!ev?.place && <Line label="Where" value={ev.place} />}
+              {!!ev?.notes && <Line label="Notes" value={ev.notes} />}
+            </View>
+            {a?.instructions ? (
+              <View style={{ gap: 4 }}>
+                <Text variant="overline" color="ink3">What it does</Text>
+                <Text variant="body" color="ink2">{a.instructions}</Text>
+              </View>
+            ) : null}
+            {prev?.headline && (
+              <View style={{ gap: 4 }}>
+                <Text variant="overline" color="ink3">Today it found</Text>
+                <Text variant="body" color="ink2">{prev.headline}</Text>
+              </View>
+            )}
+          </ScrollView>
+          <View style={{ gap: 4 }}>
+            {a && <Button label="Run it now" size="lg" fullWidth onPress={() => act(() => runNow(a))} />}
+            {a && <Button label="Open automation" variant="ghost" fullWidth onPress={() => go(() => openAutomation(a.id))} />}
+            {f && <Button label="Open the chat" size="lg" fullWidth onPress={() => go(() => openChat(f.thread_id))} />}
+            {f && <Button label="All follow-ups" variant="ghost" fullWidth onPress={() => go(() => router.push('/followups'))} />}
+            {rem && <Button label="Mark done" size="lg" fullWidth onPress={() => act(async () => finishReminder(rem))} />}
+            {ev && <Button label="Open in calendar" size="lg" fullWidth onPress={() => go(() => router.push({ pathname: '/event/[id]', params: { id: ev.id, start: String(ev.start) } }))} />}
+          </View>
+        </View>
       )}
     </Sheet>
   )
