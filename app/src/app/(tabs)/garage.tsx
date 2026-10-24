@@ -212,7 +212,7 @@ function ReceiptRow({ r }: { r: Receipt }) {
   const [steps, setSteps] = useState<Activity[] | null>(null)
   const flip = useFlip(open)
   const tm = ws.teammate(r.teammate_id)
-  const what = r.title ?? (r.trigger === 'schedule' ? 'Follow-up' : r.trigger === 'event' ? 'Event' : ws.threadTitle(r.thread_id))
+  const what = r.title ?? (r.trigger === 'schedule' ? 'Follow-up' : r.trigger === 'event' ? 'Event' : r.thread_id.startsWith('dm:') ? 'Direct chat' : ws.threadTitle(r.thread_id))
   const line = r.outcome === 'quiet' ? 'Nothing new, stayed quiet'
     : r.outcome === 'cancelled' ? 'Stopped'
       : r.outcome === 'failed' ? `Failed${r.preview ? `: ${r.preview}` : ''}`
@@ -313,7 +313,7 @@ function NowLine({ runs }: { runs: Run[] }) {
           <ListRow
             key={r.id}
             leading={tm ? <TeammateAvatar teammate={tm} size={32} interactive={false} /> : undefined}
-            title={`${tm?.name ?? 'A teammate'} · ${ws.threadTitle(r.thread_id)}`}
+            title={r.thread_id.startsWith('dm:') ? tm?.name ?? 'A teammate' : `${tm?.name ?? 'A teammate'} · ${ws.threadTitle(r.thread_id)}`}
             subtitle={doing[r.id] ? `${doing[r.id][0].toUpperCase()}${doing[r.id].slice(1)}` : 'Working…'}
             chevron
             onPress={() => router.push({ pathname: '/chat/[threadId]', params: { threadId: r.thread_id } })}

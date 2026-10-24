@@ -1545,9 +1545,9 @@ async def garage_runs(since: str, user: User = Depends(current_user)):
     """Finished runs since `since` as one-line receipts, newest first: what woke the teammate (an automation's name,
     a follow-up, an event, or a chat), how it went (posted, quiet, failed, cancelled), the start of what it posted and
     how many steps it took. Plain chat replies with no steps are left out: the chat already shows them."""
-    runs = await db.select("runs", {"owner_id": f"eq.{user['id']}", "created_at": f"gte.{since}",
-                                    "status": "not.in.(running,waiting_approval)", "order": "created_at.desc",
-                                    "limit": "80", "select": "id,thread_id,teammate_id,trigger,status,error,created_at,ended_at"})
+    runs = await db.select("runs", {"owner_id": f"eq.{user['id']}", "started_at": f"gte.{since}",
+                                    "status": "not.in.(running,waiting_approval)", "order": "started_at.desc",
+                                    "limit": "80", "select": "id,thread_id,teammate_id,trigger,status,error,started_at,ended_at"})
     if not runs:
         return []
     ids = f"in.({','.join(r['id'] for r in runs)})"
@@ -1574,7 +1574,7 @@ async def garage_runs(since: str, user: User = Depends(current_user)):
         rule = rule_of.get(r["id"])
         out.append({"run_id": r["id"], "thread_id": r["thread_id"], "teammate_id": r["teammate_id"],
                     "trigger": r["trigger"], "automation_id": rule, "title": names.get(rule) if rule else None,
-                    "outcome": outcome, "steps": n, "at": r["created_at"], "ended_at": r.get("ended_at"),
+                    "outcome": outcome, "steps": n, "at": r["started_at"], "ended_at": r.get("ended_at"),
                     "preview": (text or (r.get("error") if outcome == "failed" else "") or "")[:200]})
     return out
 

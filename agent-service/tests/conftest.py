@@ -61,6 +61,8 @@ class FakeDB:
 
     async def insert(self, table: str, row: dict) -> dict:
         row = {"id": str(uuid.uuid4()), "created_at": datetime.now(UTC).isoformat(), **DEFAULTS.get(table, {}), **row}
+        if table == "runs":  # the real table stamps runs with started_at, not created_at
+            row.setdefault("started_at", row.pop("created_at"))
         self.tables.setdefault(table, []).append(row)
         return dict(row)
 
