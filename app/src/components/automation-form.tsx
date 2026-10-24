@@ -2,7 +2,7 @@
 // think about first: what to call it and what to do, who does it and with which apps, when, and where it posts.
 import { useEffect, useMemo, useState } from 'react'
 import { ScrollView, TextInput, View } from 'react-native'
-import { AlertCircleIcon, SparklesIcon } from '@hugeicons/core-free-icons'
+import { AlertCircleIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
 import { FormSection, SwitchRow } from '@/components/form-bits'
@@ -142,7 +142,7 @@ export function useAppEvents(app: string | null) {
   return { events: app ? eventCache[app] ?? mine?.events ?? null : null, error: mine?.error ?? null }
 }
 
-export function AutomationForm({ draft, onChange, errors, events, eventsError, isNew, upcoming, tzNote }: {
+export function AutomationForm({ draft, onChange, errors, events, eventsError, isNew, upcoming, tzNote, hideWho }: {
   draft: AutomationDraft
   onChange: (d: AutomationDraft) => void
   errors: AutomationErrors
@@ -153,6 +153,8 @@ export function AutomationForm({ draft, onChange, errors, events, eventsError, i
   upcoming?: string[]
   /** Shown under When: the automation keeps another time zone than this phone's. */
   tzNote?: React.ReactNode
+  /** The new-automation screen picks who above the form. */
+  hideWho?: boolean
 }) {
   const ws = useWorkspace()
   const { connections } = useConnections()
@@ -196,10 +198,12 @@ export function AutomationForm({ draft, onChange, errors, events, eventsError, i
           placeholder="Go through my new mail since the last run and tell me what needs me, most urgent first." error={errors.instructions} />
       </FormSection>
 
-      <FormSection title="Runs as">
-        <PickerField label="Runs as" value={draft.teammateId} options={whoOptions} onChange={pickTeammate} placeholder="Pick a teammate" />
-        {errors.who && <Text variant="footnote" color="danger">{errors.who}</Text>}
-      </FormSection>
+      {!hideWho && (
+        <FormSection title="Runs as">
+          <PickerField label="Runs as" value={draft.teammateId} options={whoOptions} onChange={pickTeammate} placeholder="Pick a teammate" />
+          {errors.who && <Text variant="footnote" color="danger">{errors.who}</Text>}
+        </FormSection>
+      )}
 
       {tm && (
         <FormSection title="Apps it can use" hint={apps.length ? 'Only what’s on here. Anything that sends, posts or changes things still asks you first.' : undefined}>
@@ -386,46 +390,30 @@ function AppEventFields({ draft, onChange, apps, connected, events, eventsError 
 }
 
 /** "Describe it" for a new automation: plain words in, the whole form filled out below, ready to adjust. */
-const EXAMPLES = [
-  'Every 2 hours, check my inbox and tell me only what needs me. If people send applications, read the resumes and rank them',
-  'Every weekday at 8 am, brief me on my calendar, to-dos due and anything urgent in my mail',
-  'When a GitHub issue is opened, triage it: label it, guess the cause and tell me if it’s urgent',
-  'Every Sunday at 7 pm, plan my week from my to-dos and calendar',
-]
+/** Turns "every 2 hours, check my inbox…" into a filled draft (POST /automations/draft). Throws with the reason. */
+export async function draftFromText(text: string, draft: AutomationDraft, allowed: string[]): Promise<{ draft: AutomationDraft; note: string }> {
+  const d = await api<{
+    name: string; instructions: string; kind: 'schedule' | 'app'; cron: string | null; app?: string; trigger: string | null
+    settings: Record<string, unknown>; keywords: string[]; missing: string[]; apps: string[]; note: string
+  }>('/automations/draft', { method: 'POST', json: { text: text.trim(), teammate_id: draft.teammateId, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })
+  // Least access: just the apps it needs (none for a pizza fact); all of them only when it needs all.
+  const toolkits = allowed.every((t) => d.apps.includes(t)) ? null : d.apps.filter((t) => allowed.includes(t))
+  return {
+    draft: {
+      ...draft, name: d.name || draft.name, instructions: d.instructions || draft.instructions, kind: d.kind, toolkits,
+      schedule: d.cron ? parseCron(d.cron) : draft.schedule, app: d.app ?? null, trigger: d.trigger,
+      settings: Object.fromEntries(Object.entries(d.settings ?? {}).map(([k, v]) => [k, String(v)])), keywords: d.keywords.join(', '),
+    },
+    note: d.note || (d.missing.length ? `Fill in ${d.missing.map(label).join(', ')} under Advanced.` : ''),
+  }
+}
 
-/** Step one of a new automation: say what should happen, in your own words, and who does it. The server turns it into
- * the form (POST /automations/draft); "Fill it in yourself" skips straight to the form. */
-export function DescribeStep({ draft, onTeammate, onFilled, onManual }: {
-  draft: AutomationDraft; onTeammate: (id: string) => void
-  onFilled: (d: AutomationDraft, note: string) => void; onManual: () => void
+/** A new automation, said in your own words: a big writing area and who does it. */
+export function DescribeStep({ text, onText, teammateId, onTeammate }: {
+  text: string; onText: (t: string) => void; teammateId: string | null; onTeammate: (id: string) => void
 }) {
   const { c } = useTheme()
   const ws = useWorkspace()
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const crew = ws.teammates
-  const fill = async () => {
-    if (!draft.teammateId || text.trim().length < 3) return
-    haptic.tap()
-    setBusy(true)
-    try {
-      const d = await api<{
-        name: string; instructions: string; kind: 'schedule' | 'app'; cron: string | null; app?: string; trigger: string | null
-        settings: Record<string, unknown>; keywords: string[]; missing: string[]; apps: string[]; note: string
-      }>('/automations/draft', { method: 'POST', json: { text: text.trim(), teammate_id: draft.teammateId, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })
-      const tmApps = ws.teammate(draft.teammateId)?.allowed_toolkits ?? []
-      // Least access: just the apps it needs (none for a pizza fact); all of them only when it needs all.
-      const toolkits = tmApps.every((t) => d.apps.includes(t)) ? null : d.apps.filter((t) => tmApps.includes(t))
-      onFilled({
-        ...draft, name: d.name || draft.name, instructions: d.instructions || draft.instructions, kind: d.kind, toolkits,
-        schedule: d.cron ? parseCron(d.cron) : draft.schedule, app: d.app ?? null, trigger: d.trigger,
-        settings: Object.fromEntries(Object.entries(d.settings ?? {}).map(([k, v]) => [k, String(v)])), keywords: d.keywords.join(', '),
-      }, d.note || (d.missing.length ? `Fill in ${d.missing.map(label).join(', ')} below.` : ''))
-      haptic.success()
-    } catch (e) {
-      toast({ title: 'Couldn’t read that', body: (e as Error).message, tone: 'error' })
-    } finally { setBusy(false) }
-  }
   return (
     <View style={{ gap: 22 }}>
       <View style={{ gap: 6 }}>
@@ -434,7 +422,7 @@ export function DescribeStep({ draft, onTeammate, onFilled, onManual }: {
       </View>
       <TextInput
         value={text}
-        onChangeText={setText}
+        onChangeText={onText}
         multiline
         autoFocus
         maxLength={1000}
@@ -448,8 +436,8 @@ export function DescribeStep({ draft, onTeammate, onFilled, onManual }: {
       <View style={{ gap: 10 }}>
         <Text variant="overline" color="ink3">Who does it</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 4 }}>
-          {crew.map((t) => {
-            const on = draft.teammateId === t.id
+          {ws.teammates.map((t) => {
+            const on = teammateId === t.id
             return (
               <Press key={t.id} radius={14} static onPress={() => { haptic.tap(); onTeammate(t.id) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={t.name}
                 style={{ alignItems: 'center', gap: 6, width: 68, paddingVertical: 4 }}>
@@ -462,25 +450,11 @@ export function DescribeStep({ draft, onTeammate, onFilled, onManual }: {
           })}
         </ScrollView>
       </View>
-      <View style={{ gap: 10 }}>
-        <Text variant="overline" color="ink3">Or start from one of these</Text>
-        {EXAMPLES.map((e) => (
-          <Press key={e} radius={14} onPress={() => { haptic.tap(); setText(e) }} accessibilityLabel={`Use: ${e}`}
-            style={{ flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
-            <Icon icon={SparklesIcon} size={16} color="ink3" />
-            <Text variant="caption" color="ink2" style={{ flex: 1 }}>{e}</Text>
-          </Press>
-        ))}
-      </View>
-      <View style={{ gap: 8 }}>
-        <Button label="Set it up" icon={SparklesIcon} size="lg" fullWidth loading={busy} disabled={text.trim().length < 3 || !draft.teammateId} onPress={fill} />
-        <Button label="Fill it in yourself" variant="ghost" fullWidth onPress={onManual} />
-      </View>
     </View>
   )
 }
 
-/** Step two's header: what the teammate understood, in one sentence, before the form's details. */
+/** What the teammate understood, in one sentence, before the form's details. */
 export function Understood({ draft, events }: { draft: AutomationDraft; events: AppEvent[] | null }) {
   const ws = useWorkspace()
   const tm = ws.teammate(draft.teammateId)
@@ -501,7 +475,7 @@ export function Understood({ draft, events }: { draft: AutomationDraft; events: 
           {apps.map((t) => <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><BrandTile toolkit={t} size={18} /><Text variant="footnote" color="ink2">{toolkitName(t)}</Text></View>)}
         </View>
       )}
-      <Text variant="footnote" color="ink3">Change anything below before you set it up.</Text>
+      <Text variant="footnote" color="ink3">Change any of it under Advanced.</Text>
     </Surface>
   )
 }

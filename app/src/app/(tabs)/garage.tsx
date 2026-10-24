@@ -352,22 +352,13 @@ function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, 
               <> <Faces people={busy} /> <B>{names(busy.map((t) => t.name))}</B> {busy.length > 1 ? 'are' : 'is'} working right now.</>
             ) : null}
             {next ? <> Next up <Chip icon={Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
-          </Text>
-        )}
-
-        {(found.length > 0 || due.length > 0) && (
-          <View style={{ marginTop: 18, gap: 4 }}>
             {found.map((r) => (
-              <Highlight key={r.run_id} onPress={() => onReceipt(r)}
-                tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={26} onBlue /> : <WhiteTile icon={RepeatIcon} />}
-                title={r.title ?? 'Automation'} body={r.headline!} />
+              <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={RepeatIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
             ))}
             {due.length > 0 && (
-              <Highlight onPress={() => router.navigate('/tasks')} tile={<WhiteTile icon={CheckmarkSquare02Icon} />}
-                title={overdue.length ? `${plural(due.length, 'to-do')} due, ${overdue.length} overdue` : `${plural(due.length, 'to-do')} due today`}
-                body={due.slice(0, 3).map((t) => t.title).join(', ')} />
+              <> <Chip icon={CheckmarkSquare02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
             )}
-          </View>
+          </Text>
         )}
 
         <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 16, marginBottom: 10 }} />
@@ -383,26 +374,6 @@ function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, 
   )
 }
 
-function Highlight({ tile, title, body, onPress }: { tile: ReactNode; title: string; body: string; onPress: () => void }) {
-  return (
-    <Press radius={12} static onPress={onPress} accessibilityLabel={`${title}: ${body}`}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 }}>
-      {tile}
-      <RNText numberOfLines={2} style={{ flex: 1, fontFamily: fonts.regular, fontSize: 15, lineHeight: 20, color: DIM }}>
-        <RNText style={{ fontFamily: fonts.semibold, color: '#fff' }}>{title}</RNText>  {body}
-      </RNText>
-    </Press>
-  )
-}
-
-function WhiteTile({ icon }: { icon: typeof RepeatIcon }) {
-  return (
-    <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
-      <Icon icon={icon} size={16} color={BLUE[1]} strokeWidth={2} />
-    </View>
-  )
-}
-
 function Faces({ people }: { people: Teammate[] }) {
   return (
     <View style={{ transform: [{ translateY: 6 }] }}>
@@ -411,13 +382,16 @@ function Faces({ people }: { people: Teammate[] }) {
   )
 }
 
-function Chip({ icon }: { icon: typeof Calendar03Icon }) {
+/** A white tile sitting inline in the hero sentence: an icon, or an app's logo. */
+function Chip({ icon, tile }: { icon: typeof Calendar03Icon; tile?: ReactNode }) {
   return (
-    <View style={{ transform: [{ translateY: 5 }], width: 28, height: 28, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
-      <Icon icon={icon} size={17} color={BLUE[1]} strokeWidth={2} />
+    <View style={{ transform: [{ translateY: 5 }], width: 28, height: 28, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {tile ?? <Icon icon={icon} size={17} color={BLUE[1]} strokeWidth={2} />}
     </View>
   )
 }
+
+const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) && !/^[A-Z][a-z]+ [A-Z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s)
 
 function Dot() {
   return <View style={{ transform: [{ translateY: -3 }], width: 9, height: 9, borderRadius: 5, backgroundColor: '#ffb020' }} />

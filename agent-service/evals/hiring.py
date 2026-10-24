@@ -31,8 +31,11 @@ PEOPLE = [  # (name, resume) the strong ones: Asha, Ravi, Meera
 ]
 STRONG = {"Asha", "Ravi", "Meera"}
 
-INSTRUCTIONS = ("Check my inbox. Tell me only what needs my attention. When people send job applications, read the "
-                "resumes, score each candidate for our Junior AI Engineer role and rank them.")
+# Spelled out, and plain (what the user actually told Meta AI: no word about resumes or ranking). The plain one is
+# the real bar: a good assistant opens the resumes and ranks on its own.
+SPELLED = ("Check my inbox. Tell me only what needs my attention. When people send job applications, read the "
+           "resumes, score each candidate for our Junior AI Engineer role and rank them.")
+PLAIN = "Check my emails, summarise them and tell me if anything needs my attention."
 
 
 def mails():
@@ -47,7 +50,7 @@ def mails():
     }]}
 
 
-async def run(model: str):
+async def run(model: str, instructions: str):
     calls: list[tuple[str, dict]] = []
 
     async def fetch(query: str = "", max_results: int = 20) -> str:
@@ -65,7 +68,7 @@ async def run(model: str):
                                           description="Read Gmail attachments (PDF, Word, …) as text, up to 40 in one call. "
                                                       "files: [{message_id, attachment_id, file_name}] from each email's attachmentList.")]
     by = {t.name: t for t in tools}
-    text = (f"[Automation: Inbox check, every 2 hours]\nYour standing instructions: {INSTRUCTIONS}\n" + events.CRAFT + events.QUIET)
+    text = (f"[Automation: Inbox check, every 2 hours]\nYour standing instructions: {instructions}\n" + events.CRAFT + events.QUIET)
     msgs = [SystemMessage("You are Ivy, the user's inbox chief of staff. You use tools to do the work, then reply."), HumanMessage(text)]
     m = llm.chat_model(model, tools=tools)
     for _ in range(6):
@@ -95,19 +98,20 @@ async def run(model: str):
 
 async def main(models):
     for model in models:
-        t = time.time()
-        try:
-            checks, head, reply = await run(model)
-        except Exception as e:
-            print(f"{model}: ERROR {str(e)[:200]}")
-            continue
-        ok = sum(checks.values())
-        print(f"\n{model}: {ok}/{len(checks)} in {time.time() - t:.0f}s")
-        for k, v in checks.items():
-            print(f"  {'✓' if v else '✗'} {k}")
-        print(f"  headline: {head[:150]}")
-        if "-v" in sys.argv:
-            print(reply)
+        for kind, instructions in (("plain", PLAIN), ("spelled out", SPELLED)):
+            t = time.time()
+            try:
+                checks, head, reply = await run(model, instructions)
+            except Exception as e:
+                print(f"{model} ({kind}): ERROR {str(e)[:200]}")
+                continue
+            ok = sum(checks.values())
+            print(f"\n{model} ({kind}): {ok}/{len(checks)} in {time.time() - t:.0f}s")
+            for k, v in checks.items():
+                print(f"  {'✓' if v else '✗'} {k}")
+            print(f"  headline: {head[:150]}")
+            if "-v" in sys.argv:
+                print(reply)
 
 
 if __name__ == "__main__":
