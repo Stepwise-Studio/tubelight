@@ -1,7 +1,7 @@
 // The automation form, shared by /automation/new and each automation's page. Top to bottom it asks what people
 // think about first: what to call it and what to do, who does it and with which apps, when, and where it posts.
 import { useEffect, useMemo, useState } from 'react'
-import { View } from 'react-native'
+import { ScrollView, TextInput, View } from 'react-native'
 import { AlertCircleIcon, SparklesIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
@@ -16,7 +16,7 @@ import {
   toCron, withRepeat, type Repeat, type Schedule,
 } from '@/lib/schedule'
 import { useWorkspace } from '@/lib/workspace'
-import { useTheme } from '@/theme'
+import { fonts, useTheme } from '@/theme'
 import {
   Button, Chip, Collapse, Divider, Icon, Press, PickerField, Segment, Surface, TeammateAvatar, Text, TextField, TimePicker,
   haptic, toast, type PickerOption,
@@ -386,11 +386,24 @@ function AppEventFields({ draft, onChange, apps, connected, events, eventsError 
 }
 
 /** "Describe it" for a new automation: plain words in, the whole form filled out below, ready to adjust. */
-export function DescribeBox({ draft, onFilled }: { draft: AutomationDraft; onFilled: (d: AutomationDraft, note: string) => void }) {
+const EXAMPLES = [
+  'Every 2 hours, check my inbox and tell me only what needs me. If people send applications, read the resumes and rank them',
+  'Every weekday at 8 am, brief me on my calendar, to-dos due and anything urgent in my mail',
+  'When a GitHub issue is opened, triage it: label it, guess the cause and tell me if it’s urgent',
+  'Every Sunday at 7 pm, plan my week from my to-dos and calendar',
+]
+
+/** Step one of a new automation: say what should happen, in your own words, and who does it. The server turns it into
+ * the form (POST /automations/draft); "Fill it in yourself" skips straight to the form. */
+export function DescribeStep({ draft, onTeammate, onFilled, onManual }: {
+  draft: AutomationDraft; onTeammate: (id: string) => void
+  onFilled: (d: AutomationDraft, note: string) => void; onManual: () => void
+}) {
   const { c } = useTheme()
   const ws = useWorkspace()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const crew = ws.teammates
   const fill = async () => {
     if (!draft.teammateId || text.trim().length < 3) return
     haptic.tap()
@@ -414,15 +427,81 @@ export function DescribeBox({ draft, onFilled }: { draft: AutomationDraft; onFil
     } finally { setBusy(false) }
   }
   return (
-    <Surface padding={14} style={{ gap: 10, borderColor: c.tube }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Icon icon={SparklesIcon} size={16} color="tube" />
-        <Text variant="label">Describe it in your own words</Text>
+    <View style={{ gap: 22 }}>
+      <View style={{ gap: 6 }}>
+        <Text variant="title">What should happen?</Text>
+        <Text variant="body" color="ink2">Say it like you’d tell a person: when, what to look at, and what you want back.</Text>
       </View>
-      <TextField value={text} onChangeText={setText} multiline maxLength={1000}
-        placeholder="Every weekday at 9, go through my inbox and tell me what’s urgent" />
-      <Button label="Fill in the form" icon={SparklesIcon} variant="soft" loading={busy} disabled={text.trim().length < 3 || !draft.teammateId} onPress={fill} />
-      <Text variant="footnote" color="ink3">Or fill it in yourself below. You can change anything before it’s set up.</Text>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        multiline
+        autoFocus
+        maxLength={1000}
+        placeholder="Every 2 hours, check my inbox and tell me what needs me"
+        placeholderTextColor={c.ink4}
+        cursorColor={c.tube}
+        selectionColor={c.tubeGlow}
+        textAlignVertical="top"
+        style={{ minHeight: 120, padding: 0, fontFamily: fonts.regular, fontSize: 20, lineHeight: 28, letterSpacing: -0.3, color: c.ink }}
+      />
+      <View style={{ gap: 10 }}>
+        <Text variant="overline" color="ink3">Who does it</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 4 }}>
+          {crew.map((t) => {
+            const on = draft.teammateId === t.id
+            return (
+              <Press key={t.id} radius={14} static onPress={() => { haptic.tap(); onTeammate(t.id) }} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={t.name}
+                style={{ alignItems: 'center', gap: 6, width: 68, paddingVertical: 4 }}>
+                <View style={{ borderRadius: 26, padding: 2, borderWidth: 2, borderColor: on ? c.tube : 'transparent' }}>
+                  <TeammateAvatar teammate={t} size={40} interactive={false} paused />
+                </View>
+                <Text variant="footnote" color={on ? 'ink' : 'ink3'} numberOfLines={1}>{t.name}</Text>
+              </Press>
+            )
+          })}
+        </ScrollView>
+      </View>
+      <View style={{ gap: 10 }}>
+        <Text variant="overline" color="ink3">Or start from one of these</Text>
+        {EXAMPLES.map((e) => (
+          <Press key={e} radius={14} onPress={() => { haptic.tap(); setText(e) }} accessibilityLabel={`Use: ${e}`}
+            style={{ flexDirection: 'row', gap: 10, padding: 14, borderRadius: 14, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
+            <Icon icon={SparklesIcon} size={16} color="ink3" />
+            <Text variant="caption" color="ink2" style={{ flex: 1 }}>{e}</Text>
+          </Press>
+        ))}
+      </View>
+      <View style={{ gap: 8 }}>
+        <Button label="Set it up" icon={SparklesIcon} size="lg" fullWidth loading={busy} disabled={text.trim().length < 3 || !draft.teammateId} onPress={fill} />
+        <Button label="Fill it in yourself" variant="ghost" fullWidth onPress={onManual} />
+      </View>
+    </View>
+  )
+}
+
+/** Step two's header: what the teammate understood, in one sentence, before the form's details. */
+export function Understood({ draft, events }: { draft: AutomationDraft; events: AppEvent[] | null }) {
+  const ws = useWorkspace()
+  const tm = ws.teammate(draft.teammateId)
+  const where = draft.projectId ? ws.projects.find((p) => p.id === draft.projectId)?.name ?? 'the project' : `your chat with ${tm?.name ?? 'them'}`
+  const apps = draft.toolkits === null ? (tm?.allowed_toolkits ?? []) : draft.toolkits
+  return (
+    <Surface padding={16} style={{ gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        {tm && <TeammateAvatar teammate={tm} size={32} interactive={false} paused />}
+        <Text variant="headline" style={{ flex: 1 }}>{draft.name || 'New automation'}</Text>
+      </View>
+      <Text variant="body" color="ink2">
+        {tm?.name ?? 'Your teammate'} runs it {whenOf(draft, events)} and posts what it finds in {where}. With nothing new, it stays quiet.
+      </Text>
+      {apps.length > 0 && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Text variant="footnote" color="ink3">Uses</Text>
+          {apps.map((t) => <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><BrandTile toolkit={t} size={18} /><Text variant="footnote" color="ink2">{toolkitName(t)}</Text></View>)}
+        </View>
+      )}
+      <Text variant="footnote" color="ink3">Change anything below before you set it up.</Text>
     </Surface>
   )
 }

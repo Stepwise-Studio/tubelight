@@ -13,7 +13,7 @@ import {
 import type { IconSvgElement } from '@hugeicons/react-native'
 
 import {
-  AutomationForm, DescribeBox, checkDraft, createBody, draftOf, emptyDraft, patchBody, useAppEvents,
+  AutomationForm, DescribeStep, Understood, checkDraft, createBody, draftOf, emptyDraft, patchBody, useAppEvents,
   type AutomationDraft, type AutomationErrors,
 } from '@/components/automation-form'
 import { AutomationGlyph } from '@/components/automation-rows'
@@ -249,6 +249,8 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
   const [note, setNote] = useState('')
   const [tryNow, setTryNow] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [step, setStep] = useState<'describe' | 'form'>('describe')
+  const [filled, setFilled] = useState(false)
   const { events, error: eventsError } = useAppEvents(d.kind === 'app' ? d.app : null)
 
   const create = async () => {
@@ -269,15 +271,24 @@ function NewAutomation({ thread, teammate }: { thread?: string; teammate?: strin
   return (
     <>
       <ScreenHeader title="New automation" />
-      <KeyboardAwareScrollView bottomOffset={96} keyboardShouldPersistTaps="handled"
+      <KeyboardAwareScrollView key={step} bottomOffset={96} keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 40, gap: 28 }}>
-        <DescribeBox draft={d} onFilled={(next, n) => { setD(next); setErrors({}); setNote(n) }} />
-        {!!note && <Notice tone="info" title="Check this part" body={note} onDismiss={() => setNote('')} />}
+        {step === 'describe' ? (
+          <DescribeStep draft={d} onTeammate={(id) => setD({ ...emptyDraft(id, project), name: d.name, instructions: d.instructions })}
+            onFilled={(next, n) => { setD(next); setErrors({}); setNote(n); setFilled(true); setStep('form') }}
+            onManual={() => setStep('form')} />
+        ) : (
+          <>
+            {filled && <Understood draft={d} events={events} />}
+            {!!note && <Notice tone="info" title="Check this part" body={note} onDismiss={() => setNote('')} />}
         <AutomationForm draft={d} onChange={setD} errors={errors} events={events} eventsError={eventsError} isNew />
         <View style={{ gap: 14 }}>
           {d.kind === 'schedule' && <Checkbox value={tryNow} onChange={setTryNow} label="Run it once now, so I can see what it does" />}
           <Button label="Set up automation" size="lg" fullWidth loading={busy} onPress={create} />
+          <Button label="Start over" variant="ghost" fullWidth onPress={() => { setStep('describe'); setFilled(false); setNote('') }} />
         </View>
+          </>
+        )}
       </KeyboardAwareScrollView>
     </>
   )

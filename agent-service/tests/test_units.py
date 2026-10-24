@@ -334,3 +334,25 @@ def test_free_text_roles_decide_who_gets_a_sandbox():
     from app.tools import builder
     assert builder({"role": "Developer"}) and builder({"role": "QA engineer"}) and builder({"role": "Data analyst"})
     assert not builder({"role": "Inbox chief of staff"}) and not builder({"role": "Social media lead"})
+
+
+async def test_email_attachments_are_read_as_text_in_one_call(monkeypatch, tmp_path):
+    from app import connectors, graph, tools as T
+    (tmp_path / "a.txt").write_text("Asha: 3 years of PyTorch, built a RAG app")
+    calls = []
+
+    async def fake(user_id, slug, args):
+        calls.append((slug, args["attachment_id"]))
+        if args["attachment_id"] == "bad":
+            raise RuntimeError("not found")
+        return {"file": {"name": args["file_name"], "mimetype": "text/plain", "s3url": str(tmp_path / "a.txt")}}
+    monkeypatch.setattr(connectors, "execute", fake)
+    ctx = graph.RunCtx(run_id="r", owner_id="o", thread_id="dm:x", members=[])
+    tm = {"id": "t", "name": "Ivy", "handle": "ivy", "role": "x", "allowed_toolkits": []}
+    read = {t.name: t for t in T.build(ctx, tm, [])}["read_attachments"]
+    out = await read.coroutine(files=[{"message_id": "m1", "attachment_id": "x1", "file_name": "asha.txt"},
+                                      {"message_id": "m2", "attachment_id": "bad", "file_name": "ravi.pdf"}])
+    assert "### asha.txt\nAsha: 3 years of PyTorch" in out and "### ravi.pdf\n(Couldn't read it: not found)" in out
+    assert [c[0] for c in calls] == ["GMAIL_GET_ATTACHMENT"] * 2
+    ctx.only = ["github"]
+    assert "isn't allowed" in await read.coroutine(files=[{"message_id": "m1", "attachment_id": "x1"}])

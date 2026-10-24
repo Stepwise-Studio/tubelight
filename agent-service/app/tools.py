@@ -64,6 +64,30 @@ def conversation_stats(rows: list[dict[str, Any]], user_name: str, members: list
     ])
 
 
+ATTACH_MAX = 40
+ATTACH_BUDGET = 120_000  # characters across one call's files (Gemini reads it all; long files are cut per file)
+
+
+async def attachment_text(owner_id: str, message_id: str, attachment_id: str, name: str, limit: int) -> str:
+    """One Gmail attachment as text: Composio hands back a download link (or a local path from its SDK)."""
+    import httpx
+    from pathlib import Path
+    d = await connectors.execute(owner_id, "GMAIL_GET_ATTACHMENT",
+                                 {"message_id": message_id, "attachment_id": attachment_id, "file_name": name})
+    f = d.get("file") or d
+    url, mime = str(f.get("s3url") or f.get("uri") or ""), str(f.get("mimetype") or f.get("mimeType") or "")
+    if url.startswith("http"):
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+            data = r.content
+    elif url and Path(url).is_file():
+        data = Path(url).read_bytes()
+    else:
+        raise RuntimeError("Gmail returned no file")
+    return await files.text_of(name, mime, data, limit=limit)
+
+
 def builder(tm: dict) -> bool:
     return bool(BUILDER.search(tm.get("role") or ""))
 
@@ -71,7 +95,7 @@ def builder(tm: dict) -> bool:
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
-    "web_search": "read", "read_page": "read",
+    "web_search": "read", "read_page": "read", "read_attachments": "read",
     "browser_signin": "read", "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read",
@@ -457,7 +481,32 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return f"Couldn't open {url}: {why}" if why else f"{url} had no readable text (it may need a login or be mostly images)."
         return f"{title}\n{url}\n\n" + (text if len(text) <= 9000 else text[:9000] + f"\n[... {len(text) - 9000} more chars]")
 
+    # Email attachments (resumes, invoices, decks) as text, many in one call: one model turn reads a whole batch.
+    async def read_attachments(files: list[dict[str, str]]) -> str:
+        """files: [{message_id, attachment_id, file_name}] from the attachmentList of fetched emails."""
+        if ctx.only is not None and "gmail" not in ctx.only:
+            return "This automation isn't allowed to use Gmail."
+        files = [f for f in files if isinstance(f, dict) and f.get("message_id") and f.get("attachment_id")][:ATTACH_MAX]
+        if not files:
+            return "Give message_id, attachment_id and file_name for each attachment (from the email's attachmentList)."
+        per = max(1500, ATTACH_BUDGET // len(files))
+        gate = asyncio.Semaphore(4)
+
+        async def one(f: dict[str, str]) -> str:
+            name = f.get("file_name") or "attachment"
+            async with gate:
+                try:
+                    return await attachment_text(ctx.owner_id, f["message_id"], f["attachment_id"], name, per)
+                except Exception as e:
+                    return f"### {name}\n(Couldn't read it: {str(e)[:160]})"
+        return "\n\n".join(await asyncio.gather(*(one(f) for f in files)))
+
     tools += [
+        StructuredTool.from_function(
+            coroutine=read_attachments, name="read_attachments",
+            description="Read Gmail attachments (PDF, Word, Excel, PowerPoint, text, images) as text, up to 40 in one "
+                        "call: resumes, invoices, reports. files: [{message_id, attachment_id, file_name}] taken from "
+                        "each fetched email's attachmentList. Read them all in one call, not one by one."),
         StructuredTool.from_function(
             coroutine=web_search, name="web_search",
             description="Search the web for current information (news, docs, prices, people, anything after your "

@@ -46,6 +46,14 @@ def _describe(event: dict[str, Any]) -> str:
     return f"{event['type'].replace('_', ' ').capitalize()} event from {event['source']}" + (f": {headline}" if headline else "")
 
 
+# How an automation run works and writes: thorough (it runs unattended, so nobody can ask a follow-up question) and
+# headline first (the Garage's summary card quotes that line).
+CRAFT = ("\n\nDo the work fully: open every item that could matter, not just the subjects or previews. Emails with "
+         "attachments (resumes, invoices, contracts, reports): read the attachments with read_attachments, all of them in "
+         "one call, before you judge. When you compare or rank things, say why, with the facts that decided it.\n"
+         "Start your reply with ONE short headline line that carries the result with its numbers (e.g. '3 emails need "
+         "you: Priya's quote, 2 PR reviews' or '14 applications for the design role: 3 worth interviewing'), then the "
+         "details, then the next step you suggest (and offer to do it).")
 QUIET = ("\n\nIf the instructions ask you to post something every time (a fact, a brief, a reminder, a summary), "
          "always post it. Only when they ask you to check or watch for something and there's nothing new that matters "
          "this time, reply with exactly QUIET and nothing else: they won't see anything.")
@@ -83,7 +91,7 @@ async def fire(rule: dict[str, Any], event: dict[str, Any]) -> str:
                 f"Your standing instructions: {rule.get('instructions') or 'Tell them what matters, briefly.'}\n"
                 f"{await _since(rule, event['id'], tz)}"
                 + (f"\nThe event:\n```json\n{json.dumps(event['payload'], indent=1, default=str)[:6000]}\n```"
-                   if rule["event_type"] == "app" else "") + QUIET)
+                   if rule["event_type"] == "app" else "") + CRAFT + QUIET)
         run_id = await runs.start(rule["owner_id"], thread_id, text, trigger="schedule" if rule["event_type"] == "schedule" else "event",
                                   teammate_id=rule["teammate_id"], event_type=f"automation:{rule['name']}", sender="automation",
                                   only_apps=(rule.get("match") or {}).get("toolkits"))

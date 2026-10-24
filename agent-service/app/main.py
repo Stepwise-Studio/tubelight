@@ -1562,6 +1562,15 @@ def _place(step: dict[str, Any]) -> str | None:
     return None
 
 
+def _headline(text: str) -> str:
+    """A reply's first line as plain words (runs lead with a headline: events.CRAFT), cut to fit one line."""
+    for line in text.splitlines():
+        line = re.sub(r"[*_`#>]|^\s*[-+]\s+|!?\[([^\]]*)\]\([^)]*\)", lambda m: m.group(1) or "", line).strip()
+        if line and not line.startswith("```"):
+            return line if len(line) <= 140 else line[:139].rstrip() + "…"
+    return ""
+
+
 @app.get("/garage/runs")
 async def garage_runs(since: str, user: User = Depends(current_user)):
     """Finished runs since `since` as receipts, newest first: what woke the teammate (an automation's name, a
@@ -1607,6 +1616,7 @@ async def garage_runs(since: str, user: User = Depends(current_user)):
                     "trigger": r["trigger"], "automation_id": rule, "title": names.get(rule) if rule else None,
                     "outcome": outcome, "steps": n, "apps": places.get(r["id"], []), "duration_ms": took,
                     "at": r["started_at"], "ended_at": r.get("ended_at"),
+                    "headline": _headline(text) if outcome == "posted" else None,
                     "text": (text or (r.get("error") if outcome == "failed" else "") or "")[:1500]})
     return out
 
