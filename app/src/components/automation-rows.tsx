@@ -2,7 +2,7 @@ import { View } from 'react-native'
 import { RepeatIcon, ZapIcon } from '@hugeicons/core-free-icons'
 
 import { RowWithAction } from '@/components/form-bits'
-import { openAutomation, timing, whenText, type Automation } from '@/lib/automations'
+import { openAutomation, timing, whenText, type Automation, type RunOutcome } from '@/lib/automations'
 import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import { Divider, Icon, Surface, Text, Toggle } from '@/ui'
@@ -13,6 +13,20 @@ export function AutomationGlyph({ a, size = 36 }: { a: Pick<Automation, 'kind' |
   return (
     <View style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: a.enabled ? c.tubeSoft : c.panel2, alignItems: 'center', justifyContent: 'center' }}>
       <Icon icon={a.kind === 'app' ? ZapIcon : RepeatIcon} size={Math.round(size * 0.47)} color={a.enabled ? 'tube' : 'ink3'} />
+    </View>
+  )
+}
+
+/** How the last runs went, oldest to newest, as dots: posted lit, quiet faint, failed red, waiting amber. */
+export function RunDots({ recent }: { recent: RunOutcome[] }) {
+  const { c } = useTheme()
+  const tint: Partial<Record<RunOutcome, string>> = { posted: c.tube, quiet: c.ink3, failed: c.danger, approval: c.warning, working: c.warning }
+  if (!recent.length) return null
+  return (
+    <View style={{ flexDirection: 'row', gap: 3 }} accessibilityLabel={`Last runs: ${[...recent].reverse().join(', ')}`}>
+      {[...recent].reverse().map((o, i) => (
+        <View key={i} style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: tint[o] ?? c.line, opacity: o === 'quiet' ? 0.45 : 1 }} />
+      ))}
     </View>
   )
 }
@@ -43,7 +57,10 @@ export function AutomationRows({ items, show, onToggle }: {
             >
               <AutomationGlyph a={a} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text variant="bodyMedium" numberOfLines={1} color={a.enabled ? 'ink' : 'ink3'}>{a.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text variant="bodyMedium" numberOfLines={1} color={a.enabled ? 'ink' : 'ink3'} style={{ flexShrink: 1 }}>{a.name}</Text>
+                  <RunDots recent={a.recent ?? []} />
+                </View>
                 <Text variant="caption" color="ink3" numberOfLines={2}>{sub}</Text>
               </View>
             </RowWithAction>

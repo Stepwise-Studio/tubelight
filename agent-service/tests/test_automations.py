@@ -142,6 +142,10 @@ async def test_detail_shows_each_run_and_edits_come_with_a_capsule(api, env):
     d = (await api.get(f"/automations/{rule['id']}")).json()
     assert [h["outcome"] for h in d["runs"]] == ["posted", "quiet"] and d["runs"][0]["preview"] == "Two new mails."
     assert d["last_run"] and d["when"] == "every day at 8 AM"
+    [shown] = (await api.get("/automations")).json()
+    assert shown["recent"] == ["posted", "quiet"]
+    got = (await api.get("/garage/runs", params={"since": "2000-01-01T00:00:00Z"})).json()
+    assert [(g["title"], g["outcome"], g["preview"]) for g in got] == [("Brief", "posted", "Two new mails."), ("Brief", "quiet", "")]
 
     r = await api.patch(f"/automations/{rule['id']}", json={"cron": "*/5 * * * *"})
     assert r.status_code == 400 and "too often" in r.json()["detail"]

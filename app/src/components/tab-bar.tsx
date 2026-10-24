@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
 import { useEffect, useRef } from 'react'
-import { AiArtIcon, InboxIcon, UserCircleIcon, VaultIcon, WorkHistoryIcon } from '@hugeicons/core-free-icons'
+import { AiArtIcon, GarageIcon, InboxIcon, UserCircleIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { isUnread } from '@/lib/format'
 import { useWorkspace } from '@/lib/workspace'
@@ -21,7 +21,7 @@ const PLACES = [
   { name: 'index', label: 'Inbox', icon: InboxIcon },
   { name: 'vault', label: 'Vault', icon: VaultIcon },
   { name: 'tasks', label: 'Orbit', icon: AiArtIcon },
-  { name: 'activity', label: 'Activity', icon: WorkHistoryIcon },
+  { name: 'garage', label: 'Garage', icon: GarageIcon },
   { name: 'profile', label: 'Profile', icon: UserCircleIcon },
 ]
 const ease = motion.ease.smoothOut
@@ -40,7 +40,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const current = state.routes[state.index]?.name
   const unread = ws.threads.some(isUnread)
   const waiting = ws.pendingApprovals.length
-  const badge = (name: string) => (name === 'activity' ? waiting : 0)
+  const badge = (name: string) => (name === 'garage' ? waiting : 0)
   const dot = (name: string) => name === 'index' && unread
 
   const slot = (screen - 32 - 12) / PLACES.length

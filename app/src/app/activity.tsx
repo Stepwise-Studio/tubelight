@@ -1,22 +1,18 @@
-import { router, useLocalSearchParams } from 'expo-router'
+import { useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, { FadeIn } from 'react-native-reanimated'
-import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
-
-import { ApprovalCard } from '@/components/approval-card'
-
 import { ActivityRow } from '@/components/activity-row'
-import { TabHeader } from '@/components/screen-header'
-import { useTabBarInset } from '@/components/tab-bar'
+import { ScreenHeader } from '@/components/screen-header'
 import { FILTER_TYPES, matchesFilter, type ActivityFilter } from '@/lib/activity'
 import { dayLabel, sameDay } from '@/lib/format'
 import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
-import type { Activity, Approval, Teammate } from '@/lib/types'
+import type { Activity, Teammate } from '@/lib/types'
 import { useWorkspace } from '@/lib/workspace'
 import { motion, useTheme } from '@/theme'
-import { Button, EmptyState, Icon, Press, Segment, Skeleton, TeammateAvatar, Text, haptic } from '@/ui'
+import { Button, EmptyState, Segment, Skeleton, TeammateAvatar, Text, haptic } from '@/ui'
 
 const PAGE = 40
 
@@ -34,11 +30,12 @@ const EMPTY: Record<ActivityFilter, string> = {
   errors: 'Nothing has failed. Failed steps land here with what went wrong.',
 }
 
-export default function ActivityTab() {
+// Every step teammates took (the Garage's "All activity"): tool calls, handoffs, approvals, events and errors.
+export default function ActivityScreen() {
   const params = useLocalSearchParams<{ teammate?: string }>()
   const { c } = useTheme()
   const ws = useWorkspace()
-  const inset = useTabBarInset()
+  const insets = useSafeAreaInsets()
   const [who, setWho] = useState<string | null>(params.teammate ?? null)
   const [filter, setFilter] = useState<ActivityFilter>('all')
   // Rows are tagged with the filters they were loaded for; a filter change shows skeletons until they match.
@@ -101,28 +98,16 @@ export default function ActivityTab() {
 
   const refresh = async () => { setRefreshing(true); await Promise.all([load(), ws.refresh()]); setRefreshing(false) }
 
-  const header = (
-    <View>
-      <TabHeader title="Activity" />
-      {/* What's waiting on you comes first; past decisions are in the feed under Approvals. */}
-      {ws.pendingApprovals.length > 0 && (
-        <View style={{ gap: 12, paddingBottom: 20 }}>
-          <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 20 }}>
-            Waiting for you · {ws.pendingApprovals.length}
-          </Text>
-          {ws.pendingApprovals.map((a) => <Waiting key={a.id} approval={a} />)}
-        </View>
-      )}
-      <Filters teammates={ws.teammates} who={who} setWho={setWho} filter={filter} setFilter={setFilter} />
-    </View>
-  )
+  const header = <Filters teammates={ws.teammates} who={who} setWho={setWho} filter={filter} setFilter={setFilter} />
 
   return (
+    <View style={{ flex: 1, backgroundColor: c.canvas }}>
+    <ScreenHeader title="All activity" />
     <FlatList
       data={rows ?? []}
       keyExtractor={(a) => a.id}
       ListHeaderComponent={header}
-      contentContainerStyle={{ paddingBottom: inset + 24 }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 24 }}
       onEndReached={loadMore}
       onEndReachedThreshold={0.6}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
@@ -148,26 +133,6 @@ export default function ActivityTab() {
       )}
       ListFooterComponent={rows && rows.length > 0 && more ? <ActivityIndicator color={c.ink3} style={{ paddingVertical: 16 }} accessibilityLabel="Loading older activity" /> : null}
     />
-  )
-}
-
-function Waiting({ approval }: { approval: Approval }) {
-  const ws = useWorkspace()
-  const title = ws.threadTitle(approval.thread_id)
-  return (
-    <View style={{ paddingHorizontal: 16, gap: 6 }}>
-      <Press
-        radius={8}
-        static
-        onPress={() => router.push({ pathname: '/chat/[threadId]', params: { threadId: approval.thread_id } })}
-        accessibilityLabel={`Open ${title}`}
-        outerStyle={{ alignSelf: 'flex-start', marginLeft: -6 }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, minHeight: 32 }}
-      >
-        <Text variant="footnote" color="ink3">{approval.thread_id.startsWith('dm:') ? `Chat with ${title}` : title}</Text>
-        <Icon icon={ArrowRight01Icon} size={14} color="ink3" />
-      </Press>
-      <ApprovalCard approval={approval} teammate={ws.teammate(approval.teammate_id)} onDecided={ws.refresh} />
     </View>
   )
 }

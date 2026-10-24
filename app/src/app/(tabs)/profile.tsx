@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Platform, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, Plug01Icon, RepeatIcon,
+  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, Plug01Icon,
   Settings02Icon, SmartPhone01Icon,
 } from '@hugeicons/core-free-icons'
 
@@ -24,9 +24,7 @@ import { useTabBarInset } from '@/components/tab-bar'
 import { api } from '@/lib/api'
 import { upload } from '@/lib/attachments'
 import { identities } from '@/lib/auth'
-import type { Automation } from '@/lib/automations'
 import { useConnections } from '@/lib/catalog'
-import { whenLabel } from '@/lib/format'
 import { useFocusLater } from '@/lib/focus'
 import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
@@ -72,7 +70,6 @@ export default function ProfileScreen() {
           <Divider />
           <MemoryRow />
           <Divider />
-          <AutomationsRow />
           <Divider />
           <UsageRow />
         </Group>
@@ -279,16 +276,6 @@ function MemoryRow() {
     : [o!.open.length ? `${o!.open.length} open` : null, plural(n.people, 'person', 'people'), plural(n.facts, 'fact', 'facts'),
       n.waiting ? 'still learning' : null].filter(Boolean).join(' · ')
   return <ListRow title="Memory" subtitle={summary} icon={Brain02Icon} chevron onPress={() => router.push('/memory')} />
-}
-
-function AutomationsRow() {
-  const [items, setItems] = useState<Automation[] | null>(null)
-  useFocusLater(useCallback(() => { api<Automation[]>('/automations').then(setItems, () => setItems([])) }, []))
-  const on = (items ?? []).filter((a) => a.enabled)
-  const next = on.map((a) => a.next_run).filter((x): x is string => !!x).sort()[0]
-  const summary = items === null ? 'Loading…' : items.length === 0 ? 'Ask a teammate to do something on a schedule'
-    : [`${on.length} on`, items.length > on.length && `${items.length - on.length} paused`, next && `next ${whenLabel(next)}`].filter(Boolean).join(' · ')
-  return <ListRow title="Automations" subtitle={summary} icon={RepeatIcon} chevron onPress={() => router.push('/automations')} />
 }
 
 /** How much of the free allowances is left: anything used up first, else this month's tool calls. */

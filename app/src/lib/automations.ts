@@ -48,6 +48,8 @@ export interface Automation {
   problems: string[]
   last_run: string | null
   next_run: string | null
+  /** From GET /automations: how its last five runs went, newest first. */
+  recent?: RunOutcome[]
   /** Only from GET /automations/:id: the last 20 runs, newest first. */
   runs?: AutomationRun[]
 }

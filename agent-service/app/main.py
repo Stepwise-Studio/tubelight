@@ -745,15 +745,33 @@ async def _problems(rules: list[dict[str, Any]], owner_id: str) -> dict[str, lis
     return out
 
 
-async def _last_runs(rule_ids: list[str]) -> dict[str, str]:
+async def _run_stats(rule_ids: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Each rule's last run time and its last RECENT outcomes, newest first (the Garage's health dots)."""
     if not rule_ids:
-        return {}
-    rows = await db.select("events", {"rule_id": f"in.({','.join(rule_ids)})", "status": "eq.routed",
-                                      "order": "created_at.desc", "limit": "500", "select": "rule_id,created_at"})
+        return {}, {}
+    rows = await db.select("events", {"rule_id": f"in.({','.join(rule_ids)})", "order": "created_at.desc",
+                                      "limit": "500", "select": "rule_id,created_at,status,run_id"})
     last: dict[str, str] = {}
+    picked: dict[str, list[dict[str, Any]]] = {}
     for e in rows:
-        last.setdefault(e["rule_id"], e["created_at"])
-    return last
+        if e["status"] == "routed":
+            last.setdefault(e["rule_id"], e["created_at"])
+        if e["status"] != "ignored" and len(picked.setdefault(e["rule_id"], [])) < RECENT:
+            picked[e["rule_id"]].append(e)
+    run_ids = [e["run_id"] for es in picked.values() for e in es if e.get("run_id")]
+    runs_by: dict[str, Any] = {}
+    posted: set[str] = set()
+    if run_ids:
+        ids = f"in.({','.join(run_ids)})"
+        runs_by = {r["id"]: r for r in await db.select("runs", {"id": ids, "select": "id,status"})}
+        posted = {m["run_id"] for m in await db.select("messages", {"run_id": ids, "sender_type": "eq.teammate",
+                                                                    "select": "run_id"})}
+    recent = {rid: [_outcome(e, runs_by.get(e.get("run_id")), e.get("run_id") in posted or None) for e in es]
+              for rid, es in picked.items()}
+    return last, recent
+
+
+RECENT = 5
 
 
 @app.get("/automations")
@@ -761,8 +779,9 @@ async def list_automations(user: User = Depends(current_user)):
     """Every automation (schedules and app events), newest first; the app groups them by chat or teammate."""
     rules = await db.select("event_rules", {"owner_id": f"eq.{user['id']}", "event_type": "in.(schedule,app)",
                                             "order": "created_at.desc"})
-    last, problems = await asyncio.gather(_last_runs([r["id"] for r in rules]), _problems(rules, user["id"]))
-    return [_automation_view(r, last.get(r["id"]), problems.get(r["id"])) for r in rules]
+    (last, recent), problems = await asyncio.gather(_run_stats([r["id"] for r in rules]), _problems(rules, user["id"]))
+    return [{**_automation_view(r, last.get(r["id"]), problems.get(r["id"])), "recent": recent.get(r["id"], [])}
+            for r in rules]
 
 
 def _outcome(event: dict[str, Any], run: dict[str, Any] | None, posted: str | None) -> str:
@@ -1516,6 +1535,48 @@ _items_routes("/reminders", clock.REMINDERS, "reminder")
 
 _FOLLOWUP_KEEP = ("id", "thread_id", "what", "owner", "at", "until", "check_by", "poll_hours", "set_by", "set_at",
                   "created", "status", "closed")
+
+
+STEP_TYPES = "(tool_call,handoff,approval_request,sandbox,subagent)"
+
+
+@app.get("/garage/runs")
+async def garage_runs(since: str, user: User = Depends(current_user)):
+    """Finished runs since `since` as one-line receipts, newest first: what woke the teammate (an automation's name,
+    a follow-up, an event, or a chat), how it went (posted, quiet, failed, cancelled), the start of what it posted and
+    how many steps it took. Plain chat replies with no steps are left out: the chat already shows them."""
+    runs = await db.select("runs", {"owner_id": f"eq.{user['id']}", "created_at": f"gte.{since}",
+                                    "status": "not.in.(running,waiting_approval)", "order": "created_at.desc",
+                                    "limit": "80", "select": "id,thread_id,teammate_id,trigger,status,error,created_at,ended_at"})
+    if not runs:
+        return []
+    ids = f"in.({','.join(r['id'] for r in runs)})"
+    steps, msgs, evs = await asyncio.gather(
+        db.select("activity", {"run_id": ids, "type": f"in.{STEP_TYPES}", "select": "run_id"}),
+        db.select("messages", {"run_id": ids, "sender_type": "eq.teammate", "order": "created_at", "select": "run_id,text"}),
+        db.select("events", {"run_id": ids, "select": "run_id,rule_id"}))
+    count: dict[str, int] = {}
+    for a in steps:
+        count[a["run_id"]] = count.get(a["run_id"], 0) + 1
+    said: dict[str, str] = {}
+    for m in msgs:
+        said.setdefault(m["run_id"], m.get("text") or "")
+    rule_of = {e["run_id"]: e["rule_id"] for e in evs if e.get("rule_id")}
+    names = {r["id"]: r["name"] for r in await db.select(
+        "event_rules", {"id": f"in.({','.join(set(rule_of.values()))})", "select": "id,name"})} if rule_of else {}
+    out = []
+    for r in runs:
+        n = count.get(r["id"], 0)
+        if r["trigger"] == "message" and not n:
+            continue
+        text = said.get(r["id"])
+        outcome = {"error": "failed", "cancelled": "cancelled"}.get(r["status"]) or ("posted" if text else "quiet")
+        rule = rule_of.get(r["id"])
+        out.append({"run_id": r["id"], "thread_id": r["thread_id"], "teammate_id": r["teammate_id"],
+                    "trigger": r["trigger"], "automation_id": rule, "title": names.get(rule) if rule else None,
+                    "outcome": outcome, "steps": n, "at": r["created_at"], "ended_at": r.get("ended_at"),
+                    "preview": (text or (r.get("error") if outcome == "failed" else "") or "")[:200]})
+    return out
 
 
 @app.get("/followups")
