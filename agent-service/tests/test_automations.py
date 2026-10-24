@@ -145,7 +145,12 @@ async def test_detail_shows_each_run_and_edits_come_with_a_capsule(api, env):
     [shown] = (await api.get("/automations")).json()
     assert shown["recent"] == ["posted", "quiet"]
     got = (await api.get("/garage/runs", params={"since": "2000-01-01T00:00:00Z"})).json()
-    assert [(g["title"], g["outcome"], g["preview"]) for g in got] == [("Brief", "posted", "Two new mails."), ("Brief", "quiet", "")]
+    assert [(g["title"], g["outcome"], g["text"]) for g in got] == [("Brief", "posted", "Two new mails."), ("Brief", "quiet", "")]
+    from app.main import _place
+    assert [_place(x) for x in ({"type": "tool_call", "name": "COMPOSIO_MULTI_EXECUTE_TOOL", "input": {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS"}]}},
+                                {"type": "tool_call", "name": "web_search"}, {"type": "tool_call", "name": "COMPOSIO_SEARCH_TOOLS"},
+                                {"type": "tool_call", "name": "browser_act"}, {"type": "sandbox", "name": "run_shell"},
+                                {"type": "tool_call", "name": "recall"})] == ["gmail", "web", None, "browser", "code", None]
 
     r = await api.patch(f"/automations/{rule['id']}", json={"cron": "*/5 * * * *"})
     assert r.status_code == 400 and "too often" in r.json()["detail"]

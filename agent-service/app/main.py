@@ -1538,13 +1538,36 @@ _FOLLOWUP_KEEP = ("id", "thread_id", "what", "owner", "at", "until", "check_by",
 
 
 STEP_TYPES = "(tool_call,handoff,approval_request,sandbox,subagent)"
+_PLACES = {"web_search": "web", "read_page": "web"}
+
+
+def _place(step: dict[str, Any]) -> str | None:
+    """Where a step worked, for a receipt's logos: an app's toolkit ("gmail"), or web, browser, computer, code."""
+    name = step.get("name") or ""
+    if step["type"] == "sandbox":
+        return "code"
+    if step["type"] != "tool_call":
+        return None
+    if name == "COMPOSIO_MULTI_EXECUTE_TOOL":
+        tools = (step.get("input") or {}).get("tools") or [{}]
+        name = (tools[0] or {}).get("tool_slug") or name
+    if name in _PLACES:
+        return _PLACES[name]
+    if name.startswith(("browser_", "computer_")):
+        return name.split("_")[0]
+    if name.startswith("COMPOSIO_SEARCH_") and name != "COMPOSIO_SEARCH_TOOLS":
+        return "web"
+    if name.isupper() and "_" in name and not name.startswith("COMPOSIO_"):
+        return name.split("_")[0].lower()
+    return None
 
 
 @app.get("/garage/runs")
 async def garage_runs(since: str, user: User = Depends(current_user)):
-    """Finished runs since `since` as one-line receipts, newest first: what woke the teammate (an automation's name,
-    a follow-up, an event, or a chat), how it went (posted, quiet, failed, cancelled), the start of what it posted and
-    how many steps it took. Plain chat replies with no steps are left out: the chat already shows them."""
+    """Finished runs since `since` as receipts, newest first: what woke the teammate (an automation's name, a
+    follow-up, an event, or a chat), how it went (posted, quiet, failed, cancelled), what it said, where it worked
+    (apps, web, browser, computer, code), how many steps and how long. Plain chat replies with no steps are left out:
+    the chat already shows them."""
     runs = await db.select("runs", {"owner_id": f"eq.{user['id']}", "started_at": f"gte.{since}",
                                     "status": "not.in.(running,waiting_approval)", "order": "started_at.desc",
                                     "limit": "80", "select": "id,thread_id,teammate_id,trigger,status,error,started_at,ended_at"})
@@ -1552,15 +1575,20 @@ async def garage_runs(since: str, user: User = Depends(current_user)):
         return []
     ids = f"in.({','.join(r['id'] for r in runs)})"
     steps, msgs, evs = await asyncio.gather(
-        db.select("activity", {"run_id": ids, "type": f"in.{STEP_TYPES}", "select": "run_id"}),
+        db.select("activity", {"run_id": ids, "type": f"in.{STEP_TYPES}", "select": "run_id,type,name,input"}),
         db.select("messages", {"run_id": ids, "sender_type": "eq.teammate", "order": "created_at", "select": "run_id,text"}),
         db.select("events", {"run_id": ids, "select": "run_id,rule_id"}))
     count: dict[str, int] = {}
+    places: dict[str, list[str]] = {}
     for a in steps:
         count[a["run_id"]] = count.get(a["run_id"], 0) + 1
-    said: dict[str, str] = {}
+        p = _place(a)
+        if p and p not in places.setdefault(a["run_id"], []):
+            places[a["run_id"]].append(p)
+    said: dict[str, list[str]] = {}
     for m in msgs:
-        said.setdefault(m["run_id"], m.get("text") or "")
+        if m.get("text"):
+            said.setdefault(m["run_id"], []).append(m["text"])
     rule_of = {e["run_id"]: e["rule_id"] for e in evs if e.get("rule_id")}
     names = {r["id"]: r["name"] for r in await db.select(
         "event_rules", {"id": f"in.({','.join(set(rule_of.values()))})", "select": "id,name"})} if rule_of else {}
@@ -1569,13 +1597,17 @@ async def garage_runs(since: str, user: User = Depends(current_user)):
         n = count.get(r["id"], 0)
         if r["trigger"] == "message" and not n:
             continue
-        text = said.get(r["id"])
+        text = "\n\n".join(said.get(r["id"], []))
         outcome = {"error": "failed", "cancelled": "cancelled"}.get(r["status"]) or ("posted" if text else "quiet")
         rule = rule_of.get(r["id"])
+        took = None
+        if r.get("ended_at"):
+            took = int((datetime.fromisoformat(r["ended_at"]) - datetime.fromisoformat(r["started_at"])).total_seconds() * 1000)
         out.append({"run_id": r["id"], "thread_id": r["thread_id"], "teammate_id": r["teammate_id"],
                     "trigger": r["trigger"], "automation_id": rule, "title": names.get(rule) if rule else None,
-                    "outcome": outcome, "steps": n, "at": r["started_at"], "ended_at": r.get("ended_at"),
-                    "preview": (text or (r.get("error") if outcome == "failed" else "") or "")[:200]})
+                    "outcome": outcome, "steps": n, "apps": places.get(r["id"], []), "duration_ms": took,
+                    "at": r["started_at"], "ended_at": r.get("ended_at"),
+                    "text": (text or (r.get("error") if outcome == "failed" else "") or "")[:1500]})
     return out
 
 
