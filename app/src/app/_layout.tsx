@@ -84,6 +84,8 @@ function Root() {
               <Stack.Screen name="automation/[id]" />
               <Stack.Screen name="usage" />
               <Stack.Screen name="computers" />
+              <Stack.Screen name="phone-assistant" />
+              <Stack.Screen name="advanced" />
               <Stack.Screen name="scan" options={{ animation: 'fade' }} />
               <Stack.Screen name="link" />
               <Stack.Screen name="vault/[id]" />

@@ -35,6 +35,9 @@ export function showContextMenu(target: RNView | null, preview: Preview, items: 
   })
 }
 
+/** Closes an open context menu at once (a hold that turned into a drag). */
+export function closeContextMenu() { setPortal(KEY, null) }
+
 const CLOSE_MS = 180
 
 function Layer({ at, preview, items, close }: { at: { x: number; y: number; w: number; h: number }; preview: Preview; items: MenuItem[]; close: () => void }) {

@@ -28,10 +28,14 @@ export async function google(link = false): Promise<boolean> {
   return false
 }
 
-/** How you can sign in to this account (email, Google). */
+/** How you can sign in to this account (Google), with the name and picture it carries. */
 export async function identities() {
   const { data } = await supabase.auth.getUserIdentities()
-  return (data?.identities ?? []).map((i) => ({ provider: i.provider, email: (i.identity_data?.email as string | undefined) ?? null }))
+  return (data?.identities ?? []).map((i) => {
+    const d = i.identity_data ?? {}
+    return { provider: i.provider, email: (d.email as string | undefined) ?? null, name: (d.full_name ?? d.name ?? null) as string | null,
+      picture: (d.avatar_url ?? d.picture ?? null) as string | null }
+  })
 }
 
 function friendly(m: string) {
