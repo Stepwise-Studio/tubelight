@@ -5,7 +5,9 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Pressable, View, type LayoutChangeEvent } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import Animated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated'
+import Animated, {
+  FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming, type SharedValue,
+} from 'react-native-reanimated'
 import { ArrowDown01Icon, Calendar03Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 
 import { STATUSES, deleteTodo, dueLabel, nextStatus, statusLabel, updateTodo, type Label, type Todo, type TodoStatus } from '@/lib/tasks'
@@ -20,13 +22,15 @@ const ORDER: Record<TodoStatus, number> = { backlog: 0, todo: 1, doing: 2, done:
 const MONTH_MS = 30 * 86_400_000
 /** Notes as one quiet line: no list marks, checkboxes, quotes or code fences. */
 const plain = (s: string) => s.replace(/^\s*(?:[-*>]|```)\s?(?:\[[ xX]\]\s?)?/gm, '').replace(/\s+/g, ' ').trim()
-const layout = LinearTransition.duration(280).easing(motion.ease.smoothOut)
+const LAND = { duration: 280, easing: motion.ease.smoothOut }
+const layout = LinearTransition.duration(LAND.duration).easing(LAND.easing)
 /** Rows that appear (a group opened, the first load) fade in together: one native fade, no per-row timing. */
 const ENTER = FadeIn.duration(200)
 
 interface Group { key: string; title: string; glyph: React.ReactNode; rows: Todo[]; foldable: boolean }
-/** The view being dragged (key '' = none): where it started, its height and how far it has moved. */
-interface Drag { key: SharedValue<string>; y0: SharedValue<number>; h: SharedValue<number>; dy: SharedValue<number> }
+/** The view being dragged (key '' = none): where it started, its height, how far it has moved, and the middle the
+ * others step aside for (held still while it settles into its slot). */
+interface Drag { key: SharedValue<string>; y0: SharedValue<number>; h: SharedValue<number>; dy: SharedValue<number>; cy: SharedValue<number> }
 type Spot = { y: number; h: number }
 type Item = { k: string; group: string; todo?: Todo }
 
@@ -40,26 +44,35 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
   // Done more than a month ago drops off the board.
   const live = todos.filter((t) => t.status !== 'done' || (t.completed_at ?? t.updated_at) >= since)
   const byLabel = new Map(labels.map((l) => [l.id, l]))
-  const d: Drag = { key: useSharedValue(''), y0: useSharedValue(0), h: useSharedValue(0), dy: useSharedValue(0) }
+  const d: Drag = { key: useSharedValue(''), y0: useSharedValue(0), h: useSharedValue(0), dy: useSharedValue(0), cy: useSharedValue(0) }
   const [spots] = useState(() => new Map<string, Spot>())
   const items: Item[] = []
   const itemsRef = useRef<Item[]>([])
-  // A drop lays the list out in its new order with no layout glide (the rows already stand where they land), then
-  // the drag's offsets go back to 0 in the same frame.
-  const [quiet, setQuiet] = useState(false)
-  useLayoutEffect(() => {
-    if (!quiet) return
-    d.key.set(''); d.dy.set(0)
-    const f = requestAnimationFrame(() => setQuiet(false))
-    return () => cancelAnimationFrame(f)
-  }, [quiet, d.key, d.dy])
+  // A drop commits the new order; as the layout glides every row to its new place, the drag's offsets ease back to 0
+  // on the same curve and timing, so the two cancel out and nothing moves on screen.
+  const [landed, setLanded] = useState(0)
+  useLayoutEffect(() => { if (landed) d.key.set('') }, [landed, d.key])
+
+  // Let go: the row glides into the slot the others opened for it, then the list takes the new order.
+  const settle = (k: string, center: number) => {
+    const s0 = spots.get(k)
+    if (!s0) { drop(k, center); return }
+    let top = s0.y
+    for (const i of itemsRef.current) {
+      const s = i.k !== k && spots.get(i.k)
+      if (!s) continue
+      if (s.y > s0.y && center > s.y + s.h / 2) top = Math.max(top, s.y + s.h - s0.h)
+      if (s.y < s0.y && center < s.y + s.h / 2) top = Math.min(top, s.y)
+    }
+    d.dy.set(withTiming(top - s0.y, { duration: 220, easing: motion.ease.smoothOut }, (done) => { if (done) runOnJS(drop)(k, center) }))
+  }
 
   // Where the dragged view lands: before the first other view whose middle is below its middle. It joins that
   // spot's group, its sort halfway between its new neighbours.
   const drop = (k: string, center: number) => {
     const list = itemsRef.current
     const t = list.find((i) => i.k === k)?.todo
-    if (!t) { setQuiet(true); return }
+    if (!t) { setLanded((n) => n + 1); return }
     const from = list.find((i) => i.k === k)!.group
     const rest = list.filter((i) => i.k !== k)
     let at = rest.findIndex((i) => { const s = spots.get(i.k); return !!s && center < s.y + s.h / 2 })
@@ -74,10 +87,10 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
       if (groupBy === 'status') changes.status = group as TodoStatus
       else changes.labels = group === '_none' ? [] : [...(t.labels ?? []).filter((id) => id !== from), group]
     }
-    setQuiet(true)
+    setLanded((n) => n + 1)
     if (!Object.keys(changes).length) return
     if (changes.status === 'done') haptic.success()
-    else haptic.tap()
+    else haptic.light()
     updateTodo(t.id, changes).catch((e) => toast({ title: 'Unable to move it', body: (e as Error).message, tone: 'error' }))
   }
 
@@ -106,7 +119,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
     const shown = !fold[g.key]
     items.push({ k: `h:${g.key}`, group: g.key })
     views.push(
-      <Slot key={`h:${g.key}`} k={`h:${g.key}`} d={d} spots={spots} quiet={quiet}>
+      <Slot key={`h:${g.key}`} k={`h:${g.key}`} d={d} spots={spots}>
         <GroupHeader title={g.title} glyph={g.glyph} count={g.rows.length} open={shown}
           onToggle={() => { haptic.tap(); setFold((f) => ({ ...f, [g.key]: shown })) }} />
       </Slot>,
@@ -116,7 +129,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
       const k = groupBy === 'status' ? t.id : `${g.key}:${t.id}`
       items.push({ k, group: g.key, todo: t })
       views.push(
-      <TodoRow key={k} k={k} d={d} spots={spots} quiet={quiet} onDrop={drop} todo={t} onOpen={onOpen} labels={labels} group={g.key}
+      <TodoRow key={k} k={k} d={d} spots={spots} onDrop={settle} todo={t} onOpen={onOpen} labels={labels} group={g.key}
         who={t.assignee ? teammate(t.assignee) : t.added_by ? teammate(t.added_by) : undefined}
         project={t.project_id ? projects.find((p) => p.id === t.project_id) : undefined} />,
       )
@@ -124,7 +137,7 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
     if (!g.rows.length) {
       items.push({ k: `e:${g.key}`, group: g.key })
       views.push(
-        <Slot key={`e:${g.key}`} k={`e:${g.key}`} d={d} spots={spots} quiet={quiet} fade>
+        <Slot key={`e:${g.key}`} k={`e:${g.key}`} d={d} spots={spots} fade>
           <Text variant="footnote" color="ink4" style={{ paddingLeft: 52, paddingBottom: 12, paddingTop: 2 }}>Nothing here</Text>
         </Slot>,
       )
@@ -135,33 +148,46 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
 }
 
 /** A view of the list that steps aside while another is dragged past it: up by the dragged view's height when that
- * came from above and its middle is now below this one's middle, down for the mirror case. */
+ * came from above and its middle is now below this one's middle, down for the mirror case. Each view animates only
+ * when its own place changes (a tick of haptics then), never per finger move; the dragged one rides the finger. */
 function useSlot(k: string, d: Drag, spots: Map<string, Spot>) {
-  const { c } = useTheme()
   const y = useSharedValue(0)
   const h = useSharedValue(0)
+  const off = useSharedValue(0)
+  const lift = useSharedValue(0)
   const onLayout = (e: LayoutChangeEvent) => {
     const l = e.nativeEvent.layout
     y.set(l.y); h.set(l.height); spots.set(k, { y: l.y, h: l.height })
   }
-  const style = useAnimatedStyle(() => {
+  useAnimatedReaction(() => {
     const key = d.key.get()
-    if (key === k) return { transform: [{ translateY: d.dy.get() }, { scale: withTiming(1.02, { duration: motion.duration.fast }) }],
-      zIndex: 10, backgroundColor: c.panel, borderRadius: 16, elevation: 6 }
-    if (!key) return { transform: [{ translateY: 0 }, { scale: 1 }], zIndex: 0, backgroundColor: 'transparent', borderRadius: 0, elevation: 0 }
+    if (!key || key === k) return 0
     const mid = y.get() + h.get() / 2
-    const center = d.y0.get() + d.h.get() / 2 + d.dy.get()
-    const shift = d.y0.get() < y.get() && center > mid ? -d.h.get() : d.y0.get() > y.get() && center < mid ? d.h.get() : 0
-    return { transform: [{ translateY: withTiming(shift, { duration: 180, easing: motion.ease.smoothOut }) }, { scale: 1 }],
-      zIndex: 0, backgroundColor: 'transparent', borderRadius: 0, elevation: 0 }
+    const center = d.cy.get()
+    return d.y0.get() < y.get() && center > mid ? -d.h.get() : d.y0.get() > y.get() && center < mid ? d.h.get() : 0
+  }, (to, was) => {
+    if (was === null || to === was) return
+    if (!d.key.get()) { off.set(withTiming(0, LAND)); return } // the new order is in: undo the offset as the layout glides
+    off.set(withTiming(to, { duration: 200, easing: motion.ease.smoothOut }))
+    runOnJS(haptic.tap)()
   })
-  return { y, h, onLayout, style }
+  useAnimatedReaction(() => d.key.get() === k, (on, was) => {
+    if (was === null || on === was) return
+    lift.set(on ? withSpring(1, { damping: 18, stiffness: 320 }) : withTiming(0, { duration: 160 }))
+    if (!on) { off.set(d.dy.get()); off.set(withTiming(0, LAND)) } // the dragged one hands its offset over the same way
+  })
+  const style = useAnimatedStyle(() => {
+    const mine = d.key.get() === k
+    return { transform: [{ translateY: mine ? d.dy.get() : off.get() }, { scale: 1 + 0.03 * lift.get() }], zIndex: mine ? 10 : 0, elevation: 8 * lift.get() }
+  })
+  const card = useAnimatedStyle(() => ({ opacity: lift.get() }))
+  return { y, h, onLayout, style, card }
 }
 
-function Slot({ k, d, spots, quiet, fade, children }: { k: string; d: Drag; spots: Map<string, Spot>; quiet: boolean; fade?: boolean; children: React.ReactNode }) {
+function Slot({ k, d, spots, fade, children }: { k: string; d: Drag; spots: Map<string, Spot>; fade?: boolean; children: React.ReactNode }) {
   const { onLayout, style } = useSlot(k, d, spots)
   return (
-    <Animated.View layout={quiet ? undefined : layout} entering={fade ? ENTER : undefined} exiting={fade ? FadeOut.duration(motion.duration.quick) : undefined} onLayout={onLayout}>
+    <Animated.View layout={layout} entering={fade ? ENTER : undefined} exiting={fade ? FadeOut.duration(motion.duration.quick) : undefined} onLayout={onLayout}>
       <Animated.View style={style}>{children}</Animated.View>
     </Animated.View>
   )
@@ -192,8 +218,8 @@ function GroupHeader({ title, glyph, count, open, onToggle }: {
   )
 }
 
-const TodoRow = memo(function TodoRow({ k, d, spots, quiet, onDrop, todo: t, labels: all, group, who, project, onOpen }: {
-  k: string; d: Drag; spots: Map<string, Spot>; quiet: boolean; onDrop: (k: string, center: number) => void
+const TodoRow = memo(function TodoRow({ k, d, spots, onDrop, todo: t, labels: all, group, who, project, onOpen }: {
+  k: string; d: Drag; spots: Map<string, Spot>; onDrop: (k: string, center: number) => void
   todo: Todo; labels: Label[]; group: string; who?: Teammate; project?: Project; onOpen: (t: Todo) => void
 }) {
   const { c } = useTheme()
@@ -237,11 +263,12 @@ const TodoRow = memo(function TodoRow({ k, d, spots, quiet, onDrop, todo: t, lab
             if (Math.abs(e.translationY) < 12) return
             d.y0.set(y.get()); d.h.set(h.get()); d.key.set(k)
             runOnJS(closeContextMenu)()
-            runOnJS(haptic.light)()
+            runOnJS(haptic.medium)()
           }
           d.dy.set(e.translationY)
+          d.cy.set(d.y0.get() + d.h.get() / 2 + e.translationY)
         })
-        .onEnd((e) => { if (d.key.get() === k) runOnJS(onDrop)(k, d.y0.get() + d.h.get() / 2 + e.translationY) })
+        .onEnd(() => { if (d.key.get() === k) runOnJS(onDrop)(k, d.cy.get()) })
         .onFinalize((_, ok) => { press.onFinalize(); if (!ok && d.key.get() === k) d.key.set('') }),
       Gesture.Tap().numberOfTaps(2).maxDelay(250).onEnd(() => runOnJS(move)(nextStatus(t.status))),
       Gesture.Tap().onBegin(press.onBegin).onFinalize(press.onFinalize).onEnd(() => runOnJS(onOpen)(t)),
@@ -284,8 +311,9 @@ const TodoRow = memo(function TodoRow({ k, d, spots, quiet, onDrop, todo: t, lab
   )
 
   return (
-    <Animated.View layout={quiet ? undefined : layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)} onLayout={slot.onLayout}>
+    <Animated.View layout={layout} entering={ENTER} exiting={FadeOut.duration(motion.duration.quick)} onLayout={slot.onLayout}>
       <Animated.View style={slot.style}>
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 16, backgroundColor: c.panel }, slot.card]} />
       <GestureDetector gesture={gesture}>
         <View ref={ref} collapsable={false} accessible accessibilityRole="button"
           accessibilityLabel={`${t.title}, ${statusLabel(t.status)}`} accessibilityHint="Opens it. Use the actions to change its status."
@@ -300,5 +328,5 @@ const TodoRow = memo(function TodoRow({ k, d, spots, quiet, onDrop, todo: t, lab
   )
 }, (a, b) =>
   // A fresh list from the server is all new objects: redraw a row only when its to-do or what it shows changed.
-  a.quiet === b.quiet && a.k === b.k && a.onDrop === b.onDrop && a.todo.id === b.todo.id && a.todo.updated_at === b.todo.updated_at && a.todo.status === b.todo.status && a.labels === b.labels
+  a.k === b.k && a.onDrop === b.onDrop && a.todo.id === b.todo.id && a.todo.updated_at === b.todo.updated_at && a.todo.status === b.todo.status && a.labels === b.labels
   && a.group === b.group && a.who?.id === b.who?.id && a.project?.id === b.project?.id && a.project?.color === b.project?.color && a.onOpen === b.onOpen)

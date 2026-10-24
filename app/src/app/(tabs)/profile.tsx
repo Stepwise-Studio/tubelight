@@ -4,24 +4,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
+import * as ImagePicker from 'expo-image-picker'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as Notifications from 'expo-notifications'
 import { router, useFocusEffect } from 'expo-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Platform, RefreshControl, ScrollView, TextInput, View } from 'react-native'
+import { useCallback, useEffect, useState } from 'react'
+import { Platform, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, PaintBrush02Icon, Plug01Icon, RepeatIcon,
+  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, PencilEdit02Icon, Plug01Icon, RepeatIcon,
   Settings02Icon, SmartPhone01Icon,
 } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
 import { NotifyChoices } from '@/components/notify-prefs'
-import { Banner } from '@/components/profile/banner'
-import { BANNERS, type BannerId } from '@/components/profile/banner-shader'
+import { BANNERS, Banner, bannerOf } from '@/components/profile/banner'
 import { useTabBarInset } from '@/components/tab-bar'
 import { api } from '@/lib/api'
+import { upload } from '@/lib/attachments'
 import { identities } from '@/lib/auth'
 import type { Automation } from '@/lib/automations'
 import { useConnections } from '@/lib/catalog'
@@ -31,13 +32,13 @@ import { useSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 import type { MemoryOverview, Profile } from '@/lib/types'
 import { isPhone, useWorkspace } from '@/lib/workspace'
-import { type as typeScale, useTheme, type ThemePreference } from '@/theme'
-import { ChoiceRow, Divider, IconButton, ListRow, Press, Sheet, Surface, Text, Toggle, confirm, haptic, toast } from '@/ui'
+import { useTheme, type ThemePreference } from '@/theme'
+import { AvatarStack, Button, ChoiceRow, Divider, IconButton, ListRow, Press, Sheet, Surface, Text, TextField, Toggle, confirm, haptic, toast } from '@/ui'
 
 const TOKEN_KEY = 'tubelight.pushToken'
 const FCM_KEY = 'tubelight.fcmToken'
 const BANNER_H = 172
-const AVATAR = 88
+const AVATAR = 112
 
 export default function ProfileScreen() {
   const { c } = useTheme()
@@ -116,99 +117,141 @@ function Hero() {
   const [g, setG] = useState<{ name: string | null; picture: string | null; email: string | null } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [focused, setFocused] = useState(true)
-  const [picking, setPicking] = useState(false)
-  const [banner, setBanner] = useState<BannerId>((meta.banner as BannerId) ?? 'canopy')
-  const { connections } = useConnections()
-  const [autos, setAutos] = useState<number | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [look, setLook] = useState<{ banner?: string; dither?: boolean; avatar_path?: string | null }>(
+    { banner: meta.banner as string | undefined, dither: !!meta.dither, avatar_path: (meta.avatar_path as string | undefined) ?? null })
+  const own = useSignedUrl(look.avatar_path ?? null)
 
   useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false) }, []))
   useEffect(() => {
     identities().then((ids) => { const x = ids.find((i) => i.provider === 'google'); if (x) setG(x) }, () => {})
     supabase.from('profiles').select('*').single().then(({ data }) => { if (data) setProfile(data as Profile) })
-    api<Automation[]>('/automations').then((a) => setAutos(a.filter((x) => x.enabled).length), () => {})
   }, [])
 
-  const pickBanner = (id: BannerId) => {
-    haptic.tap()
-    setBanner(id)
-    supabase.auth.updateUser({ data: { banner: id } }).catch(() => {})
+  /** Banner, dither and your own photo live on the account (auth metadata), so every phone shows the same. */
+  const change = (next: Partial<typeof look>) => {
+    setLook((l) => ({ ...l, ...next }))
+    supabase.auth.updateUser({ data: next }).then(({ error }) => {
+      if (error) toast({ title: 'Unable to save that', body: 'Check your connection and try again.', tone: 'error' })
+    })
   }
 
   const name = profile?.display_name || g?.name || 'You'
   const email = g?.email ?? session?.user.email ?? ''
-  const picture = g?.picture ?? (meta.avatar_url as string | undefined) ?? null
-  const apps = (connections ?? []).filter((x) => x.connected).length
-  const stats: { n: number | null; label: string; go: () => void }[] = [
-    { n: ws.teammates.length, label: ws.teammates.length === 1 ? 'Teammate' : 'Teammates', go: () => router.push('/crew') },
-    { n: connections ? apps : null, label: apps === 1 ? 'App' : 'Apps', go: () => router.push('/connections') },
-    { n: autos, label: autos === 1 ? 'Automation' : 'Automations', go: () => router.push('/automations') },
-  ]
+  const picture = look.avatar_path ? own : g?.picture ?? (meta.avatar_url as string | undefined) ?? null
+  const crew = ws.teammates
 
   return (
     <View>
-      <Press static radius={0} onPress={() => setPicking(true)} accessibilityLabel="Change banner">
-        <Banner id={banner} live={focused && !picking} style={{ height: BANNER_H + top }} />
-        <LinearGradient colors={['transparent', c.canvas]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 56 }} pointerEvents="none" />
-      </Press>
+      <Banner id={look.banner} dither={look.dither} live={focused && !editing} style={{ height: BANNER_H + top }} />
+      <LinearGradient colors={[`${c.canvas}00`, c.canvas]} style={{ position: 'absolute', left: 0, right: 0, top: BANNER_H + top - 90, height: 90 }} pointerEvents="none" />
       <View style={{ position: 'absolute', right: 12, top: top + 8 }}>
-        <IconButton icon={PaintBrush02Icon} accessibilityLabel="Change banner" variant="soft" size={36} iconSize={18} round onPress={() => setPicking(true)} />
+        <IconButton icon={PencilEdit02Icon} accessibilityLabel="Edit profile" variant="soft" size={38} iconSize={18} round onPress={() => { haptic.tap(); setEditing(true) }} />
       </View>
-      <View style={{ paddingHorizontal: 20, marginTop: -AVATAR / 2 }}>
-        <View style={{ width: AVATAR + 8, height: AVATAR + 8, borderRadius: (AVATAR + 8) / 2, backgroundColor: c.canvas, padding: 4 }}>
-          {picture ? <Image source={picture} style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2 }} contentFit="cover" transition={150} accessibilityLabel="Your picture" />
-            : <View style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, backgroundColor: c.panel }} />}
+      <View style={{ alignItems: 'center', paddingHorizontal: 24, marginTop: -AVATAR / 2 - 4, gap: 14 }}>
+        <Press static radius={(AVATAR + 8) / 2} onPress={() => { haptic.tap(); setEditing(true) }} accessibilityLabel="Your picture. Edit profile">
+          <View style={{ width: AVATAR + 8, height: AVATAR + 8, borderRadius: (AVATAR + 8) / 2, backgroundColor: c.canvas, padding: 4 }}>
+            <Face uri={picture} size={AVATAR} />
+          </View>
+        </Press>
+        <View style={{ alignItems: 'center', gap: 4 }}>
+          <Text variant="title" numberOfLines={1}>{name}</Text>
+          <Text variant="caption" color="ink2" numberOfLines={1}>{email}</Text>
         </View>
-        <Name value={name} profile={profile} onSaved={setProfile} />
-        <Text variant="body" color="ink3" numberOfLines={1} style={{ marginTop: 2 }}>{email}</Text>
-        <View style={{ flexDirection: 'row', marginTop: 20, gap: 8 }}>
-          {stats.map((s) => (
-            <Press key={s.label} radius={14} onPress={s.go} outerStyle={{ flex: 1 }} accessibilityLabel={`${s.n ?? ''} ${s.label}`}
-              style={{ paddingVertical: 12, paddingHorizontal: 12, gap: 2, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
-              <Text variant="title" tabular>{s.n ?? '–'}</Text>
-              <Text variant="footnote" color="ink3" numberOfLines={1}>{s.label}</Text>
-            </Press>
-          ))}
-        </View>
+        {crew.length > 0 && (
+          <Press radius={18} onPress={() => router.push('/crew')} accessibilityLabel={`Your crew: ${crew.map((t) => t.name).join(', ')}`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, paddingLeft: 6, paddingRight: 14, borderRadius: 18, backgroundColor: c.panel, borderWidth: 1, borderColor: c.line }}>
+            <AvatarStack teammates={crew} size={26} max={5} />
+            <Text variant="footnote" color="ink2">Your crew</Text>
+          </Press>
+        )}
       </View>
-      <Sheet open={picking} onClose={() => setPicking(false)} title="Banner">
-        <View style={{ gap: 10, paddingBottom: 8 }}>
-          {BANNERS.map((b) => (
-            <Press key={b.id} radius={16} onPress={() => pickBanner(b.id)} accessibilityLabel={b.name} accessibilityState={{ selected: banner === b.id }}
-              style={{ overflow: 'hidden', borderWidth: 2, borderColor: banner === b.id ? c.ink : 'transparent' }}>
-              <Banner id={b.id} live={picking} style={{ height: 72 }} />
-              <Text variant="label" style={{ position: 'absolute', left: 12, bottom: 8, color: '#fafafa' }}>{b.name}</Text>
-            </Press>
-          ))}
-        </View>
-      </Sheet>
+      <EditProfile open={editing} onClose={() => setEditing(false)} profile={profile} name={name} picture={picture}
+        google={g?.picture ?? null} look={look} onLook={change} onSaved={setProfile} />
     </View>
   )
 }
 
-/** Your name, as teammates call you: tap it to change it in place. */
-function Name({ value, profile, onSaved }: { value: string; profile: Profile | null; onSaved: (p: Profile) => void }) {
+function Face({ uri, size }: { uri: string | null; size: number }) {
+  const { c } = useTheme()
+  return uri ? <Image source={{ uri, cacheKey: uri.split('?')[0] }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" transition={150} />
+    : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.panel }} />
+}
+
+/** A week-long link to a file in your private `attachments` folder (your own photo). */
+function useSignedUrl(path: string | null) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!path) return
+    supabase.storage.from('attachments').createSignedUrl(path, 7 * 86_400).then(({ data }) => setUrl(data?.signedUrl ?? null))
+  }, [path])
+  return path ? url : null
+}
+
+type Look = { banner?: string; dither?: boolean; avatar_path?: string | null }
+
+/** Everything about how you look, in one sheet: photo, name, banner and its dither. */
+function EditProfile({ open, onClose, profile, name, picture, google, look, onLook, onSaved }: {
+  open: boolean; onClose: () => void; profile: Profile | null; name: string; picture: string | null; google: string | null
+  look: Look; onLook: (l: Look) => void; onSaved: (p: Profile) => void
+}) {
   const { c } = useTheme()
   const [draft, setDraft] = useState<string | null>(null)
-  const ref = useRef<TextInput>(null)
-  const save = async () => {
+  const [uploading, setUploading] = useState(false)
+  const value = draft ?? profile?.display_name ?? name
+
+  const saveName = async () => {
     const next = draft?.trim()
-    setDraft(null)
     if (!profile || next === undefined || next === (profile.display_name ?? '')) return
     const { data, error } = await supabase.from('profiles').update({ display_name: next || null }).eq('id', profile.id).select().single()
     if (error) { toast({ title: 'Unable to save your name', body: 'Check your connection and try again.', tone: 'error' }); return }
     onSaved(data as Profile)
+    setDraft(null)
     haptic.success()
   }
-  if (draft !== null) return (
-    <TextInput ref={ref} value={draft} onChangeText={setDraft} onBlur={save} onSubmitEditing={save} autoFocus maxLength={40}
-      returnKeyType="done" autoCapitalize="words" selectionColor={c.tube}
-      style={[typeScale.largeTitle, { color: c.ink, marginTop: 10, padding: 0 }]} accessibilityLabel="Your name" />
-  )
+  const pickPhoto = async () => {
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', allowsEditing: true, aspect: [1, 1], quality: 0.7 })
+    if (r.canceled || !r.assets[0]) return
+    setUploading(true)
+    try {
+      const a = r.assets[0]
+      const { path } = await upload({ id: String(Date.now()), uri: a.uri, name: 'profile-photo.jpg', mime: a.mimeType ?? 'image/jpeg', size: a.fileSize ?? 0 })
+      onLook({ avatar_path: path })
+      haptic.success()
+    } catch (e) {
+      toast({ title: 'Unable to change your photo', body: (e as Error).message, tone: 'error' })
+    } finally { setUploading(false) }
+  }
+
   return (
-    <Press static radius={8} onPress={() => { haptic.tap(); setDraft(profile?.display_name ?? value) }} outerStyle={{ alignSelf: 'flex-start', marginTop: 10 }}
-      accessibilityLabel={`${value}. Teammates call you this. Tap to change it.`}>
-      <Text variant="largeTitle" numberOfLines={1}>{value}</Text>
-    </Press>
+    <Sheet open={open} onClose={() => { saveName(); onClose() }} title="Edit profile">
+      <View style={{ gap: 22, paddingBottom: 8, paddingHorizontal: 16 }}>
+        <View style={{ alignItems: 'center', gap: 12 }}>
+          <View style={{ opacity: uploading ? 0.5 : 1 }}><Face uri={picture} size={88} /></View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button label={uploading ? 'Uploading…' : 'Change photo'} size="sm" variant="soft" onPress={pickPhoto} disabled={uploading} />
+            {!!look.avatar_path && google && <Button label="Use Google photo" size="sm" variant="ghost" onPress={() => onLook({ avatar_path: null })} />}
+          </View>
+        </View>
+        <TextField label="Name" value={value} onChangeText={setDraft} onBlur={saveName} onSubmitEditing={saveName} returnKeyType="done"
+          hint="Teammates call you this." maxLength={40} autoCapitalize="words" />
+        <View style={{ gap: 10 }}>
+          <Text variant="label" color="ink2">Banner</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {BANNERS.map((b) => {
+              const on = bannerOf(look.banner).id === b.id
+              return (
+                <Press key={b.id} radius={14} onPress={() => { haptic.tap(); onLook({ banner: b.id }) }} accessibilityLabel={b.name} accessibilityState={{ selected: on }}
+                  style={{ padding: 2, borderRadius: 14, borderWidth: 2, borderColor: on ? c.ink : 'transparent' }}>
+                  <Image source={b.src} style={{ width: 112, height: 72, borderRadius: 10 }} contentFit="cover" />
+                </Press>
+              )
+            })}
+          </ScrollView>
+          <Toggle label="Dither" description="Draw it in small pixels, like a print" value={!!look.dither} onChange={(dither) => { haptic.tap(); onLook({ dither }) }} />
+        </View>
+      </View>
+    </Sheet>
   )
 }
 
