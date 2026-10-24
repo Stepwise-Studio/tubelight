@@ -40,7 +40,7 @@ PLAIN = "Check my emails, summarise them and tell me if anything needs my attent
 
 def mails():
     return {"messages": [{
-        "messageId": f"m{i}", "threadId": f"t{i}", "sender": "hr@mxcignite.example",
+        "messageId": f"m{i}", "threadId": f"t{i}", "sender": "hr@acme.example",
         "subject": f"Application: Junior AI Engineer – {n}", "messageTimestamp": "2026-10-24T09:0{i}:00Z",
         "messageText": f"Hi, forwarding {n}'s application for the Junior AI role. Resume attached. – HR",
         "attachmentList": [{"attachmentId": f"a{i}", "filename": f"{n.split()[0]}_resume.pdf", "mimeType": "application/pdf"}],
