@@ -1,5 +1,5 @@
-// Stepwise UI's AvatarGroup (ui.stepwise.studio/docs/avatar): an overlapping stack (32% of the size; the ring's 3 px
-// padding is taken back too, as on the web the ring takes no space), each avatar ringed in the
+// Stepwise UI's AvatarGroup (ui.stepwise.studio/docs/avatar): an overlapping stack (32% of the size, plus half the
+// ring's 3 px padding, which on the web takes no space), each avatar ringed in the
 // background it sits on (3 px) so the overlaps read, the first one on top; past `max`, a "+n" circle.
 // Anything round goes in it: teammates' faces (AvatarStack below), app logos, photos.
 import type { ReactNode } from 'react'
@@ -23,7 +23,7 @@ export function AvatarGroup({ items, size = 28, max = 5, ring }: {
   const rest = items.length - shown.length
   const edge = ring ?? c.canvas
   const cell = (key: string, i: number, z: number, child: ReactNode) => (
-    <View key={key} style={{ marginLeft: i === 0 ? 0 : -size * 0.32 - 6, zIndex: z, padding: 3, borderRadius: size, backgroundColor: edge }}>
+    <View key={key} style={{ marginLeft: i === 0 ? 0 : -size * 0.32 - 3, zIndex: z, padding: 3, borderRadius: size, backgroundColor: edge }}>
       <View style={{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>{child}</View>
     </View>
   )

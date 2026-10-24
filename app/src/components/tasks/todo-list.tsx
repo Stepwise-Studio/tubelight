@@ -159,8 +159,9 @@ export function TodoList({ todos, labels, groupBy, teammate, projects, onOpen }:
   useLayoutEffect(() => { itemsRef.current = items })
   return (
     <View>
+      {/* First, so the lifted row draws over it. */}
+      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 48, right: 16, top: 0, height: 2, borderRadius: 1, backgroundColor: c.tube }, lineStyle]} />
       {views}
-      <Animated.View pointerEvents="none" style={[{ position: 'absolute', left: 48, right: 16, top: 0, height: 2, borderRadius: 1, backgroundColor: c.tube, zIndex: 5 }, lineStyle]} />
     </View>
   )
 }
@@ -235,7 +236,7 @@ function useSlot(k: string, d: Drag, spots: Map<string, Spot>) {
       animations: { originX: withTiming(v.targetOriginX, cfg), originY: withTiming(v.targetOriginY, cfg), width: withTiming(v.targetWidth, cfg), height: withTiming(v.targetHeight, cfg) },
     }
   }
-  return { y, h, onLayout, style, card, layout }
+  return { y, h, lift, onLayout, style, card, layout }
 }
 
 function Slot({ k, d, spots, fade, children }: { k: string; d: Drag; spots: Map<string, Spot>; fade?: boolean; children: React.ReactNode }) {
@@ -306,7 +307,7 @@ const TodoRow = memo(function TodoRow({ k, d, spots, onDrop, todo: t, labels: al
   const gesture = (() => {
     const press = { onBegin: () => { 'worklet'; wash.set(withTiming(1, { duration: motion.duration.micro })) },
       onFinalize: () => { 'worklet'; wash.set(withTiming(0, { duration: motion.duration.quick })) } }
-    const { y, h } = slot
+    const { y, h, lift } = slot
     return Gesture.Exclusive(
       Gesture.Pan().activateAfterLongPress(320).onBegin(press.onBegin)
         // `hold` reads the row's ref only when the press happens, not while rendering.
@@ -326,8 +327,11 @@ const TodoRow = memo(function TodoRow({ k, d, spots, onDrop, todo: t, labels: al
         .onEnd(() => {
           if (d.key.get() !== k) return
           const center = d.cy.get()
-          d.dy.set(withTiming(landingTop(d) - d.y0.get(), { duration: 220, easing: motion.ease.smoothOut }, (done) => {
-            if (done) { d.landing.set(true); runOnJS(onDrop)(k, center) }
+          // It settles flat as it glides in, so it lands already at rest.
+          lift.set(withTiming(0, { duration: 220, easing: motion.ease.smoothOut }))
+          d.landing.set(true) // the drop line goes; the others hold their places
+          d.dy.set(withTiming(landingTop(d) - d.y0.get(), { duration: 220, easing: motion.ease.smoothOut }, () => {
+            runOnJS(onDrop)(k, center) // even if cut short, so the drag always ends
           }))
         })
         .onFinalize((_, ok) => { press.onFinalize(); if (!ok && d.key.get() === k) d.key.set('') }),

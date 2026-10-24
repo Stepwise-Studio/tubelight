@@ -125,6 +125,11 @@ function Hero() {
   useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false) }, []))
   useEffect(() => {
     identities().then((ids) => { const x = ids.find((i) => i.provider === 'google'); if (x) setG(x) }, () => {})
+    // The session cached on the phone carries the metadata from sign-in time; the server has what you picked since.
+    supabase.auth.getUser().then(({ data }) => {
+      const m = data.user?.user_metadata
+      if (m) setLook({ banner: m.banner as string | undefined, avatar_path: (m.avatar_path as string | undefined) ?? null })
+    }, () => {})
     supabase.from('profiles').select('*').single().then(({ data }) => { if (data) setProfile(data as Profile) })
   }, [])
 
