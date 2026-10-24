@@ -3,15 +3,14 @@
 // the to-dos due. Tap an event to edit it, + (or hold a day) to add one. Events are the phone's own calendars
 // (lib/calendar.ts), so Samsung and Google Calendar show the same.
 import { router } from 'expo-router'
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { Easing, FadeIn, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { Add01Icon, ArrowLeft01Icon, ArrowRight01Icon, Calendar03Icon, Layers01Icon, Location01Icon, Notification03Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 
 import { useTabBarInset } from '@/components/tab-bar'
-import { calendarAccess, eventDays, useCalendars, useEvents, type PhoneEvent } from '@/lib/calendar'
+import { calendarAccess, eventDays, setHiddenCalendars as setHidden, useCalendars, useEvents, useHiddenCalendars, type PhoneEvent } from '@/lib/calendar'
 import { reminderNext, useMinute, useReminders, type Reminder } from '@/lib/clock'
 import { isoDay, useTodos } from '@/lib/tasks'
 import { motion, useTheme } from '@/theme'
@@ -194,18 +193,6 @@ const MonthGrid = memo(function MonthGrid({ month, left, width, today, picked, l
     </View>
   )
 })
-
-// Which of the phone's calendars to show here (kept on the phone; Google Calendar's own choice doesn't come through).
-const HIDDEN_KEY = 'tl.calendar.hidden'
-let hiddenNow = new Set<string>()
-const hiddenSubs = new Set<() => void>()
-AsyncStorage.getItem(HIDDEN_KEY).then((v) => { if (v) { hiddenNow = new Set(JSON.parse(v)); hiddenSubs.forEach((f) => f()) } }, () => {})
-function setHidden(next: Set<string>) {
-  hiddenNow = next
-  hiddenSubs.forEach((f) => f())
-  AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])).catch(() => {})
-}
-const useHiddenCalendars = () => useSyncExternalStore((f) => { hiddenSubs.add(f); return () => { hiddenSubs.delete(f) } }, () => hiddenNow)
 
 function CalendarsSheet({ open, hidden, onClose }: { open: boolean; hidden: Set<string>; onClose: () => void }) {
   const { c } = useTheme()

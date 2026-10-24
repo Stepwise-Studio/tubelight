@@ -1,7 +1,8 @@
 // The phone's calendars for the Tasks tab (modules/phone Cal.kt): the same events Samsung Calendar and Google Calendar
 // show. Needs calendar access (asked the first time the calendar opens). Ranges are read off the JS thread; a change
 // made here bumps `version`, so every open range reads again; so does coming back to the app.
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { PermissionsAndroid } from 'react-native'
 
 import { Phone, type EventInput, type PhoneCalendar, type PhoneEvent } from '../../modules/phone'
@@ -80,3 +81,35 @@ export const REPEAT_RULES = [
   { value: '', label: 'Once' }, { value: 'FREQ=DAILY', label: 'Every day' }, { value: 'FREQ=WEEKLY', label: 'Every week' },
   { value: 'FREQ=MONTHLY', label: 'Every month' }, { value: 'FREQ=YEARLY', label: 'Every year' },
 ]
+
+// Which of the phone's calendars to show (kept on the phone; Google Calendar's own choice doesn't come through).
+const HIDDEN_KEY = 'tl.calendar.hidden'
+let hiddenNow = new Set<string>()
+const hiddenSubs = new Set<() => void>()
+AsyncStorage.getItem(HIDDEN_KEY).then((v) => { if (v) { hiddenNow = new Set(JSON.parse(v)); hiddenSubs.forEach((f) => f()) } }, () => {})
+export function setHiddenCalendars(next: Set<string>) {
+  hiddenNow = next
+  hiddenSubs.forEach((f) => f())
+  AsyncStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])).catch(() => {})
+}
+export const useHiddenCalendars = () => useSyncExternalStore((f) => { hiddenSubs.add(f); return () => { hiddenSubs.delete(f) } }, () => hiddenNow)
+
+/** Today's events as the Calendar tab shows them: hidden calendars left out, the same event in several calendars
+ * once, all-day first. Never asks for access (the Calendar tab does); null without access or while loading. */
+export function useTodayEvents() {
+  const [ok, setOk] = useState(false)
+  useEffect(() => { calendarAccess(false).then((a) => setOk(a === 'ok')) }, [])
+  const [from, to] = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return [d.getTime(), d.getTime() + 86_400_000] }, [])
+  const events = useEvents(from, to, ok)
+  const hidden = useHiddenCalendars()
+  return useMemo(() => {
+    if (!ok || !events) return null
+    const seen = new Set<string>()
+    return events.filter((e) => {
+      const key = `${e.title.trim().toLowerCase()}|${e.start}|${e.end}|${e.allDay}`
+      if (hidden.has(e.calendar) || seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.start - b.start)
+  }, [ok, events, hidden])
+}

@@ -11,18 +11,20 @@ import { Text as RNText, RefreshControl, ScrollView, View } from 'react-native'
 import Animated, { interpolate, runOnJS, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Add01Icon, ArrowDown01Icon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
-  CodeIcon, Globe02Icon, LaptopIcon, Notification03Icon, WorkflowIcon, WorkHistoryIcon,
+  Add01Icon, ArrowDown01Icon, ArrowUp01Icon, BellRingIcon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
+  CodeIcon, Globe02Icon, LaptopIcon, WorkflowIcon, WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
-import { AutomationGlyph, AutomationRows, lastRun } from '@/components/automation-rows'
+import { AutomationRows, lastRun } from '@/components/automation-rows'
 import { BrandTile } from '@/components/brand-mark'
 import { useTabBarInset } from '@/components/tab-bar'
 import { FollowupList, FollowupSheet } from '@/components/tasks/followups'
+import { StatusGlyph } from '@/components/tasks/glyphs'
 import { describe, isShown } from '@/lib/activity'
 import { api } from '@/lib/api'
 import { openAutomation, runNow, setEnabled, useAutomations, whenText, type Automation } from '@/lib/automations'
+import { useTodayEvents, type PhoneEvent } from '@/lib/calendar'
 import { finishReminder, reminderNext, REPEATS, useReminders, type Reminder } from '@/lib/clock'
 import { ago, clock, whenLabel } from '@/lib/format'
 import { liveChannel } from '@/lib/realtime'
@@ -33,8 +35,8 @@ import { useWorkspace } from '@/lib/workspace'
 import { fonts, radius, useTheme } from '@/theme'
 import { ShimmerText } from '@/ui/shimmer-text'
 import {
-  AvatarGroup, Button, Collapse, Icon, ListRow, Markdown, Press, Sheet, Skeleton, Surface, TeammateAvatar, Text,
-  confirm, useFlip,
+  AvatarGroup, Button, Icon, ListRow, Markdown, Press, Sheet, Skeleton, Surface, TeammateAvatar, Text,
+  confirm, haptic,
 } from '@/ui'
 
 /** GET /garage/runs: a finished run. */
@@ -122,6 +124,7 @@ export default function GarageTab() {
   const follow = useFollowups()
   const { todos } = useTodos()
   const reminders = useReminders().rows
+  const events = useTodayEvents()
   const [receipts, setReceipts] = useState<Receipt[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [name, setName] = useState<string | null>(null)
@@ -132,6 +135,11 @@ export default function GarageTab() {
   const closeJobs = useCallback(() => setJobs(null), [])
   const closeOne = useCallback(() => setOne(null), [])
   const closeLater = useCallback(() => setLater(null), [])
+  const [watching, setWatching] = useState<Live | null>(null)
+  const closeWatching = useCallback(() => setWatching(null), [])
+  const [allFollow, setAllFollow] = useState(false)
+  const [cal, setCal] = useState(false)
+  const openRun = useCallback((r: Receipt) => { setJobs(null); setOne(r) }, [])
   const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
   const openFollow = useCallback((f: Followup) => setFsheet((x) => ({ open: true, f, n: x.n + 1 })), [])
   const closeFollow = useCallback(() => setFsheet((x) => ({ ...x, open: false })), [])
@@ -198,14 +206,14 @@ export default function GarageTab() {
   const live = useMemo(() => running.map((run) => ({ run, doing: doing[run.id] })), [running, doing])
   const real = useMemo(() => ({
     receipts, automations: autos.list, followups: follow.pending, done: follow.done, approvals: ws.pendingApprovals, live,
-    todos: todos ?? [], reminders: reminders ?? [],
-  }), [receipts, autos.list, follow.pending, follow.done, ws.pendingApprovals, live, todos, reminders])
+    todos: todos ?? [], reminders: reminders ?? [], events: events ?? [],
+  }), [receipts, autos.list, follow.pending, follow.done, ws.pendingApprovals, live, todos, reminders, events])
   const d = sample ?? real
 
   // Automations that can't work or stopped on their own need you as much as an approval does.
   const broken = useMemo(() => (d.automations ?? []).filter((a) => a.problems.length
     || (!a.enabled && (a.recent ?? []).length >= 3 && a.recent!.slice(0, 3).every((o) => o === 'failed'))), [d.automations])
-  const upcoming = useMemo(() => comingUp(d.automations, d.followups, d.reminders), [d.automations, d.followups, d.reminders])
+  const upcoming = useMemo(() => comingUp(d.automations, d.followups, d.reminders, d.events), [d.automations, d.followups, d.reminders, d.events])
   const due = useMemo(() => (d.todos as Todo[]).filter((t) => t.due && t.status !== 'done' && t.status !== 'canceled' && t.due <= isoDay(new Date())), [d.todos])
   const onHeight = useCallback((h: number) => heroH.set(h), [heroH])
   const onNeeds = useCallback(() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true }), [scroller, insets.top])
@@ -232,6 +240,8 @@ export default function GarageTab() {
           mode={mode}
           onJobs={setJobs}
           onReceipt={setOne}
+          events={d.events}
+          onEvents={() => setCal(true)}
           onNeeds={onNeeds}
           onNext={onUpcoming}
         />
@@ -246,7 +256,6 @@ export default function GarageTab() {
                     {broken.map((a) => (
                       <ListRow
                         key={a.id}
-                        leading={<AutomationGlyph a={a} size={32} />}
                         title={a.name}
                         subtitle={a.problems[0] ?? 'Paused itself after failing 3 runs in a row. Open it to see why.'}
                         subtitleLines={2}
@@ -262,22 +271,16 @@ export default function GarageTab() {
         )}
 
         <Section title="Today">
-          <Today receipts={d.receipts} onOpen={setOne} />
+          <Today receipts={d.receipts} onOpen={openRun} />
         </Section>
 
         <Section title={d.live.length ? `Working now · ${d.live.length}` : 'Working now'}>
-          <WorkingNow live={d.live} animate={focused} />
+          <WorkingNow live={d.live} animate={focused} onOpen={setWatching} />
         </Section>
 
         <Section title="Coming up">
-          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={onUpcoming} />
+          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={onUpcoming} onFollowups={() => setAllFollow(true)} />
         </Section>
-
-        {d.followups !== null && (
-          <Section title="Follow-ups">
-            <FollowupList pending={d.followups} done={d.done} onOpen={openFollow} />
-          </Section>
-        )}
 
         <Section
           title="Automations"
@@ -313,10 +316,12 @@ export default function GarageTab() {
       </Animated.ScrollView>
       <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 0, left: 0, right: 0, height: insets.top, backgroundColor: c.canvas }, scrim]} />
 
-      <JobsSheet which={jobs} receipts={d.receipts ?? NONE} onClose={closeJobs} />
-      <Sheet open={!!one} onClose={closeOne} title={one?.title ?? 'Run'}>
-        {one && <ReceiptRow r={one} startOpen />}
-      </Sheet>
+      <JobsSheet which={jobs} receipts={d.receipts ?? NONE} onClose={closeJobs} onOpen={openRun} />
+      <RunSheet r={one} onClose={closeOne} />
+      <WorkingSheet l={watching} sample={!!sample} onClose={closeWatching} />
+      <FollowupsSheet open={allFollow} pending={d.followups ?? []} done={d.done} onClose={() => setAllFollow(false)}
+        onOpen={(f) => { setAllFollow(false); openFollow(f) }} />
+      <EventsSheet open={cal} events={d.events} onClose={() => setCal(false)} />
       <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={closeFollow} />
       <UpcomingSheet item={later} receipts={d.receipts ?? NONE} sample={!!sample} onClose={closeLater} onChanged={onChanged} />
     </View>
@@ -331,8 +336,9 @@ function B({ children, onPress }: { children: ReactNode; onPress?: () => void })
 }
 
 /** The day in one sentence, its highlights, and the outcome counts; every number opens what's behind it. */
-const Hero = memo(function Hero({ name, receipts, needs, live, next, due, mode, onHeight, onJobs, onReceipt, onNeeds, onNext }: {
+const Hero = memo(function Hero({ name, receipts, needs, live, next, due, events, mode, onHeight, onJobs, onReceipt, onNeeds, onNext, onEvents }: {
   name: string | null; receipts: Receipt[] | null; needs: number; live: Live[]; next?: Upcoming; due: Todo[]
+  events: PhoneEvent[]; onEvents: () => void
   mode: 'busy' | 'calm' | null; onHeight: (h: number) => void; onJobs: (j: Jobs) => void; onReceipt: (r: Receipt) => void
   onNeeds: () => void; onNext: (u: Upcoming) => void
 }) {
@@ -379,13 +385,16 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, due, mode, 
             {busy.length ? (
               <> <Faces people={busy} /> <B>{names(busy.map((t) => t.name))}</B> {busy.length > 1 ? 'are' : 'is'} working right now.</>
             ) : null}
-            {next ? <> Next up <Chip icon={next.reminder ? Notification03Icon : Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
+            {next ? <> Next up <Chip icon={next.reminder ? BellRingIcon : next.auto ? WorkflowIcon : Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
             {found.map((r) => (
               <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={WorkflowIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
             ))}
             {due.length > 0 && (
-              <> <Chip icon={CheckmarkSquare02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
+              <> <Chip icon={CheckmarkSquare02Icon} tile={<StatusGlyph status="todo" size={18} />} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
             )}
+            {events.length > 0 && (events.length === 1
+              ? <> <Chip icon={Calendar03Icon} /> <B onPress={onEvents}>{events[0].title || 'An event'}</B> {events[0].allDay ? 'is on your calendar today' : <>is on your calendar at <B onPress={onEvents}>{clock(new Date(events[0].start))}</B></>}.</>
+              : <> <Chip icon={Calendar03Icon} /> <B onPress={onEvents}>{events.length} events</B> are on your calendar today.</>)}
           </Text>
         )}
 
@@ -470,7 +479,7 @@ function Waiting({ approval }: { approval: Approval }) {
   )
 }
 
-function Hairline({ inset }: { inset: number }) {
+function Hairline({ inset = 0 }: { inset?: number }) {
   const { c } = useTheme()
   return <View style={{ height: 1, marginLeft: inset, backgroundColor: c.line }} />
 }
@@ -486,42 +495,51 @@ const Today = memo(function Today({ receipts, onOpen }: { receipts: Receipt[] | 
     return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Nothing has finished yet today. Runs land here with what came of them.</Text>
   }
   const shown = all ? receipts : receipts.slice(0, SHOWN)
-  const more = receipts.length - shown.length
+  const more = receipts.length - SHOWN
   return (
     <View style={{ paddingHorizontal: 16 }}>
-      {shown.map((r, i) => <Moment key={r.run_id} r={r} last={i === shown.length - 1 && !more} onOpen={onOpen} />)}
+      <Timeline receipts={shown} onOpen={onOpen} />
       {more > 0 && (
-        <Press radius={10} static onPress={() => setAll(true)} outerStyle={{ alignSelf: 'flex-start', marginLeft: 82 }}
-          style={{ paddingHorizontal: 8, minHeight: 36, justifyContent: 'center' }}>
-          <Text variant="label" color="ink2">{more} earlier today</Text>
+        <Press radius={10} static onPress={() => { haptic.tap(); setAll((x) => !x) }} outerStyle={{ alignSelf: 'flex-start', marginLeft: 96 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, minHeight: 36 }}>
+          <Text variant="label" color="ink2">{all ? 'Show less' : `${more} earlier today`}</Text>
+          <Icon icon={all ? ArrowUp01Icon : ArrowDown01Icon} size={14} color="ink3" />
         </Press>
       )}
     </View>
   )
 })
 
+function Timeline({ receipts, onOpen }: { receipts: Receipt[]; onOpen: (r: Receipt) => void }) {
+  return receipts.map((r, i) => <Moment key={r.run_id} r={r} last={i === receipts.length - 1} onOpen={onOpen} />)
+}
+
+/** What a run is called: its automation, or what woke it. */
+const runTitle = (r: Receipt, threadTitle: (id: string) => string) => r.title ?? (r.trigger === 'schedule' ? 'Scheduled'
+  : r.trigger === 'event' ? 'Event' : r.thread_id.startsWith('dm:') ? 'Asked by you' : threadTitle(r.thread_id))
+
 const Moment = memo(function Moment({ r, last, onOpen }: { r: Receipt; last: boolean; onOpen: (r: Receipt) => void }) {
   const { c } = useTheme()
   const ws = useWorkspace()
   const tm = ws.teammate(r.teammate_id)
-  const what = r.title ?? (r.trigger === 'schedule' ? 'Scheduled' : r.trigger === 'event' ? 'Event'
-    : r.thread_id.startsWith('dm:') ? 'Asked by you' : ws.threadTitle(r.thread_id))
+  const what = runTitle(r, ws.threadTitle)
   const where = r.apps.map(placeName)
   const quiet = r.outcome === 'quiet' || r.outcome === 'cancelled'
   const said = r.outcome === 'quiet' ? (where.length ? `Checked ${list(where)}, nothing new.` : 'Nothing new.')
     : r.outcome === 'cancelled' ? 'Stopped before it finished.'
       : r.outcome === 'failed' ? `Couldn’t finish${r.text ? `: ${plain(r.text)}` : '.'}`
         : r.headline || plain(r.text)
+  // The first line (time, title) is centred on the 30 px face: 30 - 22 (title line) = 8, half above.
   return (
     <Press radius={14} static onPress={() => onOpen(r)} accessibilityLabel={`${clock(new Date(r.at))}. ${what}, ${tm?.name ?? 'a teammate'}. ${said}`}
       accessibilityHint="Shows the whole reply" style={{ flexDirection: 'row', gap: 12, opacity: quiet ? 0.62 : 1 }}>
-      <Text variant="footnote" color="ink3" tabular numberOfLines={1} style={{ width: 62, textAlign: 'right', paddingTop: 7 }}>{clock(new Date(r.at))}</Text>
+      <Text variant="footnote" color="ink3" tabular numberOfLines={1} style={{ width: 62, textAlign: 'right', marginTop: 7 }}>{clock(new Date(r.at))}</Text>
       <View style={{ alignItems: 'center', width: 30 }}>
         {tm ? <TeammateAvatar teammate={tm} size={30} interactive={false} paused /> : <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: c.panel2 }} />}
         {r.outcome === 'failed' && <View style={{ position: 'absolute', top: 0, right: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger, borderWidth: 2, borderColor: c.canvas }} />}
         {!last && <View style={{ flex: 1, width: 1.5, marginTop: 6, borderRadius: 1, backgroundColor: c.line }} />}
       </View>
-      <View style={{ flex: 1, minWidth: 0, paddingTop: 5, paddingBottom: last ? 4 : 22, gap: 3 }}>
+      <View style={{ flex: 1, minWidth: 0, marginTop: 4, paddingBottom: last ? 4 : 22, gap: 3 }}>
         <Text variant="bodyMedium" numberOfLines={1}>{what}<Text variant="body" color="ink3"> · {tm?.name ?? 'A teammate'}</Text></Text>
         <Text variant="body" color={r.outcome === 'failed' ? 'danger' : 'ink2'} numberOfLines={quiet ? 1 : 2}>{said}</Text>
         {r.outcome === 'posted' && r.apps.length > 0 && (
@@ -535,17 +553,8 @@ const Moment = memo(function Moment({ r, last, onOpen }: { r: Receipt; last: boo
   )
 })
 
-function ReceiptList({ receipts }: { receipts: Receipt[] }) {
-  return receipts.map((r, i) => (
-    <View key={r.run_id}>
-      {i > 0 && <Hairline inset={64} />}
-      <ReceiptRow r={r} />
-    </View>
-  ))
-}
-
-/** The runs behind a number in the hero. */
-function JobsSheet({ which, receipts, onClose }: { which: Jobs | null; receipts: Receipt[]; onClose: () => void }) {
+/** The runs behind a number in the hero, as the same timeline. */
+function JobsSheet({ which, receipts, onClose, onOpen }: { which: Jobs | null; receipts: Receipt[]; onClose: () => void; onOpen: (r: Receipt) => void }) {
   const [last, setLast] = useState<Jobs>('all')
   if (which && which !== last) setLast(which)
   const shown = last === 'all' ? receipts : receipts.filter((r) => r.outcome === last)
@@ -554,120 +563,97 @@ function JobsSheet({ which, receipts, onClose }: { which: Jobs | null; receipts:
       : last === 'quiet' ? `${shown.length} quiet: checked, nothing new` : `${shown.length} failed`
   return (
     <Sheet open={!!which} onClose={onClose} title={title}>
-      <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ paddingBottom: 4 }}>
-        <ReceiptList receipts={shown} />
+      <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 8 }}>
+        <Timeline receipts={shown} onOpen={onOpen} />
       </ScrollView>
     </Sheet>
   )
 }
 
-/** One run: what woke them, who, what came of it and where they worked. Opens into the full reply and what to do next. */
-const ReceiptRow = memo(function ReceiptRow({ r, startOpen = false }: { r: Receipt; startOpen?: boolean }) {
+/** One run, whole: who and what at the top, the reply full width, where it worked, and the way into its chat. */
+function RunSheet({ r, onClose }: { r: Receipt | null; onClose: () => void }) {
   const ws = useWorkspace()
-  const [open, setOpen] = useState(startOpen)
-  const [seen, setSeen] = useState(startOpen) // the reply mounts on first open (Markdown is the costly part)
-  const flip = useFlip(open)
-  const tm = ws.teammate(r.teammate_id)
-  const what = r.title ?? (r.trigger === 'schedule' ? 'Scheduled' : r.trigger === 'event' ? 'Event'
-    : r.thread_id.startsWith('dm:') ? 'Asked by you' : ws.threadTitle(r.thread_id))
-  const where = r.apps.map(placeName)
-  const summary = r.outcome === 'quiet' ? (where.length ? `Checked ${list(where)}. Nothing new, so it stayed quiet.` : 'Nothing new, so it stayed quiet.')
-    : r.outcome === 'cancelled' ? 'Stopped before it finished.'
-      : r.outcome === 'failed' ? `Couldn’t finish${r.text ? `: ${plain(r.text)}` : '.'}`
-        : plain(r.text)
-  const meta = [r.steps ? plural(r.steps, 'step') : null, took(r.duration_ms)].filter(Boolean).join(' · ')
-
+  const [last, setLast] = useState<Receipt | null>(null)
+  if (r && r !== last) setLast(r)
+  const x = r ?? last
+  const tm = ws.teammate(x?.teammate_id)
+  const where = x ? x.apps.map(placeName) : []
+  const meta = x ? [where.length ? `Worked in ${list(where)}` : null, x.steps ? plural(x.steps, 'step') : null, took(x.duration_ms)].filter(Boolean).join(' · ') : ''
   return (
-    <View>
-      <Press
-        static
-        onPress={() => { setSeen(true); setOpen((o) => !o) }}
-        accessibilityLabel={`${what}, ${tm?.name ?? 'a teammate'}. ${summary}`}
-        accessibilityHint={open ? 'Hides the reply' : 'Shows the whole reply'}
-        accessibilityState={{ expanded: open }}
-        style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 14, paddingVertical: 14, alignItems: 'flex-start' }}
-      >
-        {tm ? <TeammateAvatar teammate={tm} size={36} interactive={false} paused /> : <View style={{ width: 36 }} />}
-        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text variant="bodyMedium" numberOfLines={1} style={{ flexShrink: 1 }}>
-              {what}<Text variant="body" color="ink3"> · {tm?.name ?? 'A teammate'}</Text>
-            </Text>
-            <View style={{ flex: 1 }} />
-            <Text variant="footnote" color="ink3" tabular>{ago(r.at)}</Text>
-            <Animated.View style={flip}><Icon icon={ArrowDown01Icon} size={14} color="ink3" /></Animated.View>
-          </View>
-          {!open && (
-            <Text variant="body" color={r.outcome === 'failed' ? 'danger' : r.outcome === 'posted' ? 'ink2' : 'ink3'} numberOfLines={2}>{summary}</Text>
-          )}
-          {(r.apps.length > 0 || meta) && !open && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 }}>
-              {r.apps.length > 0 && places(r.apps, 16, undefined)}
-              {meta ? <Text variant="footnote" color="ink3" tabular>{meta}</Text> : null}
+    <Sheet open={!!r} onClose={onClose} accessibilityLabel={x ? runTitle(x, ws.threadTitle) : 'Run'}>
+      {x && (
+        <View style={{ paddingHorizontal: 20, gap: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 4 }}>
+            {tm && <TeammateAvatar teammate={tm} size={40} interactive={false} paused />}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text variant="headline" numberOfLines={1}>{runTitle(x, ws.threadTitle)}</Text>
+              <Text variant="caption" color="ink3" numberOfLines={1}>{tm?.name ?? 'A teammate'}</Text>
             </View>
-          )}
-        </View>
-      </Press>
-      <Collapse open={open}>
-        {seen && <View style={{ paddingLeft: 62, paddingRight: 14, paddingBottom: 14, gap: 12 }}>
-          {r.outcome === 'posted' ? <Markdown value={r.text} /> : (
-            <Text variant="body" color={r.outcome === 'failed' ? 'danger' : 'ink2'}>{summary}</Text>
-          )}
-          {(where.length > 0 || meta) && (
-            <Text variant="footnote" color="ink3">{[where.length ? `Worked in ${list(where)}` : null, meta].filter(Boolean).join(' · ')}</Text>
-          )}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Button label="Open in chat" size="sm" variant="soft" onPress={() => openChat(r.thread_id)} />
-            {r.automation_id && <Button label="Automation" size="sm" variant="ghost" onPress={() => openAutomation(r.automation_id!)} />}
-            {r.automation_id && r.outcome === 'failed' && (
-              <Button label="Try again" size="sm" variant="ghost" onPress={() => runNow({ id: r.automation_id!, name: r.title ?? 'it' } as Automation)} />
+            <Text variant="footnote" color="ink3" tabular>{clock(new Date(x.at))}</Text>
+          </View>
+          <ScrollView style={{ maxHeight: 440 }}>
+            {x.outcome === 'posted' ? <Markdown value={x.text} /> : (
+              <Text variant="body" color={x.outcome === 'failed' ? 'danger' : 'ink2'}>
+                {x.outcome === 'quiet' ? (where.length ? `Checked ${list(where)}. Nothing new, so it stayed quiet.` : 'Nothing new, so it stayed quiet.')
+                  : x.outcome === 'cancelled' ? 'Stopped before it finished.' : `Couldn’t finish${x.text ? `: ${plain(x.text)}` : '.'}`}
+              </Text>
+            )}
+          </ScrollView>
+          {!!meta && <Text variant="footnote" color="ink3">{meta}</Text>}
+          <View style={{ gap: 4 }}>
+            <Button label="Open in chat" size="lg" fullWidth onPress={() => { onClose(); openChat(x.thread_id) }} />
+            {x.automation_id && x.outcome === 'failed' && (
+              <Button label="Try again" variant="ghost" fullWidth onPress={() => { onClose(); runNow({ id: x.automation_id!, name: x.title ?? 'it' } as Automation) }} />
             )}
           </View>
-        </View>}
-      </Collapse>
-    </View>
+        </View>
+      )}
+    </Sheet>
   )
-})
+}
 
 /** What each running run is doing this moment: its latest step, live. */
 function useDoing(runs: Run[], teammate: (id: string | null | undefined) => Teammate | undefined) {
   const [doing, setDoing] = useState<Record<string, string>>({})
   const ids = runs.map((r) => r.id).join(',')
   const sentence = useCallback((a: Activity) => describe(a, (id) => teammate(id)?.name), [teammate])
-  const useful = (a: Activity) => a.type !== 'run_start' && a.type !== 'run_end' && a.type !== 'event' && isShown(a)
   useEffect(() => {
     if (!ids) return
     supabase.from('activity').select('*').in('run_id', ids.split(',')).order('created_at', { ascending: false }).limit(30)
       .then(({ data }) => {
         const latest: Record<string, string> = {}
-        for (const a of (data ?? []) as Activity[]) if (a.run_id && !latest[a.run_id] && useful(a)) latest[a.run_id] = sentence(a)
+        for (const a of (data ?? []) as Activity[]) if (a.run_id && !latest[a.run_id] && isStep(a)) latest[a.run_id] = sentence(a)
         setDoing(latest)
       })
     const live = liveChannel(() => supabase
       .channel(`garage-now:${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity' }, (e) => {
         const a = e.new as Activity
-        if (a.run_id && ids.includes(a.run_id) && useful(a)) setDoing((d) => ({ ...d, [a.run_id!]: sentence(a) }))
+        if (a.run_id && ids.includes(a.run_id) && isStep(a)) setDoing((d) => ({ ...d, [a.run_id!]: sentence(a) }))
       }), () => {})
     return () => live.stop()
   }, [ids, sentence])
   return doing
 }
 
-/** Who is working: their face, where, and their latest step with a light sweeping through it while on screen. */
-const WorkingNow = memo(function WorkingNow({ live, animate }: { live: Live[]; animate: boolean }) {
+const isStep = (a: Activity) => a.type !== 'run_start' && a.type !== 'run_end' && a.type !== 'event' && isShown(a)
+
+/** Who is working: their face, where, and their latest step with a light sweeping through it while on screen.
+ * Tap one to watch its steps. */
+const WorkingNow = memo(function WorkingNow({ live, animate, onOpen }: { live: Live[]; animate: boolean; onOpen: (l: Live) => void }) {
   const ws = useWorkspace()
   if (!live.length) return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Everyone’s free. Runs show here, step by step, while they happen.</Text>
   return (
     <Surface style={{ marginHorizontal: 16, overflow: 'hidden' }}>
-      {live.map(({ run, doing }, i) => {
+      {live.map((l, i) => {
+        const { run, doing } = l
         const tm = ws.teammate(run.teammate_id)
         const where = run.thread_id.startsWith('dm:') ? 'Direct chat' : ws.threadTitle(run.thread_id)
         const step = doing ? `Just ${doing}` : 'Getting started…'
         return (
           <View key={run.id}>
-            {i > 0 && <Hairline inset={64} />}
-            <Press static onPress={() => openChat(run.thread_id)} accessibilityLabel={`${tm?.name ?? 'A teammate'} is working in ${where}. ${step}`}
+            {i > 0 && <Hairline />}
+            <Press static onPress={() => onOpen(l)} accessibilityLabel={`${tm?.name ?? 'A teammate'} is working in ${where}. ${step}`} accessibilityHint="Shows its steps"
               style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
               {tm ? <TeammateAvatar teammate={tm} size={36} interactive={false} /> : <View style={{ width: 36 }} />}
               <View style={{ flex: 1, minWidth: 0, gap: 2, overflow: 'hidden' }}>
@@ -683,24 +669,83 @@ const WorkingNow = memo(function WorkingNow({ live, animate }: { live: Live[]; a
   )
 })
 
-interface Upcoming { key: string; at: string; day: string; time: string; title: string; sub: string; teammate?: string; auto?: Automation; follow?: Followup; reminder?: Reminder }
+/** A run as it happens: every step so far (live), the newest shimmering, and the way into its chat. */
+function WorkingSheet({ l, sample, onClose }: { l: Live | null; sample: boolean; onClose: () => void }) {
+  const ws = useWorkspace()
+  const [last, setLast] = useState<Live | null>(null)
+  if (l && l !== last) setLast(l)
+  const x = l ?? last
+  const [real, setSteps] = useState<{ id: string; text: string; at: string }[]>([])
+  const began = x?.run.started_at
+  const fake = useMemo(() => SAMPLE_STEPS.map((t, i) => ({ id: `${i}`, text: t, at: new Date(new Date(began ?? 0).getTime() + i * 15000).toISOString() })), [began])
+  const steps = sample ? fake : real
+  const id = x?.run.id
+  useEffect(() => {
+    if (!id || !l || sample) return
+    const say = (a: Activity) => ({ id: a.id, text: describe(a, (t) => ws.teammate(t)?.name), at: a.created_at })
+    supabase.from('activity').select('*').eq('run_id', id).order('created_at').then(({ data }) => setSteps(((data ?? []) as Activity[]).filter(isStep).map(say)))
+    const live = liveChannel(() => supabase
+      .channel(`garage-steps:${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity', filter: `run_id=eq.${id}` }, (e) => {
+        const a = e.new as Activity
+        if (isStep(a)) setSteps((s) => (s.some((x) => x.id === a.id) ? s : [...s, say(a)]))
+      }), () => {})
+    return () => live.stop()
+  }, [id, l, sample]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tm = ws.teammate(x?.run.teammate_id)
+  const where = !x ? '' : x.run.thread_id.startsWith('dm:') ? 'Direct chat' : ws.threadTitle(x.run.thread_id)
+  return (
+    <Sheet open={!!l} onClose={onClose} accessibilityLabel="Working now">
+      {x && (
+        <View style={{ paddingHorizontal: 20, gap: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 4 }}>
+            {tm && <TeammateAvatar teammate={tm} size={40} interactive={false} />}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text variant="headline" numberOfLines={1}>{tm?.name ?? 'A teammate'}</Text>
+              <Text variant="caption" color="ink3" numberOfLines={1}>Working in {where} · started {ago(x.run.started_at).toLowerCase()}{/^\d/.test(ago(x.run.started_at)) ? ' ago' : ''}</Text>
+            </View>
+          </View>
+          <ScrollView style={{ maxHeight: 400 }}>
+            {steps.length === 0 ? <ShimmerText text="Getting started…" size={15} /> : steps.map((s, i) => {
+              const now = i === steps.length - 1
+              return (
+                <View key={s.id} style={{ flexDirection: 'row', gap: 12, paddingVertical: 7 }}>
+                  <Text variant="footnote" color="ink3" tabular style={{ width: 62, marginTop: 3 }}>{clock(new Date(s.at))}</Text>
+                  <View style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                    {now ? <ShimmerText text={cap(s.text)} size={15} /> : <Text variant="body" color="ink2">{cap(s.text)}</Text>}
+                  </View>
+                </View>
+              )
+            })}
+          </ScrollView>
+          <Button label="Open in chat" size="lg" fullWidth onPress={() => { onClose(); openChat(x.run.thread_id) }} />
+        </View>
+      )}
+    </Sheet>
+  )
+}
 
-/** The next automation runs, follow-ups and reminders, soonest first. */
-function comingUp(automations: Automation[] | null, followups: Followup[] | null, reminders: Reminder[]): Upcoming[] {
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const SAMPLE_STEPS = ['looked for the right app tool', 'listed open pull requests on GitHub', 'read pull request #142 on GitHub', 'read the CI logs for PR #142']
+
+interface Upcoming {
+  key: string; at: string; day: string; time: string; title: string; sub: string; teammate?: string
+  auto?: Automation; follow?: Followup; reminder?: Reminder; event?: PhoneEvent
+}
+
+/** The next automation runs, follow-ups, reminders and calendar events, soonest first. */
+function comingUp(automations: Automation[] | null, followups: Followup[] | null, reminders: Reminder[], events: PhoneEvent[]): Upcoming[] {
   const out: Upcoming[] = []
   const at = (iso: string) => { const [day, time] = whenLabel(iso).split(', '); return { day, time } }
+  const now = new Date()
   for (const a of automations ?? []) {
     if (a.enabled && a.next_run) out.push({ key: a.id, at: a.next_run, ...at(a.next_run), title: a.name, sub: 'Automation', teammate: a.teammate_id, auto: a })
   }
   for (const f of followups ?? []) {
     const when = f.at ?? f.check_by
     if (!when) continue
-    out.push({
-      key: f.id, at: when, ...at(when), title: f.what, sub: 'Follow-up',
-      teammate: f.owner === 'group' ? undefined : f.owner, follow: f,
-    })
+    out.push({ key: f.id, at: when, ...at(when), title: f.what, sub: 'Follow-up', teammate: f.owner === 'group' ? undefined : f.owner, follow: f })
   }
-  const now = new Date()
   for (const r of reminders) {
     if (r.done) continue
     const next = reminderNext(r, now)
@@ -708,22 +753,31 @@ function comingUp(automations: Automation[] | null, followups: Followup[] | null
     const iso = next.toISOString()
     out.push({ key: r.id, at: iso, ...at(iso), title: r.title, sub: 'Reminder', reminder: r })
   }
-  return out.sort((a, b) => a.at.localeCompare(b.at)).slice(0, 5)
+  for (const e of events) {
+    if (e.allDay || e.start < now.getTime()) continue
+    const iso = new Date(e.start).toISOString()
+    out.push({ key: `ev:${e.id}:${e.start}`, at: iso, ...at(iso), title: e.title || 'Event', sub: e.place ? `Calendar · ${e.place}` : 'Calendar', event: e })
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at)).slice(0, 6)
 }
 
-/** A short timeline: the time on the left, what and who on the right. Each opens its summary sheet. */
-const ComingUp = memo(function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: boolean; onOpen: (u: Upcoming) => void }) {
+/** A short timeline: the time on the left, what and who on the right; each opens its summary sheet. Under it, the
+ * way into every follow-up. */
+const ComingUp = memo(function ComingUp({ items, loading, onOpen, onFollowups }: {
+  items: Upcoming[]; loading: boolean; onOpen: (u: Upcoming) => void; onFollowups: () => void
+}) {
   const ws = useWorkspace()
   const { c } = useTheme()
   if (loading) return <View style={{ paddingHorizontal: 20, gap: 14 }}><Skeleton width="65%" /><Skeleton width="45%" /></View>
-  if (!items.length) return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Nothing scheduled. Automations and follow-ups show up here before they run.</Text>
   return (
     <Surface style={{ marginHorizontal: 16, overflow: 'hidden' }}>
+      {!items.length && <Text variant="body" color="ink3" style={{ padding: 16 }}>Nothing scheduled. Automations, follow-ups, reminders and events show up here before they happen.</Text>}
       {items.map((u, i) => {
         const tm = ws.teammate(u.teammate)
+        const glyph = u.reminder ? BellRingIcon : u.event ? Calendar03Icon : null
         return (
           <View key={u.key}>
-            {i > 0 && <Hairline inset={100} />}
+            {i > 0 && <Hairline />}
             <Press static onPress={() => onOpen(u)} accessibilityLabel={`${u.title}, ${u.day} ${u.time}`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 }}>
               <View style={{ width: 74 }}>
@@ -735,14 +789,62 @@ const ComingUp = memo(function ComingUp({ items, loading, onOpen }: { items: Upc
                 <Text variant="caption" color="ink3" numberOfLines={1}>{[tm?.name, u.sub, u.follow && ws.threadTitle(u.follow.thread_id)].filter(Boolean).join(' · ')}</Text>
               </View>
               {tm ? <TeammateAvatar teammate={tm} size={28} interactive={false} paused />
-                : u.reminder ? <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}><Icon icon={Notification03Icon} size={15} color="ink2" /></View> : null}
+                : glyph ? <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: u.event?.color || c.panel2, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon icon={glyph} size={15} color={u.event?.color ? '#fff' : 'ink2'} /></View> : null}
             </Press>
           </View>
         )
       })}
+      <Hairline />
+      <Press static onPress={onFollowups} accessibilityLabel="View all follow-ups"
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, minHeight: 48 }}>
+        <Text variant="label" color="ink2" style={{ flex: 1 }}>View all follow-ups</Text>
+        <Icon icon={ArrowRight01Icon} size={16} color="ink3" />
+      </Press>
     </Surface>
   )
 })
+
+/** Every follow-up by state: upcoming, waiting on something, done, cancelled. */
+function FollowupsSheet({ open, pending, done, onClose, onOpen }: {
+  open: boolean; pending: Followup[]; done: Followup[]; onClose: () => void; onOpen: (f: Followup) => void
+}) {
+  return (
+    <Sheet open={open} onClose={onClose} title="Follow-ups">
+      <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ paddingBottom: 8 }}>
+        <FollowupList pending={pending} done={done} onOpen={onOpen} />
+      </ScrollView>
+    </Sheet>
+  )
+}
+
+/** Today's calendar, as the Calendar tab shows it. */
+function EventsSheet({ open, events, onClose }: { open: boolean; events: PhoneEvent[]; onClose: () => void }) {
+  const { c } = useTheme()
+  return (
+    <Sheet open={open} onClose={onClose} title={`Today’s calendar · ${events.length}`}>
+      <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingBottom: 8 }}>
+        {events.map((e, i) => (
+          <View key={`${e.id}:${e.start}`}>
+            {i > 0 && <Hairline />}
+            <Press static onPress={() => { onClose(); router.push({ pathname: '/event/[id]', params: { id: e.id, start: String(e.start) } }) }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 }}>
+              <View style={{ width: 4, alignSelf: 'stretch', borderRadius: 2, backgroundColor: e.color || c.tube }} />
+              <View style={{ width: 74 }}>
+                <Text variant="bodyMedium" tabular>{e.allDay ? 'All day' : clock(new Date(e.start))}</Text>
+                {!e.allDay && <Text variant="footnote" color="ink3" tabular>{clock(new Date(e.end))}</Text>}
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text variant="bodyMedium" numberOfLines={2}>{e.title || 'Event'}</Text>
+                {!!e.place && <Text variant="caption" color="ink3" numberOfLines={1}>{e.place}</Text>}
+              </View>
+            </Press>
+          </View>
+        ))}
+      </ScrollView>
+    </Sheet>
+  )
+}
 
 function Line({ label, value }: { label: string; value: string }) {
   return (
@@ -765,6 +867,7 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
   const a = u?.auto
   const f = u?.follow
   const rem = u?.reminder
+  const ev = u?.event
   const prev = a ? receipts.find((r) => r.automation_id === a.id) : undefined
   const health = a ? lastRun(a) : null
   const act = async (work: () => Promise<unknown>) => { if (!sample) { await work(); onChanged() } onClose() }
@@ -776,7 +879,7 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             {tm && <TeammateAvatar teammate={tm} size={32} interactive={false} paused />}
             <Text variant="body" color="ink2" style={{ flex: 1 }}>
-              {rem ? `Reminds you ${day} at ${u.time}` : `${tm ? `${tm.name} ` : ''}${a ? `runs it ${day} at ${u.time}` : `checks back ${day} at ${u.time}`}`}
+              {ev ? `${day === 'today' ? 'Today' : u.day}, ${clock(new Date(ev.start))} – ${clock(new Date(ev.end))}` : rem ? `Reminds you ${day} at ${u.time}` : `${tm ? `${tm.name} ` : ''}${a ? `runs it ${day} at ${u.time}` : `checks back ${day} at ${u.time}`}`}
             </Text>
           </View>
           <View>
@@ -785,6 +888,8 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
             {f && <Line label="In" value={ws.threadTitle(f.thread_id)} />}
             {rem && <Line label="Repeats" value={REPEATS.find((x) => x.value === rem.repeat)?.label ?? 'Once'} />}
             {!!rem?.notes && <Line label="Notes" value={rem.notes} />}
+            {!!ev?.place && <Line label="Where" value={ev.place} />}
+            {!!ev?.notes && <Line label="Notes" value={ev.notes} />}
             {health && <Line label="Last time" value={health.text} />}
           </View>
           {a?.instructions ? (
@@ -800,6 +905,7 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
             </View>
           )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
+            {ev && <Button label="Open in calendar" size="sm" variant="soft" onPress={() => { onClose(); router.push({ pathname: '/event/[id]', params: { id: ev.id, start: String(ev.start) } }) }} />}
             {rem && <Button label="Mark done" size="sm" variant="soft" onPress={() => act(async () => finishReminder(rem))} />}
             {rem && <Button label="Edit" size="sm" variant="ghost" onPress={() => { onClose(); router.push({ pathname: '/reminder/[id]', params: { id: rem.id } }) }} />}
             {a && <Button label="Run now" size="sm" variant="soft" onPress={() => act(() => runNow(a))} />}
@@ -897,5 +1003,11 @@ function sampleData(crew: Teammate[], mode: 'busy' | 'calm') {
   const todo = (id: string, title: string, due: string): Todo => ({ id, title, due, status: 'todo', notes: '', priority: 0, project_id: null, thread_id: null, added_by: null, assignee: null, labels: [], sort: 0, created_at: past(2000), updated_at: past(2000), completed_at: null } as Todo)
   const todos: Todo[] = mode === 'calm' ? [todo('t1', 'Revise Signals & Systems notes', today)]
     : [todo('t1', 'Fill the GATE correction form', today), todo('t2', 'Pay the electricity bill', yesterday), todo('t3', 'Revise Signals & Systems notes', today)]
-  return { receipts, live, approvals, automations, followups, done, todos, reminders }
+  const E = (id: string, title: string, startH: number, mins: number, color: string, place = ''): PhoneEvent => {
+    const start = Date.now() + startH * 3600000
+    return { id, title, start, end: start + mins * 60000, allDay: false, place, notes: '', color, calendar: 'sample', rrule: '' }
+  }
+  const events: PhoneEvent[] = mode === 'calm' ? [E('e1', 'Study block: Networks', 1.2, 90, '#7c5cff')]
+    : [E('e1', 'Sync with Ravi', 0.8, 30, '#0b8043', 'Google Meet'), E('e2', 'Study block: Networks', 2.5, 90, '#7c5cff'), E('e3', 'Gym', 4, 60, '#f4511e')]
+  return { receipts, live, approvals, automations, followups, done, todos, reminders, events }
 }

@@ -51,14 +51,13 @@ export function AutomationRows({ items, show, onToggle }: {
         const sub = [a.problems?.length ? 'Needs attention' : null, whenText(a), context(a), timing(a)].filter(Boolean).join(' · ')
         return (
           <View key={a.id}>
-            {i > 0 && <Divider inset={60} />}
+            {i > 0 && <Divider />}
             <RowWithAction
               onPress={() => openAutomation(a.id)}
               accessibilityLabel={`${a.name}, ${sub}`}
               accessibilityHint="Opens the automation"
               action={<View style={{ paddingRight: 4 }}><Toggle value={a.enabled} onChange={(v) => onToggle(a, v)} accessibilityLabel={`${a.name} on`} /></View>}
             >
-              <AutomationGlyph a={a} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text variant="bodyMedium" numberOfLines={1} color={a.enabled ? 'ink' : 'ink3'}>{a.name}</Text>
                 <Text variant="caption" color="ink3" numberOfLines={2}>{sub}</Text>
