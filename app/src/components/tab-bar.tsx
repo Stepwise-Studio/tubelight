@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { Tabs } from 'expo-router'
 import type { ComponentProps } from 'react'
 import { useEffect, useRef } from 'react'
-import { AiArtIcon, GarageIcon, InboxIcon, UserCircleIcon, VaultIcon } from '@hugeicons/core-free-icons'
+import { AiArtIcon, ChartRadarIcon, InboxIcon, UserCircleIcon, VaultIcon } from '@hugeicons/core-free-icons'
 
 import { isUnread } from '@/lib/format'
 import { useWorkspace } from '@/lib/workspace'
@@ -21,7 +21,7 @@ const PLACES = [
   { name: 'index', label: 'Inbox', icon: InboxIcon },
   { name: 'vault', label: 'Vault', icon: VaultIcon },
   { name: 'tasks', label: 'Orbit', icon: AiArtIcon },
-  { name: 'garage', label: 'Garage', icon: GarageIcon },
+  { name: 'garage', label: 'Garage', icon: ChartRadarIcon },
   { name: 'profile', label: 'Profile', icon: UserCircleIcon },
 ]
 const ease = motion.ease.smoothOut

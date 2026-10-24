@@ -1,5 +1,5 @@
 import { View } from 'react-native'
-import { RepeatIcon, ZapIcon } from '@hugeicons/core-free-icons'
+import { WorkflowIcon } from '@hugeicons/core-free-icons'
 
 import { RowWithAction } from '@/components/form-bits'
 import { ago } from '@/lib/format'
@@ -8,12 +8,12 @@ import { useWorkspace } from '@/lib/workspace'
 import { useTheme } from '@/theme'
 import { Divider, Icon, Surface, Text, Toggle } from '@/ui'
 
-/** The icon tile an automation wears everywhere: a repeat for schedules, a bolt for app events; tinted while on. */
+/** The icon tile an automation wears everywhere (a workflow); tinted while on. */
 export function AutomationGlyph({ a, size = 36 }: { a: Pick<Automation, 'kind' | 'enabled'>; size?: number }) {
   const { c } = useTheme()
   return (
     <View style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: a.enabled ? c.tubeSoft : c.panel2, alignItems: 'center', justifyContent: 'center' }}>
-      <Icon icon={a.kind === 'app' ? ZapIcon : RepeatIcon} size={Math.round(size * 0.47)} color={a.enabled ? 'tube' : 'ink3'} />
+      <Icon icon={WorkflowIcon} size={Math.round(size * 0.47)} color={a.enabled ? 'tube' : 'ink3'} />
     </View>
   )
 }

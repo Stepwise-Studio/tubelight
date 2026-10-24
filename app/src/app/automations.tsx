@@ -3,7 +3,7 @@
 import { router } from 'expo-router'
 import { ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Add01Icon, RepeatIcon } from '@hugeicons/core-free-icons'
+import { Add01Icon, WorkflowIcon } from '@hugeicons/core-free-icons'
 
 import { AutomationRows } from '@/components/automation-rows'
 import { ScreenHeader } from '@/components/screen-header'
@@ -44,7 +44,7 @@ export default function AutomationsScreen() {
         </View>
       ) : list.length === 0 ? (
         <EmptyState
-          art={<View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={RepeatIcon} size={28} color="tube" /></View>}
+          art={<View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={WorkflowIcon} size={28} color="tube" /></View>}
           title="Nothing runs on its own yet"
           body="Ask a teammate in any chat, like “every morning at 8, brief me on new mail” or “whenever a mail from Priya arrives, ping me”."
           action={<Button label="New automation" icon={Add01Icon} variant="soft" onPress={newAutomation} />}

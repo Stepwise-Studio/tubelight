@@ -3,7 +3,7 @@
 // days and a switch; reminders in one card grouped Overdue / Today / Tomorrow / Later (tap the ring when it's done);
 // and what teammates will come back to.
 import { router } from 'expo-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native'
 import Animated, { Easing, FadeIn, FadeOut, Keyframe, LayoutAnimationConfig, LinearTransition } from 'react-native-reanimated'
 import { Add01Icon, Delete02Icon, Notification03Icon, RepeatIcon, Tick02Icon } from '@hugeicons/core-free-icons'
@@ -14,11 +14,10 @@ import {
   useAlarms, useMinute, useReminders, type Alarm, type Reminder,
 } from '@/lib/clock'
 import { Phone } from '@/lib/phone'
-import { refreshTasks, useFollowups, type Followup } from '@/lib/tasks'
+import { refreshTasks } from '@/lib/tasks'
 import { fonts, motion, useTheme } from '@/theme'
 import { Icon, IconButton, IconSwap, Notice, Squircle, Text, Toggle, haptic, showContextMenu, toast } from '@/ui'
 
-import { FollowupList, FollowupSheet } from './followups'
 
 const layout = LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)
 const DAY_MS = 86_400_000
@@ -44,10 +43,7 @@ export function ClockView({ active }: { active: boolean }) {
   const now = useMinute()
   const alarms = useAlarms().rows ?? []
   const reminders = useReminders().rows ?? []
-  const follow = useFollowups()
-  const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
   const [refreshing, setRefreshing] = useState(false)
-  const onFollow = useCallback((f: Followup) => setFsheet((s) => ({ open: true, f, n: s.n + 1 })), [])
 
   const rings = alarms.map((a) => ({ a, at: alarmNext(a, now) })).filter((x): x is { a: Alarm; at: Date } => !!x.at).sort((x, y) => x.at.getTime() - y.at.getTime())
   const open = reminders.filter((r) => !r.done).map((r) => ({ r, at: reminderNext(r, now) })).sort((x, y) => x.at.getTime() - y.at.getTime())
@@ -76,16 +72,6 @@ export function ClockView({ active }: { active: boolean }) {
       <Section title="Reminders" count={open.length ? String(open.length) : undefined} onAdd={newReminder} add="New reminder" />
       <Reminders open={open} done={done} now={now} onAdd={newReminder} />
 
-      {follow.pending !== null && (
-        <>
-          <Section title="Follow-ups" count={follow.pending.length ? String(follow.pending.length) : undefined} />
-          {/* Full width: out of the page's side padding. */}
-          <View style={{ marginHorizontal: -16 }}>
-            <FollowupList pending={follow.pending} done={follow.done} onOpen={onFollow} />
-          </View>
-        </>
-      )}
-      <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={() => setFsheet((s) => ({ ...s, open: false }))} />
     </ScrollView>
   )
 }

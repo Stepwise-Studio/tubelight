@@ -11,9 +11,10 @@ import { cancelFollowup, editFollowup, followupNow, isoDay, type Followup } from
 import { useWorkspace } from '@/lib/workspace'
 import { motion, type, useTheme } from '@/theme'
 import {
-  Button, Icon, Press, Segment, Sheet, Squircle, TeammateAvatar, Text, TimePicker, confirm, haptic, toast,
+  Button, Icon, Press, Segment, Sheet, Squircle, TeammateAvatar, Text, confirm, haptic, toast,
 } from '@/ui'
 
+import { ClockWheel } from './clock-wheel'
 import { DayPicker } from './day-picker'
 
 const layout = LinearTransition.duration(motion.duration.fast).easing(motion.ease.smoothOut)
@@ -28,28 +29,38 @@ function dayHeading(iso: string, now = new Date()) {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-type State = 'pending' | 'fired' | 'done' | 'cancelled' | 'dropped'
+/** Upcoming: has a time. Waiting: waits on something happening. Done: picked up or finished. Cancelled: called off
+ * or no longer needed. */
+type State = 'upcoming' | 'waiting' | 'done' | 'cancelled'
 const STATES: { id: State; label: string }[] = [
-  { id: 'pending', label: 'Pending' }, { id: 'fired', label: 'Picked up' }, { id: 'done', label: 'Done' },
-  { id: 'cancelled', label: 'Cancelled' }, { id: 'dropped', label: 'No longer needed' },
+  { id: 'upcoming', label: 'Upcoming' }, { id: 'waiting', label: 'Waiting' }, { id: 'done', label: 'Done' }, { id: 'cancelled', label: 'Cancelled' },
 ]
+const EMPTY: Record<State, string> = {
+  upcoming: 'Nothing scheduled. Ask a teammate to “check back on Friday at 5”.',
+  waiting: 'Nothing waiting. Ask a teammate to “check back when the design is done”.',
+  done: 'None finished yet.',
+  cancelled: 'None cancelled.',
+}
 
-/** Follow-ups by state: a row of chips with counts (Pending first; the others when they have any), and the picked
- *  state's list under it, full width. Pending ones are grouped by day (and "Waiting on something"). */
+/** Follow-ups by state: a row of chips with counts and the picked state's list under it, full width. Upcoming ones are
+ *  grouped by day. */
 export function FollowupList({ pending, done, onOpen }: { pending: Followup[]; done: Followup[]; onOpen: (f: Followup) => void }) {
   const { c } = useTheme()
-  const [state, setState] = useState<State>('pending')
-  const count = (id: State) => (id === 'pending' ? pending.length : done.filter((f) => f.status === id).length)
-  const groups = new Map<string, Followup[]>()
-  for (const f of pending) {
-    const key = f.at ? dayHeading(f.at) : 'Waiting on something'
-    groups.set(key, [...(groups.get(key) ?? []), f])
+  const lists: Record<State, Followup[]> = {
+    upcoming: pending.filter((f) => f.at).sort((a, b) => a.at!.localeCompare(b.at!)),
+    waiting: pending.filter((f) => !f.at),
+    done: done.filter((f) => f.status === 'fired' || f.status === 'done'),
+    cancelled: done.filter((f) => f.status === 'cancelled' || f.status === 'dropped'),
   }
-  const order = [...groups.keys()].sort((a, b) => (a === 'Waiting on something' ? 1 : b === 'Waiting on something' ? -1 : 0))
+  const [state, setState] = useState<State>(lists.upcoming.length || !lists.waiting.length ? 'upcoming' : 'waiting')
+  const count = (id: State) => lists[id].length
+  const groups = new Map<string, Followup[]>()
+  for (const f of lists.upcoming) groups.set(dayHeading(f.at!), [...(groups.get(dayHeading(f.at!)) ?? []), f])
+  const order = [...groups.keys()]
   return (
     <View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 4 }}>
-        {STATES.filter((x) => x.id === 'pending' || count(x.id)).map((x) => {
+        {STATES.map((x) => {
           const on = x.id === state
           return (
             <Press key={x.id} radius={18} static onPress={() => { haptic.tap(); setState(x.id) }} accessibilityRole="tab" accessibilityState={{ selected: on }}
@@ -60,15 +71,19 @@ export function FollowupList({ pending, done, onOpen }: { pending: Followup[]; d
           )
         })}
       </ScrollView>
-      {state === 'pending' ? (
-        pending.length ? order.map((g) => (
+      {!lists[state].length ? (
+        <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 16, paddingVertical: 14 }}>{EMPTY[state]}</Text>
+      ) : state === 'upcoming' ? (
+        order.map((g) => (
           <Animated.View key={g} layout={layout}>
             <Text variant="overline" color="ink3" accessibilityRole="header" style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 }}>{g}</Text>
             {groups.get(g)!.map((f) => <FollowupRow key={f.id} f={f} onPress={() => onOpen(f)} />)}
           </Animated.View>
-        )) : <Text variant="footnote" color="ink3" style={{ paddingHorizontal: 16, paddingVertical: 14 }}>Nothing pending. Ask a teammate to “check back when the design is done”.</Text>
+        ))
+      ) : state === 'waiting' ? (
+        <View style={{ paddingTop: 6 }}>{lists.waiting.map((f) => <FollowupRow key={f.id} f={f} onPress={() => onOpen(f)} />)}</View>
       ) : (
-        <View style={{ paddingTop: 6 }}>{done.filter((f) => f.status === state).map((f) => <FollowupRow key={f.id} f={f} finished />)}</View>
+        <View style={{ paddingTop: 6 }}>{lists[state].map((f) => <FollowupRow key={f.id} f={f} finished />)}</View>
       )}
     </View>
   )
@@ -174,7 +189,7 @@ export function FollowupSheet({ f, open, onClose }: { f: Followup | null; open: 
             <Squircle style={{ borderRadius: 20, borderWidth: 1, borderColor: c.line, backgroundColor: c.panel, padding: 14 }}>
               <DayPicker value={day} onChange={setDay} min={isoDay(new Date(now))} />
             </Squircle>
-            <TimePicker hour={hm[0]} minute={hm[1]} onChange={(h, m) => setHm([h, m])} label="Time" />
+            <ClockWheel hour={hm[0]} minute={hm[1]} onChange={(h, m) => setHm([h, m])} bg={c.panel} />
             <Text variant="footnote" color={past ? 'danger' : 'ink3'}>
               {past ? 'That time has passed. Pick a later one.' : `${at.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}, ${clock(at)}`}
             </Text>

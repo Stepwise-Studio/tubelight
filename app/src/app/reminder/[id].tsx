@@ -9,7 +9,8 @@ import { Chips, EditorShell, Field } from '@/components/tasks/editor-shell'
 import { REPEATS, addReminder, deleteReminder, updateReminder, useReminders, type Reminder, type Repeat } from '@/lib/clock'
 import { dueLabel, isoDay } from '@/lib/tasks'
 import { type, useTheme } from '@/theme'
-import { Icon, Press, Sheet, Text, TimePicker, haptic } from '@/ui'
+import { ClockWheel } from '@/components/tasks/clock-wheel'
+import { Icon, Press, Sheet, Text, haptic } from '@/ui'
 
 export default function ReminderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -55,15 +56,13 @@ function Editor({ reminder }: { reminder: Reminder | null }) {
         multiline maxLength={300} submitBehavior="blurAndSubmit" cursorColor={c.tube} selectionColor={c.tube}
         style={[type.title, { color: c.ink, padding: 0 }]} accessibilityLabel="What to be reminded of" />
       <Field label="When">
-        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
-          <Press radius={18} static onPress={() => setPicking(true)} accessibilityLabel={`Day, ${day.label}. Change`}
+        <View style={{ gap: 14 }}>
+          <Press radius={18} static onPress={() => setPicking(true)} outerStyle={{ alignSelf: 'flex-start' }} accessibilityLabel={`Day, ${day.label}. Change`}
             style={{ height: 44, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(138,138,141,0.23)', backgroundColor: c.panel }}>
             <Icon icon={Calendar03Icon} size={18} color={day.overdue ? 'danger' : 'ink3'} />
             <Text variant="bodyMedium" color={day.overdue ? 'danger' : 'ink'}>{day.label}</Text>
           </Press>
-          <View style={{ flex: 1 }}>
-            <TimePicker hour={at.getHours()} minute={at.getMinutes()} onChange={(h, m) => setAt(new Date(at.getFullYear(), at.getMonth(), at.getDate(), h, m))} />
-          </View>
+          <ClockWheel hour={at.getHours()} minute={at.getMinutes()} onChange={(h, m) => setAt(new Date(at.getFullYear(), at.getMonth(), at.getDate(), h, m))} />
         </View>
       </Field>
       <Field label="Repeat">

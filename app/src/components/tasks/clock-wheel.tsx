@@ -13,8 +13,10 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 1)
 const MINUTES = Array.from({ length: 60 }, (_, i) => i)
 
-export function ClockWheel({ hour, minute, onChange }: { hour: number; minute: number; onChange: (hour: number, minute: number) => void }) {
+/** `bg`: the colour it sits on (the fades blend into it); the page by default. */
+export function ClockWheel({ hour, minute, onChange, bg }: { hour: number; minute: number; onChange: (hour: number, minute: number) => void; bg?: string }) {
   const { c } = useTheme()
+  const under = bg ?? c.canvas
   const pm = hour >= 12
   const h12 = hour % 12 || 12
   const to24 = (h: number, isPm: boolean) => (h % 12) + (isPm ? 12 : 0)
@@ -25,8 +27,8 @@ export function ClockWheel({ hour, minute, onChange }: { hour: number; minute: n
       <Text maxFontSizeMultiplier={1} style={{ fontFamily: fonts.regular, fontSize: 44, lineHeight: 56, color: c.ink3, marginTop: -6 }}>:</Text>
       <Wheel items={MINUTES.map(pad)} index={minute} width={92} onPick={(i) => onChange(hour, i)} label="Minute" />
       <Wheel items={['AM', 'PM']} index={pm ? 1 : 0} width={72} small onPick={(i) => onChange(to24(h12, i === 1), minute)} label="AM or PM" />
-      <LinearGradient pointerEvents="none" colors={[c.canvas, `${c.canvas}00`]} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: ROW }} />
-      <LinearGradient pointerEvents="none" colors={[`${c.canvas}00`, c.canvas]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: ROW }} />
+      <LinearGradient pointerEvents="none" colors={[under, `${under}00`]} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: ROW }} />
+      <LinearGradient pointerEvents="none" colors={[`${under}00`, under]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: ROW }} />
     </View>
   )
 }

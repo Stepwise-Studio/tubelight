@@ -5,7 +5,7 @@ import { Fragment, createContext, memo, useContext, useEffect, useState } from '
 import { Linking, Pressable, View, useWindowDimensions, type ViewStyle } from 'react-native'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import {
-  Alert02Icon, Clock01Icon, ArrowDown01Icon, RepeatIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, FlashIcon, VaultIcon,
+  Alert02Icon, Clock01Icon, ArrowDown01Icon, WorkflowIcon, UserIcon, ArrowTurnBackwardIcon, Copy01Icon, Download03Icon, FlashIcon, VaultIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
@@ -662,7 +662,7 @@ function EventLabel({ type, runId }: { type?: string; runId?: string | null }) {
   const auto = type?.startsWith('automation:') ? type.slice('automation:'.length) : null
   const label = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-      <Icon icon={auto ? RepeatIcon : FlashIcon} size={13} color="ink3" />
+      <Icon icon={auto ? WorkflowIcon : FlashIcon} size={13} color="ink3" />
       <Text variant="footnote" color="ink3" numberOfLines={1}>{auto ? `Automation · ${auto}` : `Started by an event${type ? `: ${type}` : ''}`}</Text>
     </View>
   )

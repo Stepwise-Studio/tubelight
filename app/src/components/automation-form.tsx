@@ -6,6 +6,7 @@ import { ScrollView, TextInput, View } from 'react-native'
 import { AlertCircleIcon } from '@hugeicons/core-free-icons'
 
 import { BrandTile } from '@/components/brand-mark'
+import { ClockWheel } from '@/components/tasks/clock-wheel'
 import { FormSection, SwitchRow } from '@/components/form-bits'
 import { ThreadAvatar } from '@/components/thread-avatar'
 import { api } from '@/lib/api'
@@ -19,7 +20,7 @@ import {
 import { useWorkspace } from '@/lib/workspace'
 import { fonts, useTheme } from '@/theme'
 import {
-  Button, Chip, Collapse, Divider, Icon, Press, PickerField, Segment, Surface, TeammateAvatar, Text, TextField, TimePicker,
+  Button, Chip, Collapse, Divider, Icon, Press, PickerField, Segment, Surface, TeammateAvatar, Text, TextField,
   haptic, toast, type PickerOption,
 } from '@/ui'
 
@@ -303,7 +304,10 @@ function ScheduleFields({ schedule, onChange, upcoming }: { schedule: Schedule; 
         </View>
       )}
       {schedule.kind === 'time' && (
-        <TimePicker label="At" hour={schedule.hour} minute={schedule.minute} onChange={(hour, minute) => onChange({ ...schedule, hour, minute })} />
+        <View style={{ gap: 6 }}>
+          <Text variant="label" color="ink2">At</Text>
+          <ClockWheel hour={schedule.hour} minute={schedule.minute} onChange={(hour, minute) => onChange({ ...schedule, hour, minute })} />
+        </View>
       )}
       {schedule.kind === 'hours' && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup">

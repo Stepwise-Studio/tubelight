@@ -12,17 +12,19 @@ import Animated, { interpolate, runOnJS, useAnimatedRef, useAnimatedScrollHandle
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   Add01Icon, ArrowDown01Icon, ArrowRight01Icon, BrowserIcon, Calendar03Icon, CheckmarkSquare02Icon,
-  CodeIcon, Globe02Icon, LaptopIcon, RepeatIcon, WorkHistoryIcon,
+  CodeIcon, Globe02Icon, LaptopIcon, Notification03Icon, WorkflowIcon, WorkHistoryIcon,
 } from '@hugeicons/core-free-icons'
 
 import { ApprovalCard } from '@/components/approval-card'
 import { AutomationGlyph, AutomationRows, lastRun } from '@/components/automation-rows'
 import { BrandTile } from '@/components/brand-mark'
 import { useTabBarInset } from '@/components/tab-bar'
+import { FollowupList, FollowupSheet } from '@/components/tasks/followups'
 import { describe, isShown } from '@/lib/activity'
 import { api } from '@/lib/api'
 import { openAutomation, runNow, setEnabled, useAutomations, whenText, type Automation } from '@/lib/automations'
-import { ago, whenLabel } from '@/lib/format'
+import { finishReminder, reminderNext, REPEATS, useReminders, type Reminder } from '@/lib/clock'
+import { ago, clock, whenLabel } from '@/lib/format'
 import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
 import { cancelFollowup, dueLabel, followupNow, isoDay, useFollowups, useTodos, type Followup, type Todo } from '@/lib/tasks'
@@ -119,6 +121,7 @@ export default function GarageTab() {
   const autos = useAutomations()
   const follow = useFollowups()
   const { todos } = useTodos()
+  const reminders = useReminders().rows
   const [receipts, setReceipts] = useState<Receipt[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [name, setName] = useState<string | null>(null)
@@ -129,6 +132,10 @@ export default function GarageTab() {
   const closeJobs = useCallback(() => setJobs(null), [])
   const closeOne = useCallback(() => setOne(null), [])
   const closeLater = useCallback(() => setLater(null), [])
+  const [fsheet, setFsheet] = useState<{ open: boolean; f: Followup | null; n: number }>({ open: false, f: null, n: 0 })
+  const openFollow = useCallback((f: Followup) => setFsheet((x) => ({ open: true, f, n: x.n + 1 })), [])
+  const closeFollow = useCallback(() => setFsheet((x) => ({ ...x, open: false })), [])
+  const onUpcoming = useCallback((u: Upcoming) => (u.follow ? openFollow(u.follow) : setLater(u)), [openFollow])
 
   // Past the blue card the page shows under the clock: a canvas-coloured strip fades in there and the status bar
   // icons go back to the theme's.
@@ -190,14 +197,15 @@ export default function GarageTab() {
   const sample = useMemo(() => (mode ? sampleData(ws.teammates, mode) : null), [mode, ws.teammates])
   const live = useMemo(() => running.map((run) => ({ run, doing: doing[run.id] })), [running, doing])
   const real = useMemo(() => ({
-    receipts, automations: autos.list, followups: follow.pending, approvals: ws.pendingApprovals, live, todos: todos ?? [],
-  }), [receipts, autos.list, follow.pending, ws.pendingApprovals, live, todos])
+    receipts, automations: autos.list, followups: follow.pending, done: follow.done, approvals: ws.pendingApprovals, live,
+    todos: todos ?? [], reminders: reminders ?? [],
+  }), [receipts, autos.list, follow.pending, follow.done, ws.pendingApprovals, live, todos, reminders])
   const d = sample ?? real
 
   // Automations that can't work or stopped on their own need you as much as an approval does.
   const broken = useMemo(() => (d.automations ?? []).filter((a) => a.problems.length
     || (!a.enabled && (a.recent ?? []).length >= 3 && a.recent!.slice(0, 3).every((o) => o === 'failed'))), [d.automations])
-  const upcoming = useMemo(() => comingUp(d.automations, d.followups), [d.automations, d.followups])
+  const upcoming = useMemo(() => comingUp(d.automations, d.followups, d.reminders), [d.automations, d.followups, d.reminders])
   const due = useMemo(() => (d.todos as Todo[]).filter((t) => t.due && t.status !== 'done' && t.status !== 'canceled' && t.due <= isoDay(new Date())), [d.todos])
   const onHeight = useCallback((h: number) => heroH.set(h), [heroH])
   const onNeeds = useCallback(() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true }), [scroller, insets.top])
@@ -225,7 +233,7 @@ export default function GarageTab() {
           onJobs={setJobs}
           onReceipt={setOne}
           onNeeds={onNeeds}
-          onNext={setLater}
+          onNext={onUpcoming}
         />
 
         {needs > 0 && (
@@ -254,7 +262,7 @@ export default function GarageTab() {
         )}
 
         <Section title="Today">
-          <Today receipts={d.receipts} />
+          <Today receipts={d.receipts} onOpen={setOne} />
         </Section>
 
         <Section title={d.live.length ? `Working now · ${d.live.length}` : 'Working now'}>
@@ -262,8 +270,14 @@ export default function GarageTab() {
         </Section>
 
         <Section title="Coming up">
-          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={setLater} />
+          <ComingUp items={upcoming} loading={d.automations === null || d.followups === null} onOpen={onUpcoming} />
         </Section>
+
+        {d.followups !== null && (
+          <Section title="Follow-ups">
+            <FollowupList pending={d.followups} done={d.done} onOpen={openFollow} />
+          </Section>
+        )}
 
         <Section
           title="Automations"
@@ -277,7 +291,7 @@ export default function GarageTab() {
             ) : d.automations.length === 0 ? (
               <Surface>
                 <ListRow
-                  leading={<View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={RepeatIcon} size={16} color="tube" /></View>}
+                  leading={<View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: c.tubeSoft, alignItems: 'center', justifyContent: 'center' }}><Icon icon={WorkflowIcon} size={16} color="tube" /></View>}
                   title="Nothing runs on its own yet"
                   subtitle="Describe one, or ask a teammate: “every morning at 8, brief me on new mail”."
                   subtitleLines={2}
@@ -303,6 +317,7 @@ export default function GarageTab() {
       <Sheet open={!!one} onClose={closeOne} title={one?.title ?? 'Run'}>
         {one && <ReceiptRow r={one} startOpen />}
       </Sheet>
+      <FollowupSheet key={`f${fsheet.n}`} open={fsheet.open} f={fsheet.f} onClose={closeFollow} />
       <UpcomingSheet item={later} receipts={d.receipts ?? NONE} sample={!!sample} onClose={closeLater} onChanged={onChanged} />
     </View>
   )
@@ -364,9 +379,9 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, due, mode, 
             {busy.length ? (
               <> <Faces people={busy} /> <B>{names(busy.map((t) => t.name))}</B> {busy.length > 1 ? 'are' : 'is'} working right now.</>
             ) : null}
-            {next ? <> Next up <Chip icon={Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
+            {next ? <> Next up <Chip icon={next.reminder ? Notification03Icon : Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
             {found.map((r) => (
-              <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={RepeatIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
+              <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={WorkflowIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
             ))}
             {due.length > 0 && (
               <> <Chip icon={CheckmarkSquare02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
@@ -460,8 +475,9 @@ function Hairline({ inset }: { inset: number }) {
   return <View style={{ height: 1, marginLeft: inset, backgroundColor: c.line }} />
 }
 
-/** Today's finished runs, newest first, in one card. */
-const Today = memo(function Today({ receipts }: { receipts: Receipt[] | null }) {
+/** Today's runs as a timeline, newest first: the time on the left, faces on a thin rail, what came of each run beside
+ * them. Quiet runs sit back; a failed one says why in red. Tap one for the whole reply. */
+const Today = memo(function Today({ receipts, onOpen }: { receipts: Receipt[] | null; onOpen: (r: Receipt) => void }) {
   const [all, setAll] = useState(false)
   if (receipts === null) {
     return <View style={{ paddingHorizontal: 20, gap: 14 }}><Skeleton width="70%" /><Skeleton width="50%" /></View>
@@ -470,18 +486,52 @@ const Today = memo(function Today({ receipts }: { receipts: Receipt[] | null }) 
     return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Nothing has finished yet today. Runs land here with what came of them.</Text>
   }
   const shown = all ? receipts : receipts.slice(0, SHOWN)
+  const more = receipts.length - shown.length
   return (
-    <Surface style={{ marginHorizontal: 16, overflow: 'hidden' }}>
-      <ReceiptList receipts={shown} />
-      {receipts.length > shown.length && (
-        <>
-          <Hairline inset={0} />
-          <Press static onPress={() => setAll(true)} style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
-            <Text variant="label" color="ink2">Show {receipts.length - shown.length} more</Text>
-          </Press>
-        </>
+    <View style={{ paddingHorizontal: 16 }}>
+      {shown.map((r, i) => <Moment key={r.run_id} r={r} last={i === shown.length - 1 && !more} onOpen={onOpen} />)}
+      {more > 0 && (
+        <Press radius={10} static onPress={() => setAll(true)} outerStyle={{ alignSelf: 'flex-start', marginLeft: 82 }}
+          style={{ paddingHorizontal: 8, minHeight: 36, justifyContent: 'center' }}>
+          <Text variant="label" color="ink2">{more} earlier today</Text>
+        </Press>
       )}
-    </Surface>
+    </View>
+  )
+})
+
+const Moment = memo(function Moment({ r, last, onOpen }: { r: Receipt; last: boolean; onOpen: (r: Receipt) => void }) {
+  const { c } = useTheme()
+  const ws = useWorkspace()
+  const tm = ws.teammate(r.teammate_id)
+  const what = r.title ?? (r.trigger === 'schedule' ? 'Scheduled' : r.trigger === 'event' ? 'Event'
+    : r.thread_id.startsWith('dm:') ? 'Asked by you' : ws.threadTitle(r.thread_id))
+  const where = r.apps.map(placeName)
+  const quiet = r.outcome === 'quiet' || r.outcome === 'cancelled'
+  const said = r.outcome === 'quiet' ? (where.length ? `Checked ${list(where)}, nothing new.` : 'Nothing new.')
+    : r.outcome === 'cancelled' ? 'Stopped before it finished.'
+      : r.outcome === 'failed' ? `Couldn’t finish${r.text ? `: ${plain(r.text)}` : '.'}`
+        : r.headline || plain(r.text)
+  return (
+    <Press radius={14} static onPress={() => onOpen(r)} accessibilityLabel={`${clock(new Date(r.at))}. ${what}, ${tm?.name ?? 'a teammate'}. ${said}`}
+      accessibilityHint="Shows the whole reply" style={{ flexDirection: 'row', gap: 12, opacity: quiet ? 0.62 : 1 }}>
+      <Text variant="footnote" color="ink3" tabular numberOfLines={1} style={{ width: 62, textAlign: 'right', paddingTop: 7 }}>{clock(new Date(r.at))}</Text>
+      <View style={{ alignItems: 'center', width: 30 }}>
+        {tm ? <TeammateAvatar teammate={tm} size={30} interactive={false} paused /> : <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: c.panel2 }} />}
+        {r.outcome === 'failed' && <View style={{ position: 'absolute', top: 0, right: -1, width: 10, height: 10, borderRadius: 5, backgroundColor: c.danger, borderWidth: 2, borderColor: c.canvas }} />}
+        {!last && <View style={{ flex: 1, width: 1.5, marginTop: 6, borderRadius: 1, backgroundColor: c.line }} />}
+      </View>
+      <View style={{ flex: 1, minWidth: 0, paddingTop: 5, paddingBottom: last ? 4 : 22, gap: 3 }}>
+        <Text variant="bodyMedium" numberOfLines={1}>{what}<Text variant="body" color="ink3"> · {tm?.name ?? 'A teammate'}</Text></Text>
+        <Text variant="body" color={r.outcome === 'failed' ? 'danger' : 'ink2'} numberOfLines={quiet ? 1 : 2}>{said}</Text>
+        {r.outcome === 'posted' && r.apps.length > 0 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 3 }}>
+            {places(r.apps, 16, undefined)}
+            <Text variant="footnote" color="ink3" tabular>{[r.steps ? plural(r.steps, 'step') : null, took(r.duration_ms)].filter(Boolean).join(' · ')}</Text>
+          </View>
+        )}
+      </View>
+    </Press>
   )
 })
 
@@ -633,10 +683,10 @@ const WorkingNow = memo(function WorkingNow({ live, animate }: { live: Live[]; a
   )
 })
 
-interface Upcoming { key: string; at: string; day: string; time: string; title: string; sub: string; teammate?: string; auto?: Automation; follow?: Followup }
+interface Upcoming { key: string; at: string; day: string; time: string; title: string; sub: string; teammate?: string; auto?: Automation; follow?: Followup; reminder?: Reminder }
 
-/** The next automation runs and follow-ups, soonest first. */
-function comingUp(automations: Automation[] | null, followups: Followup[] | null): Upcoming[] {
+/** The next automation runs, follow-ups and reminders, soonest first. */
+function comingUp(automations: Automation[] | null, followups: Followup[] | null, reminders: Reminder[]): Upcoming[] {
   const out: Upcoming[] = []
   const at = (iso: string) => { const [day, time] = whenLabel(iso).split(', '); return { day, time } }
   for (const a of automations ?? []) {
@@ -650,12 +700,21 @@ function comingUp(automations: Automation[] | null, followups: Followup[] | null
       teammate: f.owner === 'group' ? undefined : f.owner, follow: f,
     })
   }
+  const now = new Date()
+  for (const r of reminders) {
+    if (r.done) continue
+    const next = reminderNext(r, now)
+    if (next < now) continue
+    const iso = next.toISOString()
+    out.push({ key: r.id, at: iso, ...at(iso), title: r.title, sub: 'Reminder', reminder: r })
+  }
   return out.sort((a, b) => a.at.localeCompare(b.at)).slice(0, 5)
 }
 
 /** A short timeline: the time on the left, what and who on the right. Each opens its summary sheet. */
 const ComingUp = memo(function ComingUp({ items, loading, onOpen }: { items: Upcoming[]; loading: boolean; onOpen: (u: Upcoming) => void }) {
   const ws = useWorkspace()
+  const { c } = useTheme()
   if (loading) return <View style={{ paddingHorizontal: 20, gap: 14 }}><Skeleton width="65%" /><Skeleton width="45%" /></View>
   if (!items.length) return <Text variant="body" color="ink3" style={{ paddingHorizontal: 20 }}>Nothing scheduled. Automations and follow-ups show up here before they run.</Text>
   return (
@@ -675,7 +734,8 @@ const ComingUp = memo(function ComingUp({ items, loading, onOpen }: { items: Upc
                 <Text variant="bodyMedium" numberOfLines={1}>{u.title}</Text>
                 <Text variant="caption" color="ink3" numberOfLines={1}>{[tm?.name, u.sub, u.follow && ws.threadTitle(u.follow.thread_id)].filter(Boolean).join(' · ')}</Text>
               </View>
-              {tm && <TeammateAvatar teammate={tm} size={28} interactive={false} paused />}
+              {tm ? <TeammateAvatar teammate={tm} size={28} interactive={false} paused />
+                : u.reminder ? <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c.panel2, alignItems: 'center', justifyContent: 'center' }}><Icon icon={Notification03Icon} size={15} color="ink2" /></View> : null}
             </Press>
           </View>
         )
@@ -704,6 +764,7 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
   const tm = ws.teammate(u?.teammate)
   const a = u?.auto
   const f = u?.follow
+  const rem = u?.reminder
   const prev = a ? receipts.find((r) => r.automation_id === a.id) : undefined
   const health = a ? lastRun(a) : null
   const act = async (work: () => Promise<unknown>) => { if (!sample) { await work(); onChanged() } onClose() }
@@ -715,13 +776,15 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             {tm && <TeammateAvatar teammate={tm} size={32} interactive={false} paused />}
             <Text variant="body" color="ink2" style={{ flex: 1 }}>
-              {tm ? `${tm.name} ` : ''}{a ? `runs it ${day} at ${u.time}` : `checks back ${day} at ${u.time}`}
+              {rem ? `Reminds you ${day} at ${u.time}` : `${tm ? `${tm.name} ` : ''}${a ? `runs it ${day} at ${u.time}` : `checks back ${day} at ${u.time}`}`}
             </Text>
           </View>
           <View>
             {a && <Line label="Repeats" value={whenText(a)} />}
             {a && a.upcoming.length > 1 && <Line label="After that" value={a.upcoming.slice(1).map((x) => whenLabel(x)).join(' · ')} />}
             {f && <Line label="In" value={ws.threadTitle(f.thread_id)} />}
+            {rem && <Line label="Repeats" value={REPEATS.find((x) => x.value === rem.repeat)?.label ?? 'Once'} />}
+            {!!rem?.notes && <Line label="Notes" value={rem.notes} />}
             {health && <Line label="Last time" value={health.text} />}
           </View>
           {a?.instructions ? (
@@ -737,6 +800,8 @@ function UpcomingSheet({ item, receipts, sample, onClose, onChanged }: {
             </View>
           )}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
+            {rem && <Button label="Mark done" size="sm" variant="soft" onPress={() => act(async () => finishReminder(rem))} />}
+            {rem && <Button label="Edit" size="sm" variant="ghost" onPress={() => { onClose(); router.push({ pathname: '/reminder/[id]', params: { id: rem.id } }) }} />}
             {a && <Button label="Run now" size="sm" variant="soft" onPress={() => act(() => runNow(a))} />}
             {a && <Button label="Pause" size="sm" variant="ghost" onPress={() => act(() => setEnabled(a, false))} />}
             {a && <Button label="Edit" size="sm" variant="ghost" onPress={() => { onClose(); openAutomation(a.id) }} />}
@@ -812,11 +877,25 @@ function sampleData(crew: Teammate[], mode: 'busy' | 'calm') {
     auto('sa2', 'Weekly post ideas', s, 'every Monday at 10 AM', ['quiet', 'posted', 'posted'], { next_run: ahead(70), upcoming: [ahead(70), ahead(238)], last_run: past(130), instructions: 'Find 3 post ideas from this week’s AI news.' }),
     auto('sa3', 'Nightly smoke test', q, 'every night at 2 AM', mode === 'calm' ? ['posted', 'posted'] : ['failed', 'failed', 'posted'], { next_run: ahead(9), upcoming: [ahead(9)], last_run: past(320), instructions: 'Open staging, sign in with the test account and check the upload flow.' }),
   ]
+  const F = (id: string, owner: string | null, what: string, extra: Partial<Followup> = {}): Followup => (
+    { id, thread_id: dm(owner), what, owner: owner ?? '', at: null, until: null, check_by: null, poll_hours: null, set_by: '', created: past(600), ...extra })
   const followups: Followup[] = [
-    { id: 'sf1', thread_id: dm(k), what: 'Check if Ravi sent the deck', owner: k ?? '', at: ahead(0.6), until: null, check_by: null, poll_hours: null, set_by: '', created: past(200) },
+    F('sf1', k, 'Check if Ravi sent the deck', { at: ahead(0.6) }),
+    F('sf2', a, 'Ask Priya if the revised quote works', { at: ahead(20) }),
+    F('sf3', b, 'Review PR #142 once CI is green', { until: 'CI on PR #142 passes', poll_hours: 2 }),
+    F('sf4', s, 'Post the launch thread when the blog is live', { until: 'the blog post is published' }),
   ]
+  const done: Followup[] = [
+    F('sd1', a, 'Remind Akhil to sign the lease renewal', { status: 'done', closed: past(240) }),
+    F('sd2', k, 'Confirm Thursday’s call with Ravi', { status: 'fired', closed: past(190) }),
+    F('sd3', q, 'Re-run the smoke test after the deploy', { status: 'cancelled', closed: past(900) }),
+  ]
+  const Rm = (id: string, title: string, at: string, repeat: Reminder['repeat'] = ''): Reminder => (
+    { id, title, notes: '', at, repeat, done: false, done_at: null, created_at: past(3000), updated_at: past(3000) })
+  const reminders: Reminder[] = mode === 'calm' ? [Rm('r1', 'Drink water', ahead(0.4), 'daily')]
+    : [Rm('r1', 'Call Amma', ahead(0.3)), Rm('r2', 'GATE mock test', ahead(14), 'weekly')]
   const todo = (id: string, title: string, due: string): Todo => ({ id, title, due, status: 'todo', notes: '', priority: 0, project_id: null, thread_id: null, added_by: null, assignee: null, labels: [], sort: 0, created_at: past(2000), updated_at: past(2000), completed_at: null } as Todo)
   const todos: Todo[] = mode === 'calm' ? [todo('t1', 'Revise Signals & Systems notes', today)]
     : [todo('t1', 'Fill the GATE correction form', today), todo('t2', 'Pay the electricity bill', yesterday), todo('t3', 'Revise Signals & Systems notes', today)]
-  return { receipts, live, approvals, automations, followups, todos }
+  return { receipts, live, approvals, automations, followups, done, todos, reminders }
 }
