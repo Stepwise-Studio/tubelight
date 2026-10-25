@@ -104,7 +104,7 @@ INTERNAL = {
     "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read",
     "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "open_repo": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
-    "ask_user": "read", "connect_app": "read", "ask_teammate": "read",
+    "ask_user": "read", "connect_app": "read", "ask_teammate": "read", "new_chat": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
@@ -788,6 +788,28 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             description=f"Ask {pm['name']} (their phone, the only one who can use it) to do something on the phone: an "
                         "timer, open an app, get a call/text/WhatsApp/email ready, directions, a calendar "
                         "entry, look through its notifications. Say exactly what and why; they OK it before it happens."))
+
+    if not helper and ctx.thread_id.startswith("dm:"):
+        async def new_chat(title: str, first_message: str = "") -> str:
+            title = " ".join(title.split())[:60]
+            if not title:
+                return "Give the chat a name."
+            mine = await db.select("threads", {"owner_id": f"eq.{ctx.owner_id}", "teammate_id": f"eq.{tm['id']}",
+                                               "kind": "eq.dm", "select": "id,title"})
+            if any((t.get("title") or "").lower() == title.lower() for t in mine):
+                return f"There's already a chat called {title}."
+            t = await db.insert("threads", {"id": f"dm:{tm['id']}:{uuid.uuid4().hex[:8]}", "owner_id": ctx.owner_id,
+                                            "kind": "dm", "teammate_id": tm["id"], "title": title})
+            if first_message.strip():
+                await db.insert("messages", {"thread_id": t["id"], "owner_id": ctx.owner_id, "sender_type": "teammate",
+                                             "teammate_id": tm["id"], "text": first_message.strip()[:4000], "kind": "text"})
+            return f"Made the chat {title}; it's in their chat list with you (tap the chats icon in your header)."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=new_chat, name="new_chat",
+            description="Start a new chat with them, beside this one, for its own topic (a subject, a project, a "
+                        "repo). title: its name, 2 to 5 words. first_message: optional opening line you post there "
+                        "(what the chat is for, what you know so far)."))
 
     others = [m for m in ctx.crew if m["id"] != tm["id"]]
     if not helper and others and ctx.event_type != "delegate":  # one level: a delegated run can't delegate again

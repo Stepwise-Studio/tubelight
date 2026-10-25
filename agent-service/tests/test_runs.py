@@ -395,3 +395,16 @@ async def test_ask_teammate_hands_work_over_and_brings_the_answer_back(api, env,
         await asyncio.sleep(0.25)
     assert [m["text"] for m in fdb.rows("messages", thread_id=f"dm:{dev['id']}")] == ["Is the build green?", "Yes, all green."]
     assert fdb.rows("messages", thread_id=f"dm:{chief['id']}", sender_type="teammate")[-1]["text"] == "Dev says: Yes, all green."
+
+
+async def test_a_teammate_starts_a_named_chat(api, env):
+    fdb, fake = env
+    mira = teammate(fdb, "mira", "IITM study partner")
+    fake.script = [ai(calls=[("new_chat", {"title": "Maths 2", "first_message": "Our Maths 2 chat."})]),
+                   ai(calls=[("new_chat", {"title": "maths 2"})]), ai("Done.")]
+    await api.post(f"/threads/dm:{mira['id']}/messages", json={"text": "make a chat for maths 2"})
+    await settle()
+    made = [t for t in fdb.rows("threads", teammate_id=mira["id"]) if t.get("title")]
+    assert [t["title"] for t in made] == ["Maths 2"]
+    assert fdb.rows("messages", thread_id=made[0]["id"])[0]["text"] == "Our Maths 2 chat."
+    assert "already a chat" in fake.calls[-1][-1].content
