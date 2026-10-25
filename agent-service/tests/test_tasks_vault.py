@@ -139,3 +139,14 @@ async def test_labels_alarms_and_reminders(env):
     assert (await clock.REMINDERS.update(U, r["id"], {"done": True}))["done_at"]
     with pytest.raises(ValueError):
         await clock.REMINDERS.add(U, {"title": "x", "at": "2026-10-13T18:00"})  # no offset
+
+
+async def test_ensure_folder_reuses_and_makes_paths(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(vault, "ROOT", tmp_path)
+    hiring = await vault.add_folder(U, "Hiring")
+    leaf = await vault.ensure_folder(U, "hiring/Resumes Oct/")
+    again = await vault.ensure_folder(U, "Hiring/resumes oct")
+    assert leaf == again and await vault.ensure_folder(U, "") == ""
+    rows = await vault.items(U)
+    assert len([r for r in rows if r["kind"] == "folder"]) == 2
+    assert next(r for r in rows if r["id"] == leaf)["parent"] == hiring["id"]

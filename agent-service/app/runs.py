@@ -44,6 +44,7 @@ async def load_ctx(run_id: str, owner_id: str, thread_id: str, trigger: str, eve
         phone_notes=await phone.has_notes(owner_id),
         phone_mate=await phone.mate(owner_id),
         kb=await _knowledge(owner_id, members),
+        crew=await db.select("teammates", {"owner_id": f"eq.{owner_id}", "select": "id,name,handle,role", "order": "created_at"}),
     )
 
 

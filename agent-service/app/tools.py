@@ -65,11 +65,12 @@ def conversation_stats(rows: list[dict[str, Any]], user_name: str, members: list
 
 
 ATTACH_MAX = 40
+DELEGATE_WAIT_S = 240  # how long ask_teammate waits for the answer before leaving it to the other chat
 ATTACH_BUDGET = 120_000  # characters across one call's files (Gemini reads it all; long files are cut per file)
 
 
-async def attachment_text(owner_id: str, message_id: str, attachment_id: str, name: str, limit: int) -> str:
-    """One Gmail attachment as text: Composio hands back a download link (or a local path from its SDK)."""
+async def attachment_bytes(owner_id: str, message_id: str, attachment_id: str, name: str) -> tuple[bytes, str]:
+    """One Gmail attachment's bytes and mime: Composio hands back a download link (or a local path from its SDK)."""
     import httpx
     from pathlib import Path
     d = await connectors.execute(owner_id, "GMAIL_GET_ATTACHMENT",
@@ -85,6 +86,11 @@ async def attachment_text(owner_id: str, message_id: str, attachment_id: str, na
         data = Path(url).read_bytes()
     else:
         raise RuntimeError("Gmail returned no file")
+    return data, mime
+
+
+async def attachment_text(owner_id: str, message_id: str, attachment_id: str, name: str, limit: int) -> str:
+    data, mime = await attachment_bytes(owner_id, message_id, attachment_id, name)
     return await files.text_of(name, mime, data, limit=limit)
 
 
@@ -95,10 +101,10 @@ def builder(tm: dict) -> bool:
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
-    "web_search": "read", "read_page": "read", "read_attachments": "read",
+    "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read",
     "browser_signin": "read", "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
-    "ask_user": "read", "connect_app": "read",
+    "ask_user": "read", "connect_app": "read", "ask_teammate": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
@@ -501,7 +507,35 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                     return f"### {name}\n(Couldn't read it: {str(e)[:160]})"
         return "\n\n".join(await asyncio.gather(*(one(f) for f in files)))
 
+    async def save_attachments(files: list[dict[str, str]], folder: str = "") -> str:
+        """Gmail attachments → files in their vault (folder made if missing)."""
+        if ctx.only is not None and "gmail" not in ctx.only:
+            return "This automation isn't allowed to use Gmail."
+        files = [f for f in files if isinstance(f, dict) and f.get("message_id") and f.get("attachment_id")][:ATTACH_MAX]
+        if not files:
+            return "Give message_id, attachment_id and file_name for each attachment (from the email's attachmentList)."
+        parent = await vault.ensure_folder(ctx.owner_id, folder)
+        gate, done, failed = asyncio.Semaphore(4), [], []
+
+        async def one(f: dict[str, str]) -> None:
+            name = f.get("file_name") or "attachment"
+            async with gate:
+                try:
+                    data, mime = await attachment_bytes(ctx.owner_id, f["message_id"], f["attachment_id"], name)
+                    done.append((await vault.add_bytes(ctx.owner_id, name, data, parent, mime))["name"])
+                except Exception as e:
+                    failed.append(f"{name} ({str(e)[:100]})")
+        await asyncio.gather(*(one(f) for f in files))
+        where = folder.strip("/") or "the top of their vault"
+        return (f"Saved {len(done)} file(s) to {where}: {', '.join(done)}." if done else "Saved nothing.") + \
+            (f" Couldn't save: {'; '.join(failed)}." if failed else "")
+
     tools += [
+        StructuredTool.from_function(
+            coroutine=save_attachments, name="save_attachments",
+            description="Save Gmail attachments as files in their vault (the Vault tab), up to 40 in one call. files: "
+                        "[{message_id, attachment_id, file_name}] from each email's attachmentList; folder: a folder "
+                        "path like 'Hiring/Resumes Oct' (made if it doesn't exist), empty for the top."),
         StructuredTool.from_function(
             coroutine=read_attachments, name="read_attachments",
             description="Read Gmail attachments (PDF, Word, Excel, PowerPoint, text, images) as text, up to 40 in one "
@@ -733,6 +767,45 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         "timer, open an app, get a call/text/WhatsApp/email ready, directions, a calendar "
                         "entry, look through its notifications. Say exactly what and why; they OK it before it happens."))
 
+    others = [m for m in ctx.crew if m["id"] != tm["id"]]
+    if not helper and others and ctx.event_type != "delegate":  # one level: a delegated run can't delegate again
+        async def ask_teammate(handle: str, request: str) -> str:
+            from . import runs
+            mate = next((m for m in others if m["handle"] == handle.lstrip("@").lower()), None)
+            if not mate:
+                return "No teammate @" + handle.lstrip("@") + ". Pick one of: " + ", ".join("@" + m["handle"] for m in others)
+            thread = f"dm:{mate['id']}"
+            asked = await db.insert("messages", {"thread_id": thread, "owner_id": ctx.owner_id, "sender_type": "teammate",
+                                                 "teammate_id": tm["id"], "text": request[:4000], "kind": "text",
+                                                 "meta": {"delegated": True}})
+            run_id = await runs.start(ctx.owner_id, thread, f"{tm['name']} (your teammate, working for {ctx.user_name}, "
+                                      f"not {ctx.user_name}) asks: {request[:4000]}", trigger="event",
+                                      teammate_id=mate["id"], event_type="delegate", sender=tm["handle"])
+            # ponytail: polls the run row; an event per run would beat a 2 s poll if delegations get frequent
+            for _ in range(DELEGATE_WAIT_S // 2):
+                await asyncio.sleep(2)
+                run = await db.one("runs", {"id": f"eq.{run_id}", "select": "status"})
+                if (run or {}).get("status") != "running":
+                    break
+            status = (run or {}).get("status")
+            if status == "waiting_approval":
+                return (f"{mate['name']} needs {ctx.user_name}'s OK in {mate['name']}'s chat before going on: tell them "
+                        "to look there.")
+            if status == "running":
+                return f"{mate['name']} is still working on it and will answer in their own chat: say so."
+            replies = await db.select("messages", {"thread_id": f"eq.{thread}", "teammate_id": f"eq.{mate['id']}",
+                                                   "created_at": f"gt.{asked['created_at']}", "select": "text",
+                                                   "order": "created_at"})
+            text = "\n\n".join(r["text"] for r in replies if r.get("text"))
+            return f"{mate['name']} answered:\n{text[:6000]}" if text else f"{mate['name']} finished without a reply ({status})."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=ask_teammate, name="ask_teammate",
+            description="Hand a request to another teammate; it works on it in its own chat (with its own apps and "
+                        f"files) and you get its answer back. Teammates: {'; '.join('@' + m['handle'] + ' ' + m['name'] + ' (' + m['role'] + ')' for m in others)}. "
+                        "Use it when the work is theirs; give the whole request and context, as you would to a colleague. "
+                        "Ask several in turn when a task spans them, then put their answers together."))
+
     if not helper:
         async def make_document(kind: str, title: str, content: str) -> str:
             try:
@@ -878,7 +951,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             note = f"\n(Still reading: {', '.join(reading)}; its passages aren't searchable yet.)" if reading else ""
             return ("\n\n".join(knowledge.cite(h) for h in hits) or "Nothing in your knowledge base matches.") + note
 
-        async def vault_files(action: str, path: str = "", query: str = "", folder: str = "") -> str:
+        async def vault_files(action: str, path: str = "", query: str = "", folder: str = "", content: str = "") -> str:
             rows = vault.visible(await vault.items(ctx.owner_id))  # folders they hid from teammates stay out
             by_id = {r["id"]: r for r in rows}
 
@@ -904,9 +977,17 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 q = query.lower().strip()
                 hits = [r for p, r in paths.items() if q and q in p]
                 return "\n".join(line(r) for r in hits[:30]) or f"Nothing in the vault matches {query}."
+            if action == "folder":
+                await vault.ensure_folder(ctx.owner_id, folder or path)
+                return f"Folder {(folder or path).strip('/')} is ready."
+            if action == "write":
+                if not path.strip("/") or not content:
+                    return "write needs path (like 'IITM/Rules.md') and content."
+                *dirs, name = path.strip("/").split("/")
+                row = await vault.add_bytes(ctx.owner_id, name, content.encode(), await vault.ensure_folder(ctx.owner_id, "/".join(dirs)))
+                return f"Wrote {'/'.join([*dirs, row['name']])} to their vault."
             if action == "save":
-                folder_row = paths.get(folder.strip("/").lower()) if folder.strip("/") else None
-                parent = folder_row["id"] if folder_row and folder_row["kind"] == "folder" else ""
+                parent = await vault.ensure_folder(ctx.owner_id, folder)
                 want = path.lower().strip()
                 mine = list(ctx.outgoing.get(tm["id"], []))
                 recent = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "owner_id": f"eq.{ctx.owner_id}",
@@ -929,7 +1010,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 data = await asyncio.to_thread(vault.read_bytes, ctx.owner_id, r["id"])
                 ctx.outgoing.setdefault(tm["id"], []).append(await files.upload(ctx.owner_id, r["name"], data))
                 return f"{r['name']} is attached to your reply."
-            return "action is list, search, read, attach or save."
+            return "action is list, search, read, attach, save, write or folder."
 
         tools += [
             StructuredTool.from_function(
@@ -966,7 +1047,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "(folder: a folder path, or empty for the top) | search (query: part of a name) | read (path: "
                             "a file's path, gives its text: documents as Markdown, sheets as tables with formulas worked "
                             "out, slides as points, images described; work out totals, trends and answers from it) | attach (path: send them the file in your reply) | save (path: "
-                            "the name of a file attached in this chat or one you just made; folder: where, optional)."),
+                            "the name of a file attached in this chat or one you just made; folder: where, made if missing) | write "
+                            "(path: like 'Notes/Plan.md', content: the text; a Markdown/text file, folders made if missing) | "
+                            "folder (folder: a path to create, like 'Hiring/Resumes')."),
         ]
 
     if images.available() and not helper:

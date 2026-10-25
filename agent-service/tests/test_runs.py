@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
@@ -375,3 +377,21 @@ async def test_a_question_written_as_json_becomes_a_card(api, env):
     [q] = fdb.rows("approvals", kind="question")
     assert q["draft"]["options"] == ["You sign in", "Cancel"]
     assert not [m for m in fdb.rows("messages", sender_type="teammate", kind="text") if "{" in (m["text"] or "")]
+
+
+async def test_ask_teammate_hands_work_over_and_brings_the_answer_back(api, env, monkeypatch):
+    from app import tools
+    monkeypatch.setattr(tools, "DELEGATE_WAIT_S", 10)
+    fdb, fake = env
+    chief = teammate(fdb, "max", "Chief of staff")
+    dev = teammate(fdb, "dev", "developer")
+    fake.script = [ai(calls=[("ask_teammate", {"handle": "@dev", "request": "Is the build green?"})]),
+                   ai("Yes, all green."), lambda m: ai("Dev says: " + m[-1].content.split("\n", 1)[1])]
+    await api.post(f"/threads/dm:{chief['id']}/messages", json={"text": "ask dev about the build"})
+    await settle()
+    for _ in range(40):
+        if fdb.rows("messages", thread_id=f"dm:{chief['id']}", sender_type="teammate"):
+            break
+        await asyncio.sleep(0.25)
+    assert [m["text"] for m in fdb.rows("messages", thread_id=f"dm:{dev['id']}")] == ["Is the build green?", "Yes, all green."]
+    assert fdb.rows("messages", thread_id=f"dm:{chief['id']}", sender_type="teammate")[-1]["text"] == "Dev says: Yes, all green."

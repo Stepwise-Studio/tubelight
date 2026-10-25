@@ -156,6 +156,20 @@ async def add_folder(owner_id: str, name: str, parent: str = "", meta: dict[str,
     return {"id": key, **row}
 
 
+async def ensure_folder(owner_id: str, path: str) -> str:
+    """The id of the folder at "A/B/C" (case-insensitive), making the missing ones; "" = the top."""
+    rows = visible(await items(owner_id))  # a teammate never files into a folder the user hid
+    parent = ""
+    for part in [p.strip() for p in path.strip("/").split("/") if p.strip()]:
+        hit = next((r for r in rows if r["kind"] == "folder" and (r.get("parent") or "") == parent
+                    and r["name"].lower() == clean_name(part).lower()), None)
+        if not hit:
+            hit = await add_folder(owner_id, part, parent)
+            rows.append(hit)
+        parent = hit["id"]
+    return parent
+
+
 async def add_file(owner_id: str, name: str, data_path: Path, size: int, parent: str = "", mime: str = "",
                    synced: dict[str, Any] | None = None) -> dict[str, Any]:
     """Takes a file already written to `data_path` (moved into the vault). `synced`: a file from a computer's synced

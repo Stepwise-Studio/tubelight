@@ -70,6 +70,7 @@ class RunCtx:
     ui_snaps: dict[str, str] = field(default_factory=dict)  # computer use: snapshot id -> the app it shows
     phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
     phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
+    crew: list[dict] = field(default_factory=list)  # all their teammates (id, name, handle, role): ask_teammate
     phone_mate: dict | None = None  # the phone's own teammate: the only one with the phone (others: ask_phone)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
 
