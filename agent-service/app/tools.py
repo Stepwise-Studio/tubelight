@@ -102,7 +102,7 @@ INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read",
-    "browser_signin": "read", "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
+    "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "open_repo": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read", "ask_teammate": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
@@ -228,6 +228,8 @@ def title(name: str, args: dict[str, Any]) -> str:
     """Short human sentence for an approval card, e.g. 'Send email to jane@acme.com'."""
     if name == "git_push":
         return f"Push commits to branch {args.get('branch', '?')}"
+    if name == "schedule_post":
+        return f"Post on {args.get('site', '?')} at {str(args.get('when', '?')).replace('T', ' ')}"[:80]
     if name == "computer_run":  # the command itself shows below the title on the card
         what = str(args.get("title") or "").strip().rstrip(".") or "Run a command"
         return f"{what[:1].upper()}{what[1:]}{' (admin)' if args.get('sudo') else ''}"[:80]
@@ -602,7 +604,27 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def browser_commit(snapshot: str, element: str, what: str) -> str:
             return await _b(browser.commit(owner, snapshot, element, tab=tab))
 
+        async def schedule_post(site: str, text: str, when: str) -> str:
+            try:
+                at = _when(when)
+            except ValueError:
+                return "Give the time as their local date and time, like 2026-10-28T09:30."
+            if not at or not datetime.now(UTC) < at < datetime.now(UTC) + timedelta(days=60):
+                return "Pick a time in the future, within the next 60 days."
+            host = browser.site_of(site)
+            await browser.preapprove(owner, tab, host, text, at)
+            await followups.add(ctx.owner_id, ctx.thread_id, tm["id"],
+                                f"Publish this on {host} now, word for word; {ctx.user_name} already approved it, so "
+                                f"browser_use and browser_commit go through without asking:\n\n{text}",
+                                at=at, set_by=f"teammate:{tm['id']}", by=tm["name"], tz=ctx.timezone)
+            return f"Scheduled for {at.astimezone(zone):%a %b %d, %I:%M %p} on {host}; it posts then without asking again."
+
         tools += [
+            StructuredTool.from_function(coroutine=schedule_post, name="schedule_post",
+                description="Schedule a post (a tweet, a LinkedIn post, a reply) to go out later through the browser. They "
+                            "approve the exact text now; at `when` (their local time, like 2026-10-28T09:30) you publish "
+                            "it without asking again, as long as the text is unchanged. site: like x.com. text: the whole "
+                            "post, final."),
             StructuredTool.from_function(coroutine=browser_use, name="browser_use",
                 description="Ask to use Tubelight's web browser on a site for a task (post, reply, fill a form, change a "
                             "setting): once per task, they OK it, then you can act on that site for 20 minutes. Its sign-ins "

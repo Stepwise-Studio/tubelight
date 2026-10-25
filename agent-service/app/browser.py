@@ -25,6 +25,7 @@ import re
 import shutil
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -774,6 +775,31 @@ async def preview(owner_id: str, args: dict, tab: str = "main") -> dict:
     _cleared[(owner_id, tab, sid, element)] = (_fp(url, e, texts), time.time() + 15 * 60)
     return {"site": site_of(url), "button": e["name"] or e["role"], "text": "\n\n".join(texts)[:2000],
             "what": str(args.get("what") or "")[:200], "image": shot_link(owner_id, key)}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+async def preapprove(owner_id: str, tab: str, site: str, text: str, at: datetime) -> None:
+    """A post the user approved ahead of time (schedule_post): its commit, around `at`, needs no second card."""
+    from . import memory
+    await memory.store.aput(("preapproved", owner_id), uuid.uuid4().hex, {
+        "tab": tab, "site": site, "text": _norm(text), "until": (at + timedelta(hours=6)).isoformat()}, index=False)
+
+
+async def preapproved(owner_id: str, tab: str, draft: dict) -> bool:
+    """True (and used up) when the commit about to happen posts a text approved ahead of time on that site."""
+    from . import memory
+    typed = _norm(draft.get("text") or "")
+    for item in await memory.store.asearch(("preapproved", owner_id), limit=100):
+        v = item.value
+        if datetime.fromisoformat(v["until"]) < datetime.now(UTC):
+            await memory.store.adelete(("preapproved", owner_id), item.key)
+        elif v["tab"] == tab and v["site"] == draft.get("site") and v["text"] and v["text"] in typed:
+            await memory.store.adelete(("preapproved", owner_id), item.key)
+            return True
+    return False
 
 
 async def commit(owner_id: str, sid: str, element: str, tab: str = "main") -> dict:

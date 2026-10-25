@@ -163,3 +163,14 @@ async def test_teammates_work_in_parallel_tabs(tmp_path, monkeypatch):
         assert [t["label"] for t in st["tabs"]] == ["A", "B", "C"] and st["tab"] == "a"
     finally:
         await B.stop(owner)
+
+
+async def test_a_scheduled_post_is_preapproved_once_word_for_word(env):
+    from datetime import UTC, datetime, timedelta
+    from app import browser
+    o = "00000000-0000-0000-0000-0000000000aa"
+    await browser.preapprove(o, "sol", "x.com", "Shipping  Tubelight\ntoday", datetime.now(UTC) + timedelta(minutes=5))
+    assert not await browser.preapproved(o, "sol", {"site": "x.com", "text": "Shipping something else"})
+    assert not await browser.preapproved(o, "dev", {"site": "x.com", "text": "shipping tubelight today"})
+    assert await browser.preapproved(o, "sol", {"site": "x.com", "text": "Shipping Tubelight today"})
+    assert not await browser.preapproved(o, "sol", {"site": "x.com", "text": "Shipping Tubelight today"})  # used up
