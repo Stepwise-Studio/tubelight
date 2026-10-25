@@ -408,12 +408,12 @@ class Box:
         await self._ready()
         return await call(self.cid, "box_write", {"key": self.key, "path": path, "content": content})
 
-    async def git_push(self, branch: str) -> str:
+    async def git_push(self, branch: str, path: str = "") -> str:
         await self._ready()
-        auth = ""
+        auth = f"-C {shlex.quote(path)} " if path else ""
         if config.GITHUB_TOKEN:
             basic = base64.b64encode(f"x-access-token:{config.GITHUB_TOKEN}".encode()).decode()
-            auth = f"-c http.extraheader={shlex.quote('AUTHORIZATION: basic ' + basic)} "
+            auth += f"-c http.extraheader={shlex.quote('AUTHORIZATION: basic ' + basic)} "
         return await call(self.cid, "box_exec", {"key": self.key, "cmd": f"git {auth}push origin HEAD:{shlex.quote(branch)}",
                                                  "timeout": 120}, 150)
 

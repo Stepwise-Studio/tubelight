@@ -103,7 +103,7 @@ INTERNAL = {
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read",
     "browser_signin": "read", "browser_use": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
-    "read_file": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
+    "read_file": "read", "open_repo": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read", "ask_teammate": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
@@ -941,12 +941,19 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 return str(e)
             return "action is list, add, update or delete."
 
-        async def knowledge_search(query: str, file: str = "") -> str:
+        async def knowledge_search(query: str, file: str = "", folder: str = "") -> str:
             st = await knowledge.state(tm["id"])
             fid = next((k for k, f in st["files"].items() if file and f["name"].lower() == file.lower()), "")
             if file and not fid:
                 return f"No file named {file} in your knowledge base. It has: " + ", ".join(f["name"] for f in st["files"].values())
-            hits = await knowledge.search(tm["id"], query, limit=6, file=fid)
+            if folder.strip("/") and not fid:
+                ids = knowledge.under(await vault.items(ctx.owner_id), folder, st["files"])
+                if not ids:
+                    return f"Nothing in your knowledge base is in a folder {folder}."
+                per = await asyncio.gather(*(knowledge.search(tm["id"], query, limit=6, file=i) for i in ids[:40]))
+                hits = sorted((h for p in per for h in p), key=lambda h: -(h.get("score") or 0))[:6]
+            else:
+                hits = await knowledge.search(tm["id"], query, limit=6, file=fid)
             reading = [f["name"] for f in st["files"].values() if f.get("reading")]
             note = f"\n(Still reading: {', '.join(reading)}; its passages aren't searchable yet.)" if reading else ""
             return ("\n\n".join(knowledge.cite(h) for h in hits) or "Nothing in your knowledge base matches.") + note
@@ -977,6 +984,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 q = query.lower().strip()
                 hits = [r for p, r in paths.items() if q and q in p]
                 return "\n".join(line(r) for r in hits[:30]) or f"Nothing in the vault matches {query}."
+            if action == "learn":
+                r = paths.get((path or folder).strip("/").lower())
+                if not r:
+                    return f"No file or folder {path or folder} in the vault."
+                st = await knowledge.state(tm["id"])
+                await knowledge.link(ctx.owner_id, tm["id"], [*st["links"], r["id"]])
+                return (f"Added {full(r)} to your knowledge base; reading it now (a big PDF takes a few minutes). "
+                        "Files added to that folder later are learned too.")
             if action == "folder":
                 await vault.ensure_folder(ctx.owner_id, folder or path)
                 return f"Folder {(folder or path).strip('/')} is ready."
@@ -985,6 +1000,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                     return "write needs path (like 'IITM/Rules.md') and content."
                 *dirs, name = path.strip("/").split("/")
                 row = await vault.add_bytes(ctx.owner_id, name, content.encode(), await vault.ensure_folder(ctx.owner_id, "/".join(dirs)))
+                knowledge.sync_later(ctx.owner_id, tm["id"])  # a note written into a folder it learns from
                 return f"Wrote {'/'.join([*dirs, row['name']])} to their vault."
             if action == "save":
                 parent = await vault.ensure_folder(ctx.owner_id, folder)
@@ -1010,7 +1026,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 data = await asyncio.to_thread(vault.read_bytes, ctx.owner_id, r["id"])
                 ctx.outgoing.setdefault(tm["id"], []).append(await files.upload(ctx.owner_id, r["name"], data))
                 return f"{r['name']} is attached to your reply."
-            return "action is list, search, read, attach, save, write or folder."
+            return "action is list, search, read, attach, save, write, folder or learn."
 
         tools += [
             StructuredTool.from_function(
@@ -1040,7 +1056,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "PDFs), read in full. Returns the passages that best match, each with its file and page. "
                             "Use it for anything those files may cover, search again with other words if the first "
                             "passages miss, answer from them and say where (file, page). file: limit to one file's "
-                            "name, optional.")] if tm["id"] in ctx.kb else []),
+                            "name; folder: limit to a vault folder (like 'IITM/Maths 2'); both optional.")] if tm["id"] in ctx.kb else []),
             StructuredTool.from_function(
                 coroutine=vault_files, name="vault",
                 description="Their vault: their own files (photos, PDFs, notes, documents) on their server. action: list "
@@ -1049,7 +1065,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "out, slides as points, images described; work out totals, trends and answers from it) | attach (path: send them the file in your reply) | save (path: "
                             "the name of a file attached in this chat or one you just made; folder: where, made if missing) | write "
                             "(path: like 'Notes/Plan.md', content: the text; a Markdown/text file, folders made if missing) | "
-                            "folder (folder: a path to create, like 'Hiring/Resumes')."),
+                            "folder (folder: a path to create, like 'Hiring/Resumes') | learn (path: a file or folder to add to "
+                            "your knowledge base, read in full and searchable from then on; a folder keeps learning new files)."),
         ]
 
     if images.available() and not helper:
@@ -1377,8 +1394,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def write_file(path: str, content: str) -> str:
             return await box().write_file(path, content)
 
-        async def git_push(branch: str) -> str:
-            out = await box().git_push(branch)
+        async def git_push(branch: str, path: str = "") -> str:
+            out = await box().git_push(branch, path)
             if ctx.project and "[exit code 0]" in out:
                 repo.schedule(ctx.owner_id, ctx.project["id"])  # the repo knowledge catches up with the push
             return out
@@ -1393,9 +1410,26 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             StructuredTool.from_function(coroutine=read_file, name="read_file", description="Read a file under /workspace."),
             StructuredTool.from_function(coroutine=write_file, name="write_file", description="Create or overwrite a file under /workspace."),
         ]
+        if config.GITHUB_TOKEN and isinstance(box(), sandbox.Sandbox):
+            async def open_repo(repo_name: str) -> str:
+                target = repo.parse(repo_name)
+                if not target:
+                    return "Give the repo as owner/name (list their repos with the GitHub tools if unsure)."
+                try:
+                    out = await box().clone(*target, await sandbox.github_identity())
+                except Exception as e:
+                    return f"Couldn't open {repo_name}: {str(e)[:200]}"
+                return f"{out}\nThe repo is at /workspace/{target[1]} (a real clone; commits are theirs). cd there first."
+
+            tools.append(StructuredTool.from_function(coroutine=open_repo, name="open_repo",
+                description="Clone one of their GitHub repos (owner/name, private ones too) into your sandbox at "
+                            "/workspace/<name>, ready to read, change, run, commit and push. Opening it again fetches "
+                            "the latest. Work on a new branch unless they asked otherwise."))
         if not helper and config.GITHUB_TOKEN:  # pushing needs a token with write access; without one, no push
             tools.append(StructuredTool.from_function(coroutine=git_push, name="git_push",
-                description="Push the current HEAD of /workspace to origin/<branch>. Needs the user's approval."))
+                description="Push the current HEAD to origin/<branch>. path: the repo's folder (like /workspace/<name> "
+                            "from open_repo), empty for /workspace. Needs the user's approval. After pushing a branch, "
+                            "open a pull request with the GitHub tools unless they said to push straight to it."))
 
     if not helper and builder(tm) and re.search(r"develop|engineer|program|coder", tm.get("role") or "", re.I):
         async def spawn_helper(task: str) -> str:

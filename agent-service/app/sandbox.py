@@ -114,11 +114,11 @@ class Sandbox:
         if any(self.dir.iterdir()) and not (self.dir / ".git").exists():
             self._exec("git init -q && git add -A && git commit -qm 'Repo as downloaded' --no-gpg-sign", 120)
 
-    def _exec(self, cmd: str, timeout_s: int) -> str:
+    def _exec(self, cmd: str, timeout_s: int, env: dict[str, str] | None = None) -> str:
         if self.container is None:
             self._start()
         wrapped = f"timeout {int(timeout_s)} bash -lc {shlex.quote(cmd)}"
-        code, out = self.container.exec_run(["bash", "-c", wrapped], workdir="/workspace")
+        code, out = self.container.exec_run(["bash", "-c", wrapped], workdir="/workspace", environment=env)
         text = out.decode(errors="replace")
         if code == 124:
             text += f"\n[timed out after {timeout_s}s]"
@@ -150,13 +150,21 @@ class Sandbox:
         p.write_text(content)
         return f"Wrote {len(content)} chars to {path}"
 
-    async def git_push(self, branch: str) -> str:
+    async def git_push(self, branch: str, path: str = "") -> str:
         await self._ready()
-        auth = ""
-        if config.GITHUB_TOKEN:
-            basic = base64.b64encode(f"x-access-token:{config.GITHUB_TOKEN}".encode()).decode()
-            auth = f"-c http.extraheader={shlex.quote('AUTHORIZATION: basic ' + basic)} "
-        return await asyncio.to_thread(self._exec, f"git {auth}push origin HEAD:{shlex.quote(branch)}", 120)
+        where = f"cd {shlex.quote(path)} && " if path else ""
+        return await asyncio.to_thread(self._exec, f"{where}git push origin HEAD:{shlex.quote(branch)}", 120, _auth())
+
+    async def clone(self, owner: str, name: str, who: tuple[str, str]) -> str:
+        """A real clone of github.com/<owner>/<name> into /workspace/<name>, committing as the user."""
+        await self._ready()
+        dest = shlex.quote(name)
+        url = shlex.quote(f"https://github.com/{owner}/{name}.git")
+        cmd = (f"if [ -d {dest}/.git ]; then cd {dest} && git fetch -q origin && git status -sb | head -1; "
+               f"else git clone -q --filter=blob:limit=5m {url} {dest} && cd {dest} && "
+               f"git config user.name {shlex.quote(who[0])} && git config user.email {shlex.quote(who[1])} && "
+               "git log --oneline -3; fi")
+        return await asyncio.to_thread(self._exec, cmd, 300, _auth())
 
     def _close(self) -> str:
         """Returns `git diff` of the workdir, then removes the container."""
@@ -176,6 +184,31 @@ class Sandbox:
 
     async def close(self) -> str:
         return await asyncio.to_thread(self._close)
+
+
+def _auth() -> dict[str, str]:
+    """The GitHub token as git config in the environment of one command (never on a command line or on disk)."""
+    if not config.GITHUB_TOKEN:
+        return {}
+    basic = base64.b64encode(f"x-access-token:{config.GITHUB_TOKEN}".encode()).decode()
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
+
+
+_identity: tuple[str, str] | None = None
+
+
+async def github_identity() -> tuple[str, str]:
+    """(name, email) of the token's GitHub account, so commits are the user's own."""
+    global _identity
+    if _identity is None:
+        import httpx
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get("https://api.github.com/user", headers={"Authorization": f"Bearer {config.GITHUB_TOKEN}"})
+            r.raise_for_status()
+            u = r.json()
+        _identity = (u.get("name") or u["login"], f"{u['id']}+{u['login']}@users.noreply.github.com")
+    return _identity
 
 
 def cleanup_workdir(run_id: str) -> None:

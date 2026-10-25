@@ -50,3 +50,12 @@ async def test_a_study_teammate_answers_from_its_notes(api, env, tmp_path, monke
     st = await knowledge.sync(OWNER, tutor["id"])
     assert st["links"] == []
     assert st["files"] == {} and await knowledge.search(tutor["id"], "DNA") == []
+
+
+def test_under_finds_indexed_files_in_a_folder_at_any_depth():
+    rows = [{"id": "i", "name": "IITM", "parent": ""}, {"id": "m", "name": "Maths 2", "parent": "i"},
+            {"id": "w", "name": "Week 1", "parent": "m"}, {"id": "a", "name": "notes.pdf", "parent": "w"},
+            {"id": "b", "name": "rules.md", "parent": "i"}, {"id": "c", "name": "maths 2.pdf", "parent": ""}]
+    files = {"a": {}, "b": {}, "c": {}}
+    assert knowledge.under(rows, "iitm/maths 2/", files) == ["a"]
+    assert sorted(knowledge.under(rows, "IITM", files)) == ["a", "b"]

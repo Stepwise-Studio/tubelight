@@ -155,6 +155,21 @@ async def search(teammate_id: str, query: str, limit: int = 6, file: str = "") -
     return [{**i.value, "score": i.score} for i in got]
 
 
+def under(rows: list[dict[str, Any]], folder: str, files: dict[str, Any]) -> list[str]:
+    """Ids of the indexed files inside the vault folder at path `folder` (any depth, case-insensitive)."""
+    by_id = {r["id"]: r for r in rows}
+
+    def path(r: dict[str, Any]) -> str:
+        parts, seen = [], set()
+        while r and r["id"] not in seen:
+            seen.add(r["id"])
+            parts.append(r["name"])
+            r = by_id.get(r.get("parent") or "")
+        return "/".join(reversed(parts)).lower()
+    want = folder.strip("/").lower() + "/"
+    return [k for k in files if k in by_id and path(by_id[k]).startswith(want)]
+
+
 def cite(hit: dict[str, Any]) -> str:
     where = f"{hit['name']}" + (f", page {hit['page']}" if hit.get("page") else "")
     return f"[{where}]\n{hit['text']}"
