@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, browser, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, browser, mail, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -101,7 +101,7 @@ def builder(tm: dict) -> bool:
 INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
-    "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read",
+    "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read", "inbox": "read",
     "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "open_repo": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read", "ask_teammate": "read", "new_chat": "read",
@@ -531,6 +531,24 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         where = folder.strip("/") or "the top of their vault"
         return (f"Saved {len(done)} file(s) to {where}: {', '.join(done)}." if done else "Saved nothing.") + \
             (f" Couldn't save: {'; '.join(failed)}." if failed else "")
+
+    if "GMAIL" in ctx.toolkits(tm):
+        async def inbox(days: float = 1, query: str = "") -> str:
+            q = " ".join(filter(None, [f"newer_than:{max(1, round(days * 24))}h" if days else "", query.strip()]))
+            try:
+                mails = await mail.fetch(ctx.owner_id, q or "in:inbox")
+            except Exception as e:
+                return f"Couldn't read Gmail: {str(e)[:200]}"
+            period = f"in the last {days:g} day{'s' if days != 1 else ''}" if days else "matching the search"
+            return mail.digest(mails, ctx.timezone, period + (f" ({query.strip()})" if query.strip() else ""))
+
+        tools.append(StructuredTool.from_function(
+            coroutine=inbox, name="inbox",
+            description="Their whole Gmail inbox for a period in one call: every email (up to 500), mail that may need "
+                        "them one per line (time, sender, subject, preview, unread/important, attachments, ids), "
+                        "promotions/social/updates folded into counts per sender. Use it FIRST for any summary, catch-up "
+                        "or 'anything I need to see' (days: 1 for today, 7 for a week; query: extra Gmail search, like "
+                        "'from:college' or 'is:unread'). Open single emails for detail only when a line isn't enough."))
 
     tools += [
         StructuredTool.from_function(

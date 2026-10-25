@@ -121,6 +121,9 @@ class RunCtx:
 
 
 # ------------------------------------------------------------------ views
+SILENT = re.compile(r"^(QUIET|PASS)[\s.]*$|^(NOT_YET|SKIP)\b")  # replies the app hides (see _stream)
+
+
 def view_for(tm: dict, msgs: list[BaseMessage], members: list[dict]) -> list[BaseMessage]:
     """What one teammate sees of the shared history."""
     who = {m["handle"]: f"{m['name']} · {m['role']}" for m in members}
@@ -132,6 +135,8 @@ def view_for(tm: dict, msgs: list[BaseMessage], members: list[dict]) -> list[Bas
         if isinstance(m, AIMessage) and garbled(m.text):
             # A garbled reply that slipped into the history derails every later call: show a placeholder instead.
             m = m.model_copy(update={"content": "[An earlier reply came out garbled and was dropped.]"})
+        if isinstance(m, AIMessage) and not m.tool_calls and SILENT.match(m.text.strip()):
+            continue  # a reply the user never saw (an automation's QUIET...): kept, a model copies it into chat replies
         if isinstance(m, AIMessage):
             if m.name == tm["handle"]:
                 out.append(m)
@@ -184,7 +189,7 @@ VOICE = """## How you talk (always)
 # App playbooks: how to do the common job well with each app, added when the teammate has it.
 PLAYBOOKS = {
     "GMAIL": """Working with email:
-- "What did I get / summarise my inbox": fetch the messages first (sender, subject, snippet; open a full body only when it decides importance). "Today" means today in the user's time zone.
+- "What did I get / summarise my inbox / anything I need to see": call inbox first (days: 1 today, 7 a week), every time, even if you answered the same question earlier: mail keeps arriving, so an earlier reply is never the answer. Cover the whole period, not a sample; open a full email only when a line doesn't settle its importance. "Today" means today in the user's time zone.
 - Sort into: needs them (a real person waiting on a reply or asking them something, deadlines, bills and payments, unexpected security alerts), worth knowing, and noise (promotions, newsletters, social notifications, automated receipts).
 - Reply shape: a one-line verdict; then each needs-them item as who, what they want, and what you suggest; then one line for worth-knowing; then one line counting the noise ("plus 5 promos and newsletters").
 - Spot follow-ups: threads where they were asked something and haven't replied, or promised something. Offer to draft the reply.
