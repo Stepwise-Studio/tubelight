@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, brief, browser, computers, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
+from . import automations, brief, browser, computers, ground, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ class RunCtx:
     ui_snaps: dict[str, str] = field(default_factory=dict)  # computer use: snapshot id -> the app it shows
     phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
     phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
+    checked: set = field(default_factory=set)  # requests whose data-built reply was already checked (ground.check)
     crew: list[dict] = field(default_factory=list)  # all their teammates (id, name, handle, role): ask_teammate
     phone_mate: dict | None = None  # the phone's own teammate: the only one with the phone (others: ask_phone)
     _tools: dict[str, list[BaseTool]] = field(default_factory=dict)
@@ -604,6 +605,41 @@ def _ids(ctx: RunCtx, tm: dict) -> dict:
     return {"run_id": ctx.run_id, "teammate_id": tm["id"], **({"event_type": ctx.event_type} if ctx.event_type else {})}
 
 
+async def _look_first(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tools: list[BaseTool]) -> dict | None:
+    """On a teammate's first move for a new request: the judge's verdict when it must look first (ground.py), else None."""
+    tail = msgs[-1] if msgs else None
+    if not isinstance(tail, HumanMessage) or tail.name == "system_note" or not tools:
+        return None  # mid-turn (after a tool result or another speaker's reply) or nothing to look with
+    recent = "\n".join(f"{getattr(m, 'name', None) or m.type}: {str(m.content)[:300]}" for m in msgs[-7:-1]
+                       if isinstance(m, (HumanMessage, AIMessage)) and str(m.content).strip())
+    verdict = await ground.judge(tm, [t.name for t in tools], str(tail.content), recent)
+    await db.activity(ctx.owner_id, "event", "grounding", run_id=ctx.run_id, thread_id=ctx.thread_id,
+                      teammate_id=tm["id"], output=verdict)
+    return verdict if verdict["look"] else None
+
+
+async def _checked(ctx: RunCtx, tm: dict, model, convo: list[BaseMessage], view: list[BaseMessage], ai: AIMessage,
+                   stream_id: str) -> tuple[AIMessage, str]:
+    """A reply built on this turn's tool data, checked against that data once before it's saved (ground.check);
+    one that misses or misstates something is redrawn with the problems named."""
+    at = max((i for i, m in enumerate(view) if isinstance(m, HumanMessage) and m.name != "system_note"), default=-1)
+    data = "\n\n".join(str(m.content) for m in view[at + 1:] if isinstance(m, ToolMessage))
+    key = f"{tm['id']}:{at}"
+    if at < 0 or len(data) < ground.DATA_MIN or key in ctx.checked:
+        return ai, stream_id
+    ctx.checked.add(key)
+    verdict = await ground.check(str(view[at].content), data, said(ai))
+    await db.activity(ctx.owner_id, "event", "reply_check", run_id=ctx.run_id, thread_id=ctx.thread_id,
+                      teammate_id=tm["id"], output=verdict)
+    if verdict["ok"]:
+        return ai, stream_id
+    log.warning("%s's reply failed the data check: %s", tm["handle"], verdict["problems"])
+    await db.broadcast(ctx.thread_id, "done", {**_ids(ctx, tm), "stream_id": stream_id, "discarded": True})
+    stream_id = str(uuid.uuid4())
+    await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
+    return await _stream(ctx, tm, model, [*convo, ai, ground.redo(verdict["problems"])], stream_id), stream_id
+
+
 def make_teammate(ctx: RunCtx, tm: dict):
     async def node(state: State) -> dict:
         ctx.scope(state["messages"])
@@ -619,6 +655,10 @@ def make_teammate(ctx: RunCtx, tm: dict):
             await db.update("runs", {"id": f"eq.{ctx.run_id}"}, {"teammate_id": tm["id"]})
         await db.broadcast(ctx.thread_id, "status", ctx.status(tm, "thinking"))
         convo = [SystemMessage(system), *view]
+        look = await _look_first(ctx, tm, msgs, tools)
+        if look:
+            convo.append(ground.note(look["what"]))
+            model = llm.chat_model(tm["model"], tools, size=size, must_use_tool=True)
         for attempt in range(3):
             try:
                 ai = await _stream(ctx, tm, model, convo, stream_id)
@@ -640,6 +680,16 @@ def make_teammate(ctx: RunCtx, tm: dict):
                     "[Note: your last reply called a tool that does not exist or with invalid arguments. Use only the "
                     f"tools you have ({', '.join(t.name for t in tools) or 'none'}) with exactly their parameters, "
                     "or answer in text.]", name="system_note")]
+        if look and not ai.tool_calls:
+            # A model that ignores tool_choice answered without looking: drop it (the app clears the streamed text)
+            # and draw again on the next model, still told to look.
+            log.warning("%s answered without looking; retrying", tm["handle"])
+            await db.broadcast(ctx.thread_id, "done", {**_ids(ctx, tm), "stream_id": stream_id, "discarded": True})
+            stream_id = str(uuid.uuid4())
+            ai = await _stream(ctx, tm, llm.chat_model(tm["model"], tools, size=size, skip=1, must_use_tool=True),
+                               convo, stream_id)
+        if not ai.tool_calls and said(ai).strip():
+            ai, stream_id = await _checked(ctx, tm, model, convo, view, ai, stream_id)
         ai.name = tm["handle"]
         text = said(ai).strip()
         done = {**_ids(ctx, tm), "stream_id": stream_id}

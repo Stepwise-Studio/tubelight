@@ -181,7 +181,7 @@ GROQ_REQUEST_LIMIT = 7000  # tokens: Groq's free tier allows 8k per minute per m
 
 
 def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, size: int = 0, json: bool = False,
-               skip: int = 0) -> Runnable:
+               skip: int = 0, must_use_tool: bool = False) -> Runnable:
     """The model (tools bound) followed by the fallback chain for 429s, 5xx, timeouts and provider errors.
     `skip` drops the first models of the chain (a retry after an empty or cut-off reply goes to the next one).
     Tests monkeypatch this to return a scripted fake."""
@@ -207,7 +207,7 @@ def chat_model(model: str | None = None, tools: list[BaseTool] | None = None, si
         # A stalled or rate-limited model isn't retried when a fallback can answer: the retry only doubles the wait
         # (a 30 s read timeout twice). The last one in the chain gets one retry.
         llm = _one(m, retries=1 if i == len(ids) - 1 else 0)
-        bound = llm.bind_tools(tools) if tools else llm.bind(response_format={"type": "json_object"}) if json else llm
+        bound = llm.bind_tools(tools, **({"tool_choice": "required"} if must_use_tool else {})) if tools else llm.bind(response_format={"type": "json_object"}) if json else llm
         chain.append(RunnableLambda(_text_content) | bound if parse(m)[0] == "cloudflare" else bound)
     return chain[0].with_fallbacks(chain[1:], exceptions_to_handle=(openai.APIError,)) if len(chain) > 1 else chain[0]
 

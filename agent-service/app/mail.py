@@ -12,6 +12,7 @@ from . import connectors
 
 PAGE = 100
 MAX_MAILS = 500
+BATCH = 3  # this many from one sender read as one batch
 FOLDED = {"CATEGORY_PROMOTIONS": "Promotions", "CATEGORY_SOCIAL": "Social", "CATEGORY_UPDATES": "Updates",
           "CATEGORY_FORUMS": "Forums"}
 
@@ -51,6 +52,10 @@ def _who(sender: str) -> str:
     return name or (sender or "unknown")
 
 
+def _at(m: dict[str, Any], zone: ZoneInfo) -> datetime:
+    return datetime.fromisoformat(str(m.get("messageTimestamp", "")).replace("Z", "+00:00")).astimezone(zone)
+
+
 def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
     zone = ZoneInfo(tz)
     unread = sum("UNREAD" in _labels(m) for m in mails)
@@ -63,9 +68,24 @@ def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
             folded.setdefault(cat, {}).setdefault(_who(m.get("sender", "")), []).append(m.get("subject") or "")
         else:
             keep.append(m)
-    lines.append(f"\nMail that may need them ({len(keep)}), newest first:")
+    by_sender: dict[str, list[dict[str, Any]]] = {}
     for m in keep:
-        at = datetime.fromisoformat(str(m.get("messageTimestamp", "")).replace("Z", "+00:00")).astimezone(zone)
+        by_sender.setdefault(str(m.get("sender", "")).lower(), []).append(m)
+    batches = [ms for ms in by_sender.values() if len(ms) >= BATCH]
+    singles = [m for m in keep if len(by_sender[str(m.get("sender", "")).lower()]) < BATCH]
+    lines.append(f"\nMail that may need them ({len(keep)}), newest first:")
+    for ms in sorted(batches, key=len, reverse=True):
+        # A batch from one sender (applications, alerts, a thread) is one item to judge, not N lines to skim past.
+        span = f"{_at(ms[-1], zone):%a %b %d} – {_at(ms[0], zone):%a %b %d}"
+        subjects = list(dict.fromkeys(f"{(m.get('subject') or '(no subject)')[:70]}" + (f" ({_snippet(m)[:60]})" if _snippet(m) else "")
+                                      for m in ms))
+        with_files = sum(bool(m.get("attachmentList")) for m in ms)
+        lines.append(f"- BATCH: {len(ms)} emails from {ms[0].get('sender', '')}, {span}"
+                     + (f", {with_files} with attachments" if with_files else "") + ": "
+                     + "; ".join(subjects[:15]) + (f"; +{len(subjects) - 15} more" if len(subjects) > 15 else "")
+                     + f" (message_ids {', '.join(str(m.get('messageId')) for m in ms[:50])})")
+    for m in singles:
+        at = _at(m, zone)
         flags = [f for f, l in (("unread", "UNREAD"), ("important", "IMPORTANT"), ("starred", "STARRED")) if l in _labels(m)]
         atts = m.get("attachmentList") or []
         names = [f"{a.get('filename') or a.get('name') or 'file'} (attachment_id {a.get('attachmentId') or a.get('id')})"

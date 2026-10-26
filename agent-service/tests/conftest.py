@@ -124,7 +124,16 @@ async def env(monkeypatch):
     from app import brief
     monkeypatch.setattr(brief, "schedule", lambda *a: None)  # tested on its own in test_memory
     fake = FakeLLM(script=[], calls=[])
-    monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None, size=0, json=False, skip=0: fake)
+    monkeypatch.setattr(llm, "chat_model", lambda model=None, tools=None, size=0, json=False, skip=0, must_use_tool=False: fake)
+    from app import ground
+
+    async def no_look(*a):  # the look-first judge is tested on its own (test_ground, evals/grounding.py)
+        return {"look": False, "what": ""}
+    monkeypatch.setattr(ground, "judge", no_look)
+
+    async def fine(*a):
+        return {"ok": True, "problems": []}
+    monkeypatch.setattr(ground, "check", fine)
 
     async def ctx_window(model: str) -> int:
         return 32_000

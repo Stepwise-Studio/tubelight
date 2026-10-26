@@ -25,3 +25,10 @@ def test_hidden_replies_never_reach_the_model_again():
     msgs = [HumanMessage("check mail"), AIMessage("QUIET", name="ivy"), HumanMessage("hello"),
             AIMessage("Pass the details to Tempo.", name="ivy")]
     assert [x.content for x in graph.view_for(tm, msgs, [tm])] == ["check mail", "hello", "Pass the details to Tempo."]
+
+
+def test_a_stack_from_one_sender_reads_as_one_batch():
+    hr = [m(i, ["INBOX", "UNREAD"], "HR <hr@acme.com>", f"Fw: Application – {n}") for i, n in enumerate(["Asha", "Ravi", "Meera"])]
+    out = mail.digest([*hr, m(7, ["INBOX"])], "Asia/Kolkata", "this week")
+    assert "BATCH: 3 emails from HR <hr@acme.com>" in out and "Fw: Application – Ravi" in out
+    assert "message_ids id0, id1, id2" in out and out.count("· Asha <a@x.com> ·") == 1

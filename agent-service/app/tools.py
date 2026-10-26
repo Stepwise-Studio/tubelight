@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, browser, mail, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, browser, mail, results, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -283,7 +283,7 @@ async def run_tool(ctx: RunCtx, tm: dict, tool: BaseTool | None, name: str, args
     t0 = time.monotonic()
     try:
         out = await tool.ainvoke(args)
-        content, status = sandbox.truncate(out if isinstance(out, str) else str(out)), "ok"
+        content, status = results.fit(out), "ok"  # never a silent cut: see results.py
     except Exception as e:
         content, status = f"The tool failed: {e}", "error"
     await db.activity(
