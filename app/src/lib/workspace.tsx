@@ -24,6 +24,8 @@ export interface Workspace {
   pendingApprovals: Approval[]
   /** Runs still going (running or waiting for approval). */
   liveRuns: Run[]
+  /** Goes up on every change to any run (started, finished, failed): pages that summarise runs reload on it. */
+  runTick: number
   /** Latest message per thread id. */
   previews: Record<string, Preview>
   refresh: () => Promise<void>
@@ -76,6 +78,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const [threads, setThreads] = useState<Thread[]>([])
   const [pendingApprovals, setPending] = useState<Approval[]>([])
   const [liveRuns, setLiveRuns] = useState<Run[]>([])
+  const [runTick, setRunTick] = useState(0)
   const [previews, setPreviews] = useState<Record<string, Preview>>({})
   const [offline, setOffline] = useState(false)
   const loaded = useRef(false)
@@ -181,6 +184,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'runs' }, (e) => {
           const row = (e.eventType === 'DELETE' ? e.old : e.new) as Run
+          setRunTick((n) => n + 1)
           setLiveRuns((l) => {
             const rest = l.filter((x) => x.id !== row.id)
             return e.eventType !== 'DELETE' && LIVE.includes(row.status) ? [...rest, row] : rest
@@ -248,7 +252,7 @@ export function WorkspaceProvider({ userId, children }: { userId: string | null;
   const crew = teammates.filter((t) => !isComputer(t) && !isPhone(t))
   return (
     <Ctx value={{
-      loading, error, offline, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, previews,
+      loading, error, offline, teammates: crew, everyone: teammates, projects, members, threads, pendingApprovals, liveRuns, runTick, previews,
       refresh, markRead, teammate, project, thread, membersOf, threadTeammates, threadTitle, isWorking, isThreadLive,
       chatsWith, newChat, renameChat, deleteChat,
     }}>

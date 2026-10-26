@@ -25,6 +25,7 @@ import { openAutomation, runNow, useAutomations, whenText, type Automation } fro
 import { useTodayEvents, type PhoneEvent } from '@/lib/calendar'
 import { finishReminder, reminderNext, REPEATS, useReminders, type Reminder } from '@/lib/clock'
 import { ago, clock, whenLabel } from '@/lib/format'
+import { onReturn } from '@/lib/app-state'
 import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
 import { dueLabel, isoDay, useFollowups, useTodos, type Followup, type Todo } from '@/lib/tasks'
@@ -61,7 +62,7 @@ interface Receipt {
 interface Live { run: Run; doing?: string }
 
 /** What a sheet of runs shows: every run today, or one outcome. */
-type Jobs = 'all' | 'posted' | 'quiet' | 'failed'
+type Jobs = 'all' | 'posted' | 'quiet' | 'failed' | 'found'
 
 const BLUE = ['#3f7cff', '#1f50e3'] as const
 const BLUE_MID = '#2f66f1' // behind inline faces, so their rings melt into the card
@@ -180,13 +181,29 @@ export default function GarageTab() {
     })
   }, [])
 
-  // A run that just finished becomes a receipt (and may have changed an automation's last run).
+  // In step with the server: every change to any run (started, finished, failed, an automation's next slot) reloads
+  // what the card and lists are built from, a moment later so a burst of updates is one reload.
   const running = useMemo(() => ws.liveRuns.filter((r) => r.status === 'running'), [ws.liveRuns])
-  const count = useRef(running.length)
+  const sync = useCallback(() => { loadReceipts(); autos.load(); follow.refresh() }, [loadReceipts, autos, follow])
+  const synced = useRef(ws.runTick)
   useEffect(() => {
-    if (running.length < count.current) { loadReceipts(); autos.load() }
-    count.current = running.length
-  }, [running.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (ws.runTick === synced.current) return
+    synced.current = ws.runTick
+    const t = setTimeout(sync, 800)
+    return () => clearTimeout(t)
+  }, [ws.runTick, sync])
+  useEffect(() => onReturn(sync, 5_000), [sync])
+  // The clock: "next up" drops what has passed, the greeting turns, and at midnight today's receipts start over.
+  const [minute, setMinute] = useState(() => Math.floor(Date.now() / 60_000))
+  useEffect(() => {
+    if (!focused) return
+    const t = setInterval(() => setMinute(Math.floor(Date.now() / 60_000)), 15_000)
+    return () => clearInterval(t)
+  }, [focused])
+  const day = useRef(new Date().toDateString())
+  useEffect(() => {
+    if (new Date().toDateString() !== day.current) { day.current = new Date().toDateString(); sync() }
+  }, [minute, sync])
   const doing = useDoing(running, ws.teammate)
 
   const refresh = async () => {
@@ -207,7 +224,15 @@ export default function GarageTab() {
   // Automations that can't work or stopped on their own need you as much as an approval does.
   const broken = useMemo(() => (d.automations ?? []).filter((a) => a.problems.length
     || (!a.enabled && (a.recent ?? []).length >= 3 && a.recent!.slice(0, 3).every((o) => o === 'failed'))), [d.automations])
-  const upcoming = useMemo(() => comingUp(d.automations, d.followups, d.reminders, d.events), [d.automations, d.followups, d.reminders, d.events])
+  const upcoming = useMemo(() => comingUp(d.automations, d.followups, d.reminders, d.events), [d.automations, d.followups, d.reminders, d.events, minute]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Automations still to run today, soonest first: the card counts them, the sheet lists them.
+  const todays = useMemo(() => {
+    const now = minute * 60_000
+    const end = new Date(now); end.setHours(23, 59, 59, 999)
+    return (d.automations ?? []).filter((a) => a.enabled && a.next_run && new Date(a.next_run) <= end && new Date(a.next_run).getTime() >= now - 60_000)
+      .sort((a, b) => a.next_run!.localeCompare(b.next_run!))
+  }, [d.automations, minute])
+  const [autoSheet, setAutoSheet] = useState(false)
   const due = useMemo(() => (d.todos as Todo[]).filter((t) => t.due && t.status !== 'done' && t.status !== 'canceled' && t.due <= isoDay(new Date())), [d.todos])
   const onHeight = useCallback((h: number) => heroH.set(h), [heroH])
   const onNeeds = useCallback(() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true }), [scroller, insets.top])
@@ -229,7 +254,9 @@ export default function GarageTab() {
           receipts={d.receipts}
           needs={needs}
           live={d.live}
-          next={upcoming[0]}
+          next={upcoming.find((u) => !u.auto)}
+          autos={todays}
+          onAutos={() => setAutoSheet(true)}
           due={due}
           mode={mode}
           onJobs={setJobs}
@@ -314,6 +341,7 @@ export default function GarageTab() {
       <RunSheet r={one} onClose={closeOne} />
       <WorkingSheet l={watching} sample={!!sample} onClose={closeWatching} />
       <EventsSheet open={cal} events={d.events} onClose={() => setCal(false)} />
+      <AutomationsSheet open={autoSheet} items={todays} onClose={() => setAutoSheet(false)} />
       <UpcomingSheet item={later} receipts={d.receipts ?? NONE} sample={!!sample} onClose={closeLater} onChanged={onChanged} />
     </View>
   )
@@ -327,8 +355,9 @@ function B({ children, onPress }: { children: ReactNode; onPress?: () => void })
 }
 
 /** The day in one sentence, its highlights, and the outcome counts; every number opens what's behind it. */
-const Hero = memo(function Hero({ name, receipts, needs, live, next, due, events, mode, onHeight, onJobs, onReceipt, onNeeds, onNext, onEvents }: {
+const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due, events, mode, onHeight, onJobs, onReceipt, onNeeds, onNext, onEvents, onAutos }: {
   name: string | null; receipts: Receipt[] | null; needs: number; live: Live[]; next?: Upcoming; due: Todo[]
+  autos: Automation[]; onAutos: () => void
   events: PhoneEvent[]; onEvents: () => void
   mode: 'busy' | 'calm' | null; onHeight: (h: number) => void; onJobs: (j: Jobs) => void; onReceipt: (r: Receipt) => void
   onNeeds: () => void; onNext: (u: Upcoming) => void
@@ -344,9 +373,8 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, due, events
   for (const r of done) if (r.outcome in counts) counts[r.outcome as keyof typeof counts]++
   const worked = [...new Set(done.flatMap((r) => r.apps))]
   const busy = [...new Map(live.map((l) => [l.run.teammate_id, ws.teammate(l.run.teammate_id)])).values()].filter((t): t is Teammate => !!t)
-  // What automations found today: each one's latest headline.
-  const found = [...new Map([...done].reverse().filter((r) => r.automation_id && r.outcome === 'posted' && r.headline)
-    .map((r) => [r.automation_id, r])).values()].reverse().slice(0, 3)
+  // Automations that had something to tell today: counted here, each one's reply is a tap away in the sheet.
+  const found = new Set(done.filter((r) => r.automation_id && r.outcome === 'posted').map((r) => r.automation_id)).size
   const overdue = due.filter((t) => dueLabel(t.due!).overdue)
 
   return (
@@ -377,9 +405,8 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, due, events
               <> <Faces people={busy} /> <B>{names(busy.map((t) => t.name))}</B> {busy.length > 1 ? 'are' : 'is'} working right now.</>
             ) : null}
             {next ? <> Next up <Chip icon={next.reminder ? BellRingIcon : next.auto ? WorkflowIcon : Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
-            {found.map((r) => (
-              <RNText key={r.run_id}> <Chip tile={r.apps[0] ? <PlaceTile place={r.apps[0]} size={28} onBlue /> : undefined} icon={WorkflowIcon} /> {r.title ?? 'An automation'} found <B onPress={() => onReceipt(r)}>{lowerFirst(r.headline!.replace(/[.\s]+$/, ''))}</B>.</RNText>
-            ))}
+            {found > 0 && <> <Chip icon={WorkflowIcon} /> <B onPress={() => onJobs('found')}>{plural(found, 'automation')}</B> found something for you.</>}
+            {autos.length > 0 && <> <B onPress={onAutos}>{plural(autos.length, 'automation')}</B> {autos.length === 1 ? 'runs' : 'run'} again today, next at <B onPress={onAutos}>{clock(new Date(autos[0].next_run!))}</B>.</>}
             {due.length > 0 && (
               <> <Chip icon={CheckmarkCircle02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
             )}
@@ -421,7 +448,6 @@ function Chip({ icon, tile }: { icon: typeof Calendar03Icon; tile?: ReactNode })
   )
 }
 
-const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) && !/^[A-Z][a-z]+ [A-Z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s)
 
 function Dot() {
   return <View style={{ transform: [{ translateY: -3 }], width: 9, height: 9, borderRadius: 5, backgroundColor: '#ffb020' }} />
@@ -550,8 +576,10 @@ const Moment = memo(function Moment({ r, last, onOpen }: { r: Receipt; last: boo
 function JobsSheet({ which, receipts, onClose, onOpen }: { which: Jobs | null; receipts: Receipt[]; onClose: () => void; onOpen: (r: Receipt) => void }) {
   const [last, setLast] = useState<Jobs>('all')
   if (which && which !== last) setLast(which)
-  const shown = last === 'all' ? receipts : receipts.filter((r) => r.outcome === last)
+  const shown = last === 'all' ? receipts
+    : last === 'found' ? receipts.filter((r) => r.automation_id && r.outcome === 'posted') : receipts.filter((r) => r.outcome === last)
   const title = last === 'all' ? `${plural(shown.length, 'job')} today`
+    : last === 'found' ? 'What automations found today'
     : last === 'posted' ? `${shown.length} posted: they had something to tell you`
       : last === 'quiet' ? `${shown.length} quiet: checked, nothing new` : `${shown.length} failed`
   return (
@@ -821,6 +849,34 @@ function EventsSheet({ open, events, onClose }: { open: boolean; events: PhoneEv
             </Press>
           </View>
         ))}
+      </ScrollView>
+    </Sheet>
+  )
+}
+
+/** Automations still to run today: when, what, who, and how often; each opens its automation. */
+function AutomationsSheet({ open, items, onClose }: { open: boolean; items: Automation[]; onClose: () => void }) {
+  const ws = useWorkspace()
+  return (
+    <Sheet open={open} onClose={onClose} title={`Coming up today · ${items.length}`}>
+      <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingBottom: 8 }}>
+        {items.map((a, i) => {
+          const t = ws.teammate(a.teammate_id)
+          return (
+            <View key={a.id}>
+              {i > 0 && <Hairline />}
+              <Press static onPress={() => { onClose(); openAutomation(a.id) }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12 }}>
+                <Text variant="bodyMedium" tabular style={{ width: 74 }}>{clock(new Date(a.next_run!))}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text variant="bodyMedium" numberOfLines={2}>{a.name}</Text>
+                  <Text variant="caption" color="ink3" numberOfLines={1}>{[t?.name, whenText(a)].filter(Boolean).join(' · ')}</Text>
+                </View>
+                {t && <TeammateAvatar teammate={t} size={28} interactive={false} paused />}
+              </Press>
+            </View>
+          )
+        })}
       </ScrollView>
     </Sheet>
   )
