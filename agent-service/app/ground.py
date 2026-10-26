@@ -58,18 +58,34 @@ Flag only what matters to the user:
   them, a batch of applications, a deadline, a payment, a conflict), left out or brushed off as unimportant;
 - wrong: a claim the data contradicts (a count, a name, a date, "nothing needs you" when something does);
 - partial: the reply presents data as complete when the data says items were not shown or cut.
+A claim is wrong only if the data shows otherwise; if the data simply doesn't cover it, say nothing about it.
 Don't flag style, length, tone, or details the user wouldn't care about. If the reply is fair to the data, it's ok.
 
 Reply with JSON only: {"ok": true|false, "problems": ["<one short line each>"]}"""
 
 DATA_MIN = 1500  # tool output this small (a saved to-do, a short lookup) isn't worth a second opinion
+CHECK_DATA = 120_000  # characters of data the checker reads (~30k tokens; every tool result fits several times)
+# Composio's tool finder and schemas: how to call things, not data about the user. The checker never sees them.
+META = {"COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MANAGE_CONNECTIONS"}
+
+
+def turn_data(msgs: list[Any]) -> str:
+    """The data a reply can be built on: this turn's tool results, without the tool-finding chatter."""
+    from langchain_core.messages import ToolMessage
+    return "\n\n".join(str(m.content) for m in msgs if isinstance(m, ToolMessage) and m.name not in META)
 
 
 async def check(request: str, data: str, reply: str) -> dict[str, Any]:
     """{"ok": bool, "problems": [...]}; ok when the checker itself fails (it never blocks a reply on its own outage)."""
-    prompt = f"The request:\n{request[:2000]}\n\nThe data its tools returned:\n{data[:20000]}\n\nThe reply:\n{reply[:6000]}"
+    clipped = len(data) > CHECK_DATA
+    prompt = (f"The request:\n{request[:2000]}\n\nThe data its tools returned"
+              + (f" (only the first {CHECK_DATA} of {len(data)} characters are shown here: never call a claim wrong "
+                 "or made up because you can't see it)" if clipped else "")
+              + f":\n{data[:CHECK_DATA]}\n\nThe reply:\n{reply[:6000]}")
     try:
-        out = await llm.chat_model(config.ROUTER_MODEL, json=True).ainvoke([SystemMessage(CHECK), HumanMessage(prompt)])
+        # sized, so a big week of data goes to a model that can hold all of it (Groq's free tier can't)
+        model = llm.chat_model(config.ROUTER_MODEL, json=True, size=(len(prompt) + len(CHECK)) // 4)
+        out = await model.ainvoke([SystemMessage(CHECK), HumanMessage(prompt)])
         text = out.text if isinstance(out.text, str) else str(out.content)
         d = json.loads(text[text.find("{"):text.rfind("}") + 1])
         problems = [str(p)[:300] for p in d.get("problems") or []][:6]

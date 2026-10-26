@@ -623,7 +623,7 @@ async def _checked(ctx: RunCtx, tm: dict, model, convo: list[BaseMessage], view:
     """A reply built on this turn's tool data, checked against that data once before it's saved (ground.check);
     one that misses or misstates something is redrawn with the problems named."""
     at = max((i for i, m in enumerate(view) if isinstance(m, HumanMessage) and m.name != "system_note"), default=-1)
-    data = "\n\n".join(str(m.content) for m in view[at + 1:] if isinstance(m, ToolMessage))
+    data = ground.turn_data(view[at + 1:])
     key = f"{tm['id']}:{at}"
     if at < 0 or len(data) < ground.DATA_MIN or key in ctx.checked:
         return ai, stream_id

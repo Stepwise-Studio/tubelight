@@ -48,9 +48,9 @@ async def probe(owner: str, handle: str) -> dict:
             run = t and tc["name"] not in SKIP and graph.T.classify_call(tc["name"], tc["args"]) != "act"
             res = graph.T.results.fit(await t.ainvoke(tc["args"])) if run else "[skipped in the eval]"
             data += bool(run and len(str(res)) > 80 and "fail" not in str(res)[:80].lower())
-            convo.append(ToolMessage(res, tool_call_id=tc["id"]))
+            convo.append(ToolMessage(res, tool_call_id=tc["id"], name=tc["name"]))
     reply = graph.said(convo[-1])
-    seen = "\n\n".join(str(m.content) for m in convo if isinstance(m, ToolMessage))
+    seen = ground.turn_data(convo)
     first = await ground.check(request, seen, reply) if len(seen) >= ground.DATA_MIN else {"ok": True, "problems": []}
     redrawn = not first["ok"]
     if redrawn:  # as in a chat: one redraw with the problems named (graph._checked)
