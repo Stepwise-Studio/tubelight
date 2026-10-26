@@ -2,7 +2,7 @@
 that needs fresh data, run the way a chat runs it (look-first judge → forced first tool call). Tools that act
 (send, post, push...) and ask_teammate (it would post in another chat) are not run; they return "[skipped]".
 Nothing is written to any chat. Run inside the server container:
-    docker exec -w /srv tubelight-agent python -m evals.crew <owner_id> [handle ...]
+    docker exec -w /srv tubelight-agent python -m evals.crew <owner_id> [handle ...] [x3]   (x3: each probe 3 times)
 Checks per probe: the judge said look, the first move was a tool call, a data tool returned something, the reply
 isn't the stale answer planted in history (where one is). Read the replies too: the checks can't judge accuracy."""
 import asyncio
@@ -70,26 +70,30 @@ async def probe(owner: str, handle: str) -> dict:
             "still wrong": final["problems"]}
 
 
-async def main(owner: str, handles: list[str]) -> None:
+async def main(owner: str, handles: list[str], times: int) -> None:
     total = passed = 0
     for h in handles:
-        try:
-            r = await probe(owner, h)
-        except Exception as e:
-            print(f"\n{h}: ERROR {str(e)[:300]}")
-            continue
-        ok = sum(r["checks"].values())
-        total, passed = total + len(r["checks"]), passed + ok
-        print(f"\n{h}: {ok}/{len(r['checks'])} calls={r['calls']}")
-        if r["redrawn"]:
-            print(f"  (first draft redrawn: {'; '.join(r['redrawn'])})")
-        if r["still wrong"]:
-            print(f"  (grader: {'; '.join(r['still wrong'])})")
-        for k, v in r["checks"].items():
-            print(f"  {'✓' if v else '✗'} {k}")
-        print("  " + r["reply"][:900].replace("\n", "\n  "))
+        rates: dict[str, int] = {}
+        for n in range(times):
+            try:
+                r = await probe(owner, h)
+            except Exception as e:
+                print(f"\n{h} #{n + 1}: ERROR {str(e)[:300]}")
+                continue
+            for k, v in r["checks"].items():
+                rates[k] = rates.get(k, 0) + v
+            total, passed = total + len(r["checks"]), passed + sum(r["checks"].values())
+            print(f"\n{h} #{n + 1}: {sum(r['checks'].values())}/{len(r['checks'])} calls={r['calls']}")
+            if r["redrawn"]:
+                print(f"  (first draft redrawn: {'; '.join(r['redrawn'])})")
+            if r["still wrong"]:
+                print(f"  (grader: {'; '.join(r['still wrong'])})")
+            print("  " + r["reply"][:500].replace("\n", "\n  "))
+        print(f"{h}: " + " · ".join(f"{k} {v}/{times}" for k, v in rates.items()))
     print(f"\nTOTAL {passed}/{total}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1], sys.argv[2:] or list(PROBES)))
+    args = [a for a in sys.argv[2:] if not a.startswith("x")]
+    times = next((int(a[1:]) for a in sys.argv[2:] if a.startswith("x")), 1)
+    asyncio.run(main(sys.argv[1], args or list(PROBES), times))

@@ -8,7 +8,7 @@ import ast
 import json
 from typing import Any
 
-BUDGET = 24_000  # characters of one tool result (~6k tokens)
+BUDGET = 40_000  # characters of one tool result (~10k tokens; bigger requests route past Groq, llm.chat_model size)
 STEPS = (2000, 600, 200, 80)
 
 
@@ -24,6 +24,15 @@ def _parse(s: str) -> Any:
         return ast.literal_eval(s)  # Composio's LangChain tools hand back a Python repr
     except (ValueError, SyntaxError, MemoryError, RecursionError):
         return None
+
+
+def _bare(v: Any) -> Any:
+    """Without empty fields (None, "", [], {}): lossless, and API results are full of them."""
+    if isinstance(v, dict):
+        return {k: b for k, x in v.items() if (b := _bare(x)) not in (None, "", [], {})}
+    if isinstance(v, (list, tuple)):
+        return [_bare(x) for x in v]
+    return v
 
 
 def _cap(v: Any, n: int, cut: list[int]) -> Any:
@@ -68,6 +77,10 @@ def fit(out: Any, budget: int = BUDGET) -> str:
     s = _dump(data)
     if len(s) <= budget:
         return text if text is not None and len(text) <= budget else s
+    data = _bare(data)
+    s = _dump(data)
+    if len(s) <= budget:
+        return s
     notes, shrunk = [], data
     for n in STEPS:
         cut = [0]
@@ -94,4 +107,6 @@ def fit(out: Any, budget: int = BUDGET) -> str:
         if lost:
             notes.append("NOT SHOWN: " + "; ".join(lost) + ". Don't present this as complete: page through, ask for "
                          "fewer fields or a narrower range, or say how much you saw")
-    return s + "\n[RESULT COMPACTED: " + "; ".join(notes) + ".]"
+    if any(n.startswith("NOT SHOWN") for n in notes):
+        return s + "\n[RESULT COMPACTED: " + "; ".join(notes) + ".]"
+    return s + "\n[Complete: " + "; ".join(notes) + ".]"  # nothing missing: never read as partial

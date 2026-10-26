@@ -13,7 +13,7 @@ def test_small_results_pass_through():
 
 def test_long_fields_shrink_but_every_item_stays():
     out = results.fit(str(mails(50)))  # a Python repr, as Composio's tools return it
-    data = json.loads(out.split("\n[RESULT COMPACTED")[0])
+    data = json.loads(out.split("\n[Complete")[0])
     assert len(data["data"]["messages"]) == 50 and data["data"]["messages"][49]["subject"] == "S49"
     assert "every item is here" in out and len(out) < results.BUDGET + 300
 

@@ -193,6 +193,8 @@ VOICE = """## How you talk (always)
 PLAYBOOKS = {
     "GMAIL": """Working with email:
 - "What did I get / summarise my inbox / anything I need to see": call inbox first (days: 1 today, 7 a week), every time, even if you answered the same question earlier: mail keeps arriving, so an earlier reply is never the answer. Cover the whole period, not a sample; open a full email only when a line doesn't settle its importance. "Today" means today in the user's time zone.
+- A BATCH line is many mails from one sender read as one item: when it's people (applications, candidates, forwards, a
+  thread), always say it with its count, near the top.
 - Sort into: needs them (a real person waiting on a reply or asking them something, deadlines, bills and payments, unexpected security alerts), worth knowing, and noise (promotions, newsletters, social notifications, automated receipts).
 - Reply shape: a one-line verdict; then each needs-them item as who, what they want, and what you suggest; then one line for worth-knowing; then one line counting the noise ("plus 5 promos and newsletters").
 - Spot follow-ups: threads where they were asked something and haven't replied, or promised something. Offer to draft the reply.
