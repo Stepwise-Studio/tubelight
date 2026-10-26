@@ -73,7 +73,7 @@ def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
         by_sender.setdefault(str(m.get("sender", "")).lower(), []).append(m)
     batches = [ms for ms in by_sender.values() if len(ms) >= BATCH]
     singles = [m for m in keep if len(by_sender[str(m.get("sender", "")).lower()]) < BATCH]
-    lines.append(f"\nMail that may need them ({len(keep)}), newest first:")
+    lines.append(f"\nPeople and services, not promotions/social/updates ({len(keep)}), newest first; judge each:")
     for ms in sorted(batches, key=len, reverse=True):
         # A batch from one sender (applications, alerts, a thread) is one item to judge, not N lines to skim past.
         span = f"{_at(ms[-1], zone):%a %b %d} – {_at(ms[0], zone):%a %b %d}"

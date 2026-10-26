@@ -17,6 +17,7 @@ SUPABASE_DB_URL = env("SUPABASE_DB_URL")
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")  # GROQ_/GEMINI_/MISTRAL_API_KEY and LLM_FALLBACKS: see llm.py
 DEFAULT_MODEL = env("DEFAULT_MODEL", "openrouter:nvidia/nemotron-3-super-120b-a12b:free")
 ROUTER_MODEL = env("ROUTER_MODEL", DEFAULT_MODEL)
+CHECK_MODEL = env("CHECK_MODEL", DEFAULT_MODEL)  # ground.check: Flash-Lite judged stakes best (evals/grounding.py)
 LEARN_MODEL = env("LEARN_MODEL", "gemini:gemini-3.5-flash-lite")
 MEM_MODEL = env("MEM_MODEL", LEARN_MODEL)  # memory v2 extraction + profiles (mem.py), JSON mode
 KEEPER_MODEL = env("KEEPER_MODEL", LEARN_MODEL)  # brief + follow-up reconciliation after each reply (brief.py)

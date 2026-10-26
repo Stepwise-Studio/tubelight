@@ -15,7 +15,7 @@ def test_digest_lists_real_mail_and_folds_the_noise():
              m(9, ["CATEGORY_UPDATES", "IMPORTANT"], "Bank <b@x>", "OTP")]
     out = mail.digest(mails, "Asia/Kolkata", "in the last 7 days")
     assert out.startswith("6 emails in the last 7 days (1 unread).")
-    assert "Mail that may need them (2)" in out and "Sat Oct 24 03:00 PM · Asha <a@x.com> · Hi — Can we meet Tuesday?" in out
+    assert "People and services, not promotions/social/updates (2)" in out and "Sat Oct 24 03:00 PM · Asha <a@x.com> · Hi — Can we meet Tuesday?" in out
     assert "cv.pdf (attachment_id A1)" in out and "(message_id id1)" in out and "OTP" in out
     assert "Promotions (4): Rapido ×4 (Deal 2)" in out
 

@@ -6,6 +6,7 @@ Nothing is written to any chat. Run inside the server container:
 Checks per probe: the judge said look, the first move was a tool call, a data tool returned something, the reply
 isn't the stale answer planted in history (where one is). Read the replies too: the checks can't judge accuracy."""
 import asyncio
+import re
 import sys
 import uuid
 
@@ -14,6 +15,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from app import db, graph, ground, llm, runs
 
 STALE = "Quiet week, nothing needs you: 8 newsletters and promos, no urgent items."
+# Facts from the user's real data that a fair reply must carry (dated: the inbox moves on, refresh them when it does).
+MUST = {"ivy": (r"applica", 400), "tempo": (r"TDS Project 1", 2000)}  # handle: (pattern, within the first N chars)
 PROBES = {  # handle: (request, stale answer planted before it, or "")
     "ivy": ("Could you look at my inbox of the last week and summarise it and let me know if anything needs my attention", STALE),
     "tempo": ("What's on my calendar this week?", ""),
@@ -60,6 +63,9 @@ async def probe(owner: str, handle: str) -> dict:
     checks = {"judge said look": verdict["look"], "first move was a tool": bool(calls),
               "a data tool answered": data > 0, "not the stale answer": not stale or stale[:20] not in reply,
               "final reply fair to the data (grader)": final["ok"]}
+    if handle in MUST:
+        pat, within = MUST[handle]
+        checks[f"says '{pat}' early (ground truth)"] = bool(re.search(pat, reply[:within], re.I))
     return {"checks": checks, "calls": calls, "reply": reply, "redrawn": first["problems"] if redrawn else [],
             "still wrong": final["problems"]}
 

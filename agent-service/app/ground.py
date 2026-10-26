@@ -52,16 +52,23 @@ def note(what: str) -> HumanMessage:
 
 
 CHECK = """You check an AI teammate's reply against the data its tools returned for this request, before the user reads it.
-
-Flag only what matters to the user:
-- missed: something in the data that the request asked about and the user would want to know (a person waiting on
-  them, a batch of applications, a deadline, a payment, a conflict), left out or brushed off as unimportant;
+The teammate's job is judgement: lead with what matters, fold routine things into a line or leave them out. Protect
+that. List problems, each with its stakes:
+- missed: something in the data the reply leaves out or brushes off;
 - wrong: a claim the data contradicts (a count, a name, a date, "nothing needs you" when something does);
-- partial: the reply presents data as complete when the data says items were not shown or cut.
-A claim is wrong only if the data shows otherwise; if the data simply doesn't cover it, say nothing about it.
-Don't flag style, length, tone, or details the user wouldn't care about. If the reply is fair to the data, it's ok.
+- partial: the reply calls the data complete when the data itself says items were not shown or were cut.
 
-Reply with JSON only: {"ok": true|false, "problems": ["<one short line each>"]}"""
+stakes "high" ONLY when the user would act on it and lose something by not hearing it: a real person waiting on a
+reply, a batch of job applications or candidates, a deadline or exam, money they owe (not $0), a meeting clash or a
+meeting they'd miss, a security alert about something they didn't do, a false claim of any kind about those, and
+any "partial" (calling data complete, "that's everything", when the data says items were not shown).
+stakes "low" for everything else, for example: one-time or sign-in codes they asked for, $0 invoices, receipts,
+newsletters, promotions, changelogs, maintenance notices, holidays, a GitHub run on their own repo, ordering, wording.
+A specific claim the data doesn't contain (a meeting, a person, a date, an amount) is made up: kind "wrong", stakes
+"high", unless you were told the data shown to you is cut, in which case say nothing about what you can't see.
+
+Reply with JSON only: {"problems": [{"kind": "missed|wrong|partial", "what": "<one short line>", "stakes": "high|low"}]}
+An empty list when the reply is fair to the data."""
 
 DATA_MIN = 1500  # tool output this small (a saved to-do, a short lookup) isn't worth a second opinion
 CHECK_DATA = 120_000  # characters of data the checker reads (~30k tokens; every tool result fits several times)
@@ -79,17 +86,20 @@ async def check(request: str, data: str, reply: str) -> dict[str, Any]:
     """{"ok": bool, "problems": [...]}; ok when the checker itself fails (it never blocks a reply on its own outage)."""
     clipped = len(data) > CHECK_DATA
     prompt = (f"The request:\n{request[:2000]}\n\nThe data its tools returned"
-              + (f" (only the first {CHECK_DATA} of {len(data)} characters are shown here: never call a claim wrong "
-                 "or made up because you can't see it)" if clipped else "")
+              + (f" (CUT: only the first {CHECK_DATA} of {len(data)} characters are shown here, so never call a "
+                 "claim wrong or made up because you can't see it)" if clipped else " (all of it)")
               + f":\n{data[:CHECK_DATA]}\n\nThe reply:\n{reply[:6000]}")
     try:
         # sized, so a big week of data goes to a model that can hold all of it (Groq's free tier can't)
-        model = llm.chat_model(config.ROUTER_MODEL, json=True, size=(len(prompt) + len(CHECK)) // 4)
+        model = llm.chat_model(config.CHECK_MODEL, json=True, size=(len(prompt) + len(CHECK)) // 4)
         out = await model.ainvoke([SystemMessage(CHECK), HumanMessage(prompt)])
         text = out.text if isinstance(out.text, str) else str(out.content)
         d = json.loads(text[text.find("{"):text.rfind("}") + 1])
-        problems = [str(p)[:300] for p in d.get("problems") or []][:6]
-        return {"ok": bool(d.get("ok")) or not problems, "problems": problems}
+        items = [p for p in d.get("problems") or [] if isinstance(p, dict)]
+        # Only what the user would lose by not hearing earns a redraw: a fussy checker flattens a teammate's judgement.
+        problems = [f"{p.get('kind', 'missed')}: {str(p.get('what', ''))[:280]}" for p in items if p.get("stakes") == "high"][:3]
+        return {"ok": not problems, "problems": problems,
+                "minor": [str(p.get("what", ""))[:200] for p in items if p.get("stakes") != "high"][:5]}
     except Exception as e:
         log.warning("reply check failed, letting the reply through: %s", str(e)[:200])
         return {"ok": True, "problems": []}
