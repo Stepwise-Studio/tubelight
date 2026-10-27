@@ -219,10 +219,10 @@ def _read(dest: str, root: str) -> list[dict]:
                         loop.quit()
             bus.call(dest, path, iface, method, args, None, 0, 3000, None, done)
 
-        def visit(path: str, order: tuple, depth: int, parent: str) -> None:
+        def visit(path: str, order: tuple, depth: int, parent: str, web: bool = False) -> None:
             if len(nodes) >= MAX_NODES or depth > MAX_DEPTH:
                 return
-            n = nodes[path] = {"path": path, "order": order, "depth": depth, "parent": parent}
+            n = nodes[path] = {"path": path, "order": order, "depth": depth, "parent": parent, "web": web}
             got: dict = {}
 
             def part(key):
@@ -239,10 +239,15 @@ def _read(dest: str, root: str) -> list[dict]:
 
         def basics(n: dict, got: dict) -> None:
             states = _state_names(got["state"][0]) if got["state"] else set()
-            if n["depth"] and ("showing" not in states or "visible" not in states) or not got["role"]:
+            role = _role(got["role"][0]) if got["role"] else ""
+            # Browsers leave "showing" off a page's containers even when they're on screen: inside a web page, walk
+            # through them (the cap on nodes still holds) and list only what's on screen.
+            web = n["web"] or role in ("document web", "document frame")
+            if not role or n["depth"] and ("visible" not in states or "showing" not in states and not n["web"]):
                 n["skip"] = True
                 return
-            role, ifaces = _role(got["role"][0]), set(got["ifaces"][0] if got["ifaces"] else ())
+            n["web"], n["hidden"] = web, "showing" not in states
+            ifaces = set(got["ifaces"][0] if got["ifaces"] else ())
             n.update(role=role, states=states, ifaces=ifaces, names=[],
                      name=" ".join(str(got["name"][0] if got["name"] else "").split())[:120])
             if n["depth"]:
@@ -262,7 +267,7 @@ def _read(dest: str, root: str) -> list[dict]:
                     call(path, PROPS, "Get", GLib.Variant("(ss)", (I_TEXT, "CharacterCount")), count)
             for i, (d, p) in enumerate((got["kids"][0] if got["kids"] else [])[:400]):
                 if d == dest and p not in nodes:
-                    visit(p, n["order"] + (i,), n["depth"] + 1, n["name"])
+                    visit(p, n["order"] + (i,), n["depth"] + 1, n["name"], n["web"])
 
         visit(root, (), 0, "")
         stop = GLib.timeout_source_new(5000)
@@ -279,7 +284,7 @@ def _read(dest: str, root: str) -> list[dict]:
 def _walk(dest: str, root: str, pid: int) -> list[dict]:
     out: list[dict] = []
     for n in _read(dest, root):
-        if not n["depth"]:
+        if not n["depth"] or n.get("hidden"):
             continue
         acts, value = _actions(n["names"], n["ifaces"], n["role"], n["states"]), _value(n)
         echo = not acts and not value and n["name"] == n["parent"]  # a label repeating its button's name
@@ -622,25 +627,56 @@ def keys(sequence: list[str], app_name: str = "") -> dict:
 
 
 # ------------------------------------------------------------------ launching
+def _flat(t: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
+
+
 def launch(name: str) -> dict:
-    """Opens an app by name (as its menu entry calls it) and waits for its window."""
-    if any(name.lower() in a["app"].lower() for a in apps()):
-        return {"status": "running", **observe(name)}
+    """Opens an app by name (as its menu entry calls it), or brings its window to the front if it's already open
+    (an app like Firefox or Zen hands a second start to the window it has). Never waits more than 4 s: a slow app
+    comes back as "starting"."""
     hits = [h for group in Gio.DesktopAppInfo.search(name) for h in group]
     info = next((Gio.DesktopAppInfo.new(h) for h in hits if Gio.DesktopAppInfo.new(h)), None)
+    keys = {_flat(name)} | ({_flat(info.get_id().removesuffix(".desktop")), _flat(info.get_startup_wm_class() or ""),
+                             _flat(info.get_name())} if info else set())
+    keys.discard("")
+    same = lambda *labels: any(k and l and (k in l or l in k) for k in keys for l in map(_flat, labels))  # noqa: E731
+    try:
+        wins = _shell("List")["windows"]
+    except RuntimeError:
+        wins = None  # no window control here: AT-SPI's app names only
+    mine = [w for w in wins or [] if same(w["app"], w["title"].rsplit("—", 1)[-1], w["title"].rsplit(" - ", 1)[-1])]
+    running = mine or [a for a in apps() if same(a["app"])]
+    if running:
+        if mine:
+            _shell("Place", {"id": mine[-1]["id"], "focus": True})
+        if mine:  # browsers draw windows in one process and talk to accessibility from another: match by name too
+            app = next((a["app"] for a in apps() if a["pid"] == mine[-1]["pid"] or same(a["app"])), None)
+            return {"status": "running", **(_s(lambda: observe(app), {"app": app}) if app else {"app": mine[-1]["app"]})}
+        return {"status": "running", **_look_pid(running[0]["pid"])}
     if not info:
         raise LookupError(f"No app called {name!r} is installed.")
-    before = {a["app"] for a in apps()}
-    import subprocess  # its own session, nothing of ours inherited (a launched app outlives this call)
+    before_wins = {w["id"] for w in wins or []}
+    before_apps = {a["pid"] for a in apps()}
     subprocess.Popen(["gtk-launch", info.get_id()], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+                     stderr=subprocess.DEVNULL, start_new_session=True)  # its own session: it outlives this call
     for _ in range(40):
-        time.sleep(0.25)
-        new = [a for a in apps() if a["app"] not in before]
+        time.sleep(0.1)
+        new = [w["pid"] for w in _s(lambda: _shell("List")["windows"], []) if w["id"] not in before_wins] if wins is not None \
+            else [a["pid"] for a in apps() if a["pid"] not in before_apps]
         if new:
-            time.sleep(0.6)  # let its first window fill in
-            return {"status": "opened", **observe(new[0]["app"])}
-    raise TimeoutError(f"{info.get_display_name()} was started but no window showed up in 10 s.")
+            time.sleep(0.3)  # let its first window fill in
+            return {"status": "opened", **_look_pid(new[0])}
+    return {"status": "starting", "app": info.get_name(), "why": "it's still starting"}
+
+
+def _look_pid(pid: int) -> dict:
+    """A look at the app with this process, if accessibility knows it yet (else just its name)."""
+    app = next((a["app"] for a in apps() if a["pid"] == pid), None)
+    try:
+        return observe(app) if app else {"app": str(pid)}
+    except LookupError:
+        return {"app": app}
 
 
 # ------------------------------------------------------------------ windows (Snoofy, a GNOME Shell extension)

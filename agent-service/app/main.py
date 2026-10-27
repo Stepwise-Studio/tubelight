@@ -1331,6 +1331,15 @@ class RunnerVoiceTask(BaseModel):
 VOICE_TASK_WAIT_S = 90
 
 
+def _plain_cards(text: str) -> str:
+    """A reply's ```openui cards as plain lines (the hotkey's card and the voice have no chat to draw them in):
+    each line's quoted values joined, so a table row reads ".config — 22 GB"."""
+    def lines(m: re.Match) -> str:
+        rows = [" — ".join(v for v in re.findall(r'"([^"]*)"', ln) if v.strip()) for ln in m.group(1).splitlines()]
+        return "\n".join(r for r in rows if r)
+    return re.sub(r"```openui\s*\n(.*?)```", lines, text, flags=re.S).strip()
+
+
 @app.post("/runner/voice/task")
 async def runner_voice_task(body: RunnerVoiceTask, who: tuple[str, str] = Depends(runner_auth)):
     """run_task from the hotkey: a hidden message to the computer's teammate, answered with its reply (or what it's
@@ -1348,8 +1357,8 @@ async def runner_voice_task(body: RunnerVoiceTask, who: tuple[str, str] = Depend
                                              "sender_type": "neq.user", "order": "created_at.asc", "select": "kind,text,meta"})
         run = await db.one("runs", {"id": f"eq.{run_id}"}) or {}
         blocking = next((m for m in fresh if m["kind"] in ("approval", "question", "connect", "signin", "error")), None)
-        said = " ".join(m["text"] for m in fresh if m["kind"] == "text" and (m["text"] or "").strip()
-                        and not (m.get("meta") or {}).get("voice"))[:2000]
+        said = "\n".join(_plain_cards(m["text"]) for m in fresh if m["kind"] == "text" and (m["text"] or "").strip()
+                         and not (m.get("meta") or {}).get("voice"))[:3000]
         if blocking:
             what = {"approval": "Waiting for their OK in the Tubelight app", "question": "The teammate needs an answer in the app",
                     "connect": "An app needs connecting first, in the Tubelight app", "signin": "A sign-in is needed, in the Tubelight app",

@@ -72,7 +72,7 @@ class Voice:
     def toggle(self) -> None:
         c = self.load()
         if not c.get("token") or not c.get("use_apps") or c.get("paused"):
-            self.pill(state="error", text="Turn on “Let teammates use your apps” in Tubelight first")
+            self.pill(state="error", verb="Turn on “Let teammates use your apps” in Tubelight first")
             src = GLib.timeout_source_new(2500)
             src.set_callback(lambda *_: self.pill(state="hide") and False)
             src.attach(self.ctx)
@@ -93,11 +93,12 @@ class Session:
         self.pending = b""
         self.speaking_until = 0.0
         self.last = time.monotonic()
-        self.heard, self.said, self.turns = "", "", []
+        self.turns: list[dict] = []  # the card's conversation: {you, reply, detail, closed}
         self.tasks = 0
+        self.verb = ""
         self.over = False
         print("voice: listening", flush=True)
-        self.v.pill(state="listening", text="Listening…")
+        self.show("listening")
         self.mic = self._mic()
         self.out = self._speaker()
         self._tick = GLib.timeout_source_new(500)
@@ -215,23 +216,38 @@ class Session:
             if (part.get("inlineData") or {}).get("data"):
                 self._play(part["inlineData"]["data"])
         if (sc.get("inputTranscription") or {}).get("text"):
-            self.heard += sc["inputTranscription"]["text"]
+            self._turn(new=True)["you"] += sc["inputTranscription"]["text"]
             self.last = time.monotonic()
-            self.v.pill(state="thinking" if self.tasks == 0 else "working", text=self.heard.strip())
+            self.show("working" if self.tasks else "thinking")
         if (sc.get("outputTranscription") or {}).get("text"):
-            self.said += sc["outputTranscription"]["text"]
-            self.v.pill(state="speaking", text=self.said.strip())
+            self._turn()["reply"] += sc["outputTranscription"]["text"]
+            self.show("working" if self.tasks else "speaking")
         if sc.get("turnComplete"):
-            self.turns += [{"role": "user", "text": self.heard.strip()}, {"role": "teammate", "text": self.said.strip()}]
-            if self.said.strip() and self.tasks == 0:
-                self.v.pill(state="done", text=self.said.strip())
-            self.heard, self.said, self.last = "", "", time.monotonic()
+            if self.turns:
+                self.turns[-1]["closed"] = True
+            self.last = time.monotonic()
+            self.show("working" if self.tasks else "listening")
+
+    # ---------------------------------------------------------- the card
+    def _turn(self, new: bool = False) -> dict:
+        """The exchange being spoken now; a new one when they start talking after the last one finished."""
+        if not self.turns or new and self.turns[-1]["closed"]:
+            self.turns.append({"you": "", "reply": "", "detail": "", "closed": False})
+        return self.turns[-1]
+
+    def _view(self) -> list[dict]:
+        return [{k: t[k].strip() for k in ("you", "reply", "detail")} for t in self.turns[-4:]]
+
+    def show(self, state: str) -> None:
+        self.v.pill(state=state, verb=self.verb if state == "working" else "", turns=self._view())
 
     # ---------------------------------------------------------- tools
     def _tool(self, fc: dict) -> None:
         name, args = fc.get("name"), fc.get("args") or {}
         self.tasks += 1
-        self.v.pill(state="working", text=_doing(name, args))
+        snap = getattr(self.v.driver(), "_snaps", {}).get(str(args.get("snapshot") or ""), {}) if name == "act_in_app" else {}
+        self.verb = _doing(name, {**args, "app": args.get("app") or snap.get("app") or ""})
+        self.show("working")
 
         def run() -> None:
             began = time.monotonic()
@@ -284,8 +300,10 @@ class Session:
         if fc.get("name") == "run_task":
             response["scheduling"] = "WHEN_IDLE"
         self._send({"toolResponse": {"functionResponses": [{"id": fc.get("id"), "name": fc.get("name"), "response": response}]}})
+        if fc.get("name") == "run_task" and result.strip():  # the teammate's whole answer, not just the spoken gist
+            self._turn()["detail"] = result.strip()
         if self.tasks == 0:
-            self.v.pill(state="done", text=result[:120])
+            self.show("thinking")
 
     # ---------------------------------------------------------- ending
     def _idle(self, *_) -> bool:
@@ -307,13 +325,14 @@ class Session:
         if self.ws:
             self.ws.close(1000, None)
         if why and state == "error":
-            self.v.pill(state="error", text=why)
-            src = GLib.timeout_source_new(2500)
+            self.v.pill(state="error", verb=why, turns=self._view())
+            src = GLib.timeout_source_new(3000)
             src.set_callback(lambda *_: self.v.pill(state="hide") and False)
             src.attach(self.ctx)
         else:
             self.v.pill(state="hide")
-        turns = [t for t in self.turns if t["text"]]
+        turns = [{"role": r, "text": t[k].strip()} for t in self.turns for r, k in (("user", "you"), ("teammate", "reply"))
+                 if t[k].strip()]
         if turns:
             threading.Thread(target=self.v.api, args=(self.v.load(), "/runner/voice/transcript", {"turns": turns}), daemon=True).start()
         if self.v.session is self:
@@ -327,12 +346,21 @@ def _windows_line(got: dict) -> str:
         + "".join(f" ({k})" for k in ("maximized", "minimized", "focused") if w[k]) for w in reversed(got["windows"]))
 
 
+def _pretty(app: str) -> str:
+    """"gnome-calculator", "org.gnome.TextEditor", "app.zen_browser.zen" → Calculator, TextEditor, Zen."""
+    app = app.rsplit(".", 1)[-1].removeprefix("gnome-").replace("-", " ").replace("_", " ").strip()
+    return app[:1].upper() + app[1:] if app else ""
+
+
 def _doing(name: str, a: dict) -> str:
-    """The pill's line while a tool runs."""
+    """The card's spinner line while a tool runs."""
+    app = _pretty(str(a.get("app") or a.get("window") or ""))
     if name == "place_window":
         where = a.get("monitor") or a.get("where") or a.get("state") or a.get("size") or ""
-        return f"Moving {a.get('window', 'the window')}" + (f" → {where}" if where else "")
-    return {"open_app": f"Opening {a.get('app', '')}", "close_app": f"Closing {a.get('app', '')}",
-            "press_keys": "Pressing keys", "list_windows": "Looking at your windows",
-            "look_at_app": f"Looking at {a.get('app', 'the app')}", "act_in_app": "Working in the app",
-            "run_task": str(a.get("request") or "Working on it")[:90]}.get(name, "Working…")
+        return f"Moving {app or 'the window'}" + (f" to {where}" if where else "")
+    if name == "act_in_app":
+        what = {"TYPE": "Typing", "READ": "Reading", "SCROLL_TO": "Scrolling", "FOCUS": "Focusing"}
+        return what.get(str(a.get("action", "")).upper(), "Clicking") + (f" in {app}" if app else "…")
+    return {"open_app": f"Opening {app}", "close_app": f"Closing {app}", "press_keys": f"Pressing keys in {app}".strip(),
+            "list_windows": "Looking at your windows", "look_at_app": f"Looking at {app}",
+            "run_task": "Asking your teammate: " + str(a.get("request") or "")[:70]}.get(name, "Working…")
