@@ -1,5 +1,7 @@
 # Snoofy
 
+Tubelight's computer use (part of Tubelight, not published on its own).
+
 Computer use for Linux (GNOME on Wayland). An agent reads an app's window as a list of elements and acts on them **in
 the background** (your pointer and the window in front stay where they are), and arranges windows across monitors
 in one call. Use it over MCP from Claude Code, Claude Desktop, Codex, Cursor or any MCP client. No model, no API key,
@@ -60,7 +62,3 @@ python3 -m pytest test_snoofy.py
 | Set 200 characters + settle | ~200 ms |
 | Button click + settle + fresh read | ~450 ms (≈260 ms of it is GTK's own button delay) |
 | Move/resize a window, confirmed | 20–90 ms (shell call 1–12 ms) |
-
-## License
-
-MIT, © Stepwise Studio. See [LICENSE](LICENSE).
