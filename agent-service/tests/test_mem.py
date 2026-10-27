@@ -316,6 +316,10 @@ def test_stage0_reads_what_could_matter_and_drops_chatter():
     assert mem._worth_reading(ep(said), said)
     assert mem._worth_reading(ep("Found it: nischay@example.com (Nischay Rao).", 1), said)
     assert mem._worth_reading(ep("ok", 0), said) and mem._worth_reading(ep("hi", 1, "note"), said)  # apps, notes: always
+    relay = {"text": "Done, I read it.", "trust": 0, "source": "chat", "speaker": "Ivy"}
+    assert not mem._worth_reading(relay, said, frozenset({"Ivy"}))  # a teammate relaying mail: filtered like any reply
+    friend = {"text": "I painted a sunrise last year.", "trust": 0, "source": "chat", "speaker": "Melanie"}
+    assert mem._worth_reading(friend, said, frozenset({"Ivy"}))  # another person's own words: always read
 
 
 PRIOR = {"b0": -3.5, "imp": 3.0, "dur": 2.5, "nov": 1.5, "tr": 1.0, "ex": 2.0, "rep": 1.0}  # fixed: refits can't break these

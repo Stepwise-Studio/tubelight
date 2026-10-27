@@ -445,14 +445,14 @@ def _keys(t: str) -> set[str]:
     return {m.group(0).lower().strip(".,") for m in found if m.group(0) not in _STARTERS}
 
 
-def _worth_reading(ep: dict[str, Any], said: str) -> bool:
+def _worth_reading(ep: dict[str, Any], said: str, mates: frozenset[str] = frozenset()) -> bool:
     """Stage 0 of the gate, no model: can this episode hold anything lasting? Unsure means yes: what's skipped here is
     never read (until a new extractor version). Drops greetings, slash commands, and teammate replies that bring no name,
     number or address beyond what the user said ("Done.", "Timer set for 2 minutes.")."""
     t = ep["text"].strip()
-    relay = ep["trust"] == 0 and bool(ep.get("speaker")) and not str(ep["speaker"]).startswith("app ")
+    relay = ep["trust"] == 0 and ep.get("speaker") in mates  # a teammate passing on what it read (log_run)
     if (ep["trust"] == 0 and not relay) or ep["source"] != "chat":
-        return True  # app results are read whole; a teammate relaying them is filtered like any teammate reply
+        return True  # outside words (apps, mail, people) are read whole; a relaying teammate is filtered like any reply
     if t.startswith("/") and len(t) < 40:
         return False
     if ep["trust"] == 2:
@@ -524,7 +524,8 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]], gl
     said = " ".join(e["text"] for e in episodes if e["trust"] == 2)
     project = await _project(episodes[0]["ref"])
     skipped = len(episodes)
-    episodes = [e for e in episodes if _worth_reading(e, said)]
+    mates = frozenset(await _roster(owner))
+    episodes = [e for e in episodes if _worth_reading(e, said, mates)]
     skipped -= len(episodes)
     if not episodes:
         return {"facts": 0, "stage0": skipped}
@@ -544,7 +545,10 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]], gl
     eps = "\n\n".join(f"#{i + 1} [{e['occurred_at']:%Y-%m-%d %H:%M} · {e['source']} · {e['speaker']} · "
                       f"{'outside content' if e['trust'] == 0 else TRUST[e['trust']]}]\n{e['text']}"
                       for i, e in enumerate(episodes))
-    prompt = EXTRACT.format(user=user_name, roster=", ".join(await _roster(owner)) or "(none)", today=f"{datetime.now(UTC):%Y-%m-%d}", entities=ent_lines or "(none yet)",
+    # "today" is the day the conversation happened: a re-read of old episodes (backfill, a new extractor version) must
+    # date "yesterday" from then, not from the day it's re-read
+    today = max(e["occurred_at"] for e in episodes)
+    prompt = EXTRACT.format(user=user_name, roster=", ".join(await _roster(owner)) or "(none)", today=f"{today:%Y-%m-%d}", entities=ent_lines or "(none yet)",
                             facts=fact_lines)
     if project:  # what's said in a project's group is usually about that project: say which one it is
         eps = (f"These episodes are from the group chat of {user_name}'s project \"{project['name']}\""
