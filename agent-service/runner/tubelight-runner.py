@@ -475,6 +475,8 @@ def _driver(c: dict, a: dict):
     if not c.get("use_apps"):
         raise PermissionError("Using apps is off on this computer. Turn on “Let teammates use your apps” in Tubelight there.")
     here = Path(__file__).resolve().parent
+    if (here / "snoofy" / "snoofy.py").exists():  # run from the Tubelight repo, where Snoofy has its own folder
+        here = here / "snoofy"
     for part in ("snoofy.py", "snoofy-shell.js", "snoofy-shell.json"):
         if not (here / part).exists():  # updated from a runner that didn't know this part yet
             (here / part).write_bytes(fetch(c, part))

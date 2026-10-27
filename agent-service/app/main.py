@@ -59,13 +59,17 @@ async def lifespan(_: FastAPI):
     except Exception as e:
         log.error("memory v2 unavailable (%s); teammates use the older notes", e)
         mem._pool = None
-    mem_worker = asyncio.create_task(mem.loop()) if mem.ready() else None
+    # BACKGROUND=0: a second server beside the real one (a local test): it answers requests but never sweeps runs,
+    # fires schedules or works through memory, which the real server owns (both would act on the same database).
+    background = config.env("BACKGROUND", "1") != "0"
+    mem_worker = asyncio.create_task(mem.loop()) if background and mem.ready() else None
     runs.docker_ok = await asyncio.to_thread(sandbox.available)
     browser.ready = await asyncio.to_thread(browser.available)
-    browsers = asyncio.create_task(browser.loop()) if browser.ready else None
-    await runs.sweep_orphans()
+    browsers = asyncio.create_task(browser.loop()) if background and browser.ready else None
+    if background:
+        await runs.sweep_orphans()
     asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, _dump_stacks)
-    scheduler = asyncio.create_task(events.schedule_loop())
+    scheduler = asyncio.create_task(events.schedule_loop()) if background else asyncio.create_task(asyncio.sleep(0))
     warm = asyncio.create_task(_warm_catalog())  # the first Connections visit shouldn't wait on Composio
     yield
     warm.cancel()
