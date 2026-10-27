@@ -213,21 +213,36 @@ async def log_episode(owner: str, source: str, text: str, *, trust: int, ref: st
             log.exception("memory: logging an episode failed")
 
 
+# Tools whose results are the user's own records or Tubelight's state, not words from outside. Any other tool (apps,
+# mail, web, browser, files, the computer's screen, the phone's notifications) brings in outside content.
+INSIDE = frozenset({
+    "recall", "remember", "memory_search", "memory_why", "memory_confirm", "memory_dismiss", "memory_correct",
+    "memory_merge", "todos", "alarms", "reminders", "follow_up", "automate", "app_events", "playbook", "new_chat",
+    "ask_teammate", "ask_user", "connect_app", "make_document", "generate_image", "schedule_post", "phone_action",
+    "computer_windows", "computer_place_window", "computer_apps", "computer_close_app", "browser_use", "browser_signin",
+    "chat_stats", "model_usage", "search_chat"})
+
+
 async def log_run(owner: str, thread_id: str, user_name: str, msgs: list, source: str = "chat") -> None:
     """A finished run's new turn: the user's message, what app tools returned, and the teammates' replies. source:
     "journal" when the user was talking to their memory agent (only their own words; the agent's stay "chat")."""
     from langchain_core.messages import AIMessage, ToolMessage  # noqa: PLC0415
 
     from .learn import exchange_start  # noqa: PLC0415
-    now = datetime.now(UTC)
+    now, relayed = datetime.now(UTC), False
     for i, m in enumerate(msgs[exchange_start(msgs):]):
         at = now - timedelta(milliseconds=(len(msgs) - i))  # keep the order inside the turn
         if isinstance(m, HumanMessage) and m.name != "summary":
             await log_episode(owner, source, str(m.content), trust=2, ref=thread_id, speaker=user_name, at=at)
-        elif isinstance(m, ToolMessage) and (m.name or "").isupper():  # app results (Composio: GMAIL_FETCH_EMAILS...)
-            await log_episode(owner, "chat", str(m.content)[:2500], trust=0, ref=thread_id, speaker=f"app {m.name}", at=at)
+        elif isinstance(m, ToolMessage):
+            relayed = relayed or (m.name or "") not in INSIDE
+            if (m.name or "").isupper():  # app results (Composio: GMAIL_FETCH_EMAILS...)
+                await log_episode(owner, "chat", str(m.content)[:2500], trust=0, ref=thread_id, speaker=f"app {m.name}", at=at)
         elif isinstance(m, AIMessage) and m.text.strip():
-            await log_episode(owner, "chat", m.text, trust=1, ref=thread_id, speaker=m.name or "Teammate", at=at)
+            # a reply written after reading an email, page or file passes on outside words: it gets their trust, or an
+            # injected "Jayanth promised to pay X" would be stored as a teammate's word (trust laundering)
+            await log_episode(owner, "chat", m.text, trust=0 if relayed else 1, ref=thread_id, speaker=m.name or "Teammate",
+                              at=at)
 
 
 # ------------------------------------------------------------------ entities
@@ -435,8 +450,9 @@ def _worth_reading(ep: dict[str, Any], said: str) -> bool:
     never read (until a new extractor version). Drops greetings, slash commands, and teammate replies that bring no name,
     number or address beyond what the user said ("Done.", "Timer set for 2 minutes.")."""
     t = ep["text"].strip()
-    if ep["trust"] == 0 or ep["source"] != "chat":
-        return True
+    relay = ep["trust"] == 0 and bool(ep.get("speaker")) and not str(ep["speaker"]).startswith("app ")
+    if (ep["trust"] == 0 and not relay) or ep["source"] != "chat":
+        return True  # app results are read whole; a teammate relaying them is filtered like any teammate reply
     if t.startswith("/") and len(t) < 40:
         return False
     if ep["trust"] == 2:
@@ -479,6 +495,28 @@ async def _roster(owner: str) -> list[str]:
         return []
 
 
+ON_RECORD = 60  # current facts the extractor is shown: only these can be replaced, marked done or shown wrong
+
+
+async def _on_record(owner: str, ids: list[str], episodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The current facts an extraction may update: the nearest to each episode, the open commitments, then the newest.
+    Newest-only hid everything older once the user had ON_RECORD facts: "I work at Swiggy now" couldn't close the
+    year-old "works at Zomato", and an old promise couldn't be marked done."""
+    sel = ("select f.id, f.subject, f.text, f.trust, f.valid_from, f.kind, f.due from mem_facts f where f.owner = %s "
+           "and f.status = 'current' and f.subject = any(%s::uuid[]) and (f.kind <> 'commitment' or f.done is not true)")
+    picked: dict[str, dict[str, Any]] = {}
+    for v in await memory.embed([e["text"][:2000] for e in episodes[:12]]):
+        for r in await _q(sel + " order by f.embedding <=> %s::vector limit 8", owner, ids, _vec(v)):
+            picked.setdefault(str(r["id"]), r)
+    for r in await _q(sel + " and f.kind = 'commitment' order by f.due nulls last, f.learned_at desc limit 15", owner, ids):
+        picked.setdefault(str(r["id"]), r)
+    for r in await _q(sel + " order by f.learned_at desc limit %s", owner, ids, ON_RECORD):
+        if len(picked) >= ON_RECORD:
+            break
+        picked.setdefault(str(r["id"]), r)
+    return list(picked.values())[:ON_RECORD]
+
+
 async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]], glean: bool = False) -> dict[str, Any]:
     """One model call over a batch of episodes (one conversation, oldest first): entities, facts, completions.
     Episodes stage 0 rules out aren't sent; a batch with nothing left costs no call. What the user tells their memory
@@ -496,10 +534,7 @@ async def extract(owner: str, user_name: str, episodes: list[dict[str, Any]], gl
     known = {f"E{i + 1}": str(r["id"]) for i, r in enumerate(cands)}
     known["user"] = me
     ids = list(known.values())  # the user's own facts too: what's on record about them shouldn't be restated
-    cur = await _q("select f.id, f.subject, f.text, f.trust, f.valid_from, f.kind, f.due from mem_facts f "
-                   "where f.owner = %s and f.status = 'current' and f.subject = any(%s::uuid[]) "
-                   "and (f.kind <> 'commitment' or f.done is not true) order by f.learned_at desc limit 60", owner, ids)
-    fids = {f"F{i + 1}": r for i, r in enumerate(cur)}
+    fids = {f"F{i + 1}": r for i, r in enumerate(await _on_record(owner, ids, episodes))}
     label = {v: ("user" if v == me else k) for k, v in known.items()}
     names = {str(r["id"]): r["name"] for r in cands}
     ent_lines = "\n".join(f"{label[str(r['id'])]} | {r['kind']} | {r['name']} | {', '.join(r['aliases'])}" for r in cands)
@@ -905,15 +940,29 @@ def _fit(blocks: list[tuple[str, list[str]]], budget: int) -> str:
 
 
 async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, ...] = (), brief: bool = False,
-                 budget: int = 3500, used: bool = False) -> str:
+                 budget: int = 3500, used: bool = False, since: date | None = None, until: date | None = None) -> str:
     """What memory holds for this moment, as notes for a prompt: the entities it names, what's linked to them
     (spreading activation over PPMI links), and related facts ranked by similarity, link and strength
     (app/memgraph.py). brief: also the user's preferences and open commitments (a teammate's turn). used: a teammate
     asked on purpose (the recall tool): what comes back counts as used and strengthens; facts put in a prompt
     automatically don't, or whatever is strong would grow stronger by being shown. Empty when nothing is on record.
+    since/until: a period asked about ("in March"): facts true at any time in it come first, replaced ones too, since
+    "where did I work last year" is answered by a fact that's closed now.
     Only for the user's own teammates: someone outside (a caller) gets `about_caller`."""
     if not ready():
         return ""
+    blocks: list[tuple[str, list[str]]] = []
+    seen: set = set()
+    if since or until:
+        lo, hi = since or date(1900, 1, 1), until or datetime.now(UTC).date()
+        vec = _vec((await memory.embed([query[:500] or "what happened"]))[0])
+        # true at some point in [lo, hi]: started by its end, and not over before its start (an event is its own day)
+        then = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'closed', 'tentative') "
+                        "and ((valid_from <= %s and coalesce(valid_to, case when kind = 'event' then valid_from end, "
+                        "current_date) >= %s) or (kind = 'commitment' and due between %s and %s)) "
+                        "order by embedding <=> %s::vector limit 15", owner, hi, lo, lo, hi, vec)
+        seen |= {f["id"] for f in then}
+        blocks.append((f"True between {lo} and {hi}:", [_line(f) for f in sorted(then, key=lambda f: f["valid_from"] or lo)]))
     words = {w for w in _norm(" ".join([query, *names])).split() if len(w) > 2}
     ents = await _q("select id, kind, name, aliases, profile from mem_entities where owner = %s and kind <> 'user'", owner)
     hit = [e for e in ents if words & {w for n in [e["name"], *e["aliases"]] for w in _norm(n).split() if len(w) > 2}]
@@ -932,8 +981,6 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
     # full-name matches first ("Priya Shah" over every Priya)
     hit.sort(key=lambda e: -len(words & set(_norm(e["name"]).split())))
     hit = hit[:5]
-    blocks: list[tuple[str, list[str]]] = []
-    seen: set = set()
     for e in hit:
         # its own facts, and others that name it ("Jayanth owes Ananya the deck" may sit on Jayanth)
         pats = [rf"\m{re.escape(n)}\M" for n in [e["name"], *e["aliases"]] if len(n) > 2]
@@ -945,7 +992,7 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         old = [f for f in facts if f["status"] == "closed"][:3]
         seen |= {f["id"] for f in cur + old}
         head = f"{e['name']} ({e['kind']}" + (f", also called {', '.join(e['aliases'][:4])}" if e["aliases"] else "") + ")"
-        blocks.append(((f"People and things this is about:\n" if not blocks else "") + head + ":",
+        blocks.append(((f"People and things this is about:\n" if e is hit[0] else "") + head + ":",
                        ([f"  {e['profile']}"] if e["profile"] else []) + [f"  {_line(f)}" for f in cur + old] or ["  (nothing more on record)"]))
     # spreading activation from what the moment names: what's linked to it comes along
     pi = memgraph.spread(await links(owner), {str(e["id"]) for e in hit}) if hit else {}
@@ -993,8 +1040,8 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
 
 
 async def about_caller(owner: str, name: str, phone: str = "", budget: int = 2500) -> str:
-    """What an assistant speaking to someone outside (the call stand-in) may know: facts about that person or naming
-    them, current only, never sensitive, and no open search over the rest of memory. Enforced here, not in a prompt.
+    """What an assistant speaking to someone outside (the call stand-in) may know: facts about that person and promises
+    naming them, current only, never sensitive, and no open search over the rest of memory. Enforced here, not in a prompt.
     Profiles are left out: they're written from all of a person's facts, sensitive ones included."""
     if not ready():
         return ""
@@ -1011,9 +1058,11 @@ async def about_caller(owner: str, name: str, phone: str = "", budget: int = 250
     if not ent:
         return ""
     pats = [rf"\m{re.escape(n)}\M" for n in [ent["name"], *ent["aliases"]] if len(n) > 2]
+    # their own facts, and promises that name them; never what's filed about someone else ("Priya says Saqlain owes
+    # her money" is about Priya: naming the caller doesn't make it theirs to hear)
     facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status = 'current' and not sensitive "
-                     "and (subject = %s or text ~* any(%s)) order by subject = %s desc, learned_at desc limit 15",
-                     owner, ent["id"], pats, ent["id"])
+                     "and (subject = %s or (kind = 'commitment' and text ~* any(%s))) "
+                     "order by subject = %s desc, learned_at desc limit 15", owner, ent["id"], pats, ent["id"])
     head = f"{ent['name']} ({ent['kind']}" + (f", also called {', '.join(ent['aliases'][:4])}" if ent["aliases"] else "") + "):"
     return _fit([(head, [f"  {_line(f)}" for f in facts] or ["  (nothing more on record)"])], budget)
 

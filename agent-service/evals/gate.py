@@ -66,9 +66,12 @@ async def run(name: str) -> None:
     for r in labels:
         await mem.log_episode(owner, r["source"], r["text"], trust=r["trust"], ref=r["ref"], speaker=r["speaker"],
                               at=datetime.fromisoformat(r["at"]))
-    ids = {(r["text"], r["occurred_at"]): str(r["id"]) for r in
-           await mem._q("select id, text, occurred_at from mem_episodes where owner = %s", owner)}
-    label_of = {ids[(r["text"][:4000], datetime.fromisoformat(r["at"]))]: r for r in labels}
+    # a long message is stored as several pieces a microsecond apart: every piece carries its message's label
+    at_of = {datetime.fromisoformat(r["at"]): r for r in labels}
+    label_of = {}
+    for r in await mem._q("select id, occurred_at from mem_episodes where owner = %s", owner):
+        t = r["occurred_at"]
+        label_of[str(r["id"])] = at_of.get(t) or at_of[max(k for k in at_of if k <= t)]
     if roster:  # synthetic users have no account: their name and teammates come from the set
         async def _roster(_owner: str) -> list[str]:
             return roster

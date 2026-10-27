@@ -7,7 +7,7 @@ import base64
 import re
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -334,14 +334,18 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                           teammate_id=tm["id"], input={"name": name, "when": when}, output={"did": did})
         return f"Playbook “{name.strip()}” {did}. Every teammate follows it from now on."
 
-    async def recall(query: str) -> str:
+    async def recall(query: str, since: str = "", until: str = "") -> str:
+        try:
+            when = {k: date.fromisoformat(v) for k, v in (("since", since), ("until", until)) if v.strip()}
+        except ValueError:
+            return "since and until are dates like 2026-03-01."
         spaces = [memory.ns("teammate", tm["id"]), memory.ns("user", ctx.owner_id)]
         if ctx.project:
             spaces.append(memory.ns("project", ctx.project["id"]))
         if mem.ready():
             spaces.remove(memory.ns("user", ctx.owner_id))
         found = [t for ns in spaces for t in await memory.search(ns, query, limit=5)]
-        world = await mem.recall(ctx.owner_id, query, used=True) if mem.ready() else ""
+        world = await mem.recall(ctx.owner_id, query, used=True, **when) if mem.ready() else ""
         return "\n".join([world, *(f"- {t}" for t in found)]).strip() or "Nothing relevant in memory."
 
     try:
@@ -1291,7 +1295,9 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                         "change they ask for later: save again with the same name). read: one's steps. list, delete. "
                         "Save only when they want it remembered or taught it for next time; a one-off request isn't one."),
         StructuredTool.from_function(
-            coroutine=recall, name="recall", description="Search long-term memory (yours, the project's and the user's profile)."),
+            coroutine=recall, name="recall", description="Search long-term memory (yours, the project's and the user's profile). For a time ('in March', "
+                        "'last year', 'before I joined X'), also pass since/until as YYYY-MM-DD: what was true then comes "
+                        "back, including facts that have since changed."),
     ]
 
     if not helper:

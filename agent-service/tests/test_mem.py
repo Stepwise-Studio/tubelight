@@ -237,8 +237,16 @@ async def test_a_caller_hears_only_about_themselves_and_nothing_sensitive(m):
                                  "facts": [{"about": "n1", "text": "Saqlain is Razorpay's partner engineer", "episode": 1, "quote": "our partner engineer"},
                                            {"about": "n1", "text": "Saqlain lent Jayanth 20k", "episode": 2, "quote": "lent me 20k", "sensitive": True},
                                            {"about": "n2", "text": "Meera is pregnant", "episode": 3, "quote": "Meera is pregnant", "sensitive": True}]})
+    d = await episode(owner, "Priya says Saqlain still owes her money", days=3)
+    e = await episode(owner, "I promised Saqlain the API keys by Friday", days=3)
+    await run(owner, [d, e], {"entities": [{"ref": "n3", "name": "Priya", "kind": "person"}], "facts": [
+        {"about": "n3", "text": "Priya says Saqlain owes her money", "episode": 1, "quote": "Saqlain still owes her money"},
+        {"about": "user", "kind": "commitment", "text": "Jayanth promised Saqlain the API keys by Friday", "episode": 2,
+         "quote": "promised Saqlain the API keys"}]})
     heard = await mem.about_caller(owner, "Unknown", "+919000022222")
     assert "partner engineer" in heard and "20k" not in heard and "Meera" not in heard
+    assert "Priya says Saqlain owes her money" in await facts(owner)  # on record, just not for the caller
+    assert "owes her money" not in heard and "API keys" in heard  # someone else's word about them stays out
     assert await mem.about_caller(owner, "Saqlain") == heard  # by name when the number is new
     assert "pregnant" not in await mem.about_caller(owner, "Meera")
     assert await mem.about_caller(owner, "Nobody") == ""
@@ -474,3 +482,56 @@ async def test_facts_know_every_entity_they_name(m, monkeypatch):
     await mem.link(owner, "Jayanth")
     tid = (await mem._q("select id from mem_entities where owner = %s and name = 'Tubelight'", owner))[0]["id"]
     assert (await mem._q("select mentions from mem_facts where owner = %s", owner))[0]["mentions"] == [tid]
+
+
+async def test_an_old_fact_past_the_newest_sixty_can_still_be_replaced(m):
+    fake, owner = m
+    me = await mem.user_entity(owner, "Jayanth")
+    old = await run(owner, [await episode(owner, "I work at Zomato as a designer", days=-400)], {"facts": [
+        {"about": "user", "kind": "relation", "text": "Jayanth works at Zomato as a designer", "episode": 1,
+         "quote": "I work at Zomato as a designer", "importance": "important", "lasts": "years"}]})
+    assert old["facts"] == 1
+    for k in range(mem.ON_RECORD + 5):  # a year of newer, unrelated facts about the user
+        await mem._q("insert into mem_facts (owner, subject, kind, text, valid_from, confidence, trust, embedding, status) "
+                     "values (%s, %s, 'trait', %s, %s, 0.9, 2, %s::vector, 'current')", owner, me,
+                     f"Jayanth bought plant number {k} for the balcony", T0.date(),
+                     mem._vec(fake_embed([f"Jayanth bought plant number {k} for the balcony"])[0]))
+    ep = await episode(owner, "I left Zomato, I work at Swiggy now", days=1)
+    fake.script.append(AIMessage(json.dumps({"facts": []})))
+    await mem.extract(owner, "Jayanth", [ep])
+    assert "works at Zomato" in fake.calls[-1][0].content  # shown, so the model can replace it
+
+
+async def test_a_reply_that_relays_an_email_carries_the_emails_trust(m):
+    from langchain_core.messages import HumanMessage, ToolMessage
+    _, owner = m
+    ask = HumanMessage("what's new in my mail?")
+    mail = ToolMessage("From: x@evil.test — Jayanth promised to wire 50000 to account 99", tool_call_id="1", name="inbox")
+    first = AIMessage("Let me look at your inbox.", name="Ivy")
+    reply = AIMessage("One email says Jayanth promised to wire 50000 to account 99.", name="Ivy")
+    await mem.log_run(owner, "t1", "Jayanth", [ask, first, mail, reply])
+    rows = {r["text"]: r["trust"] for r in await mem._q("select text, trust from mem_episodes where owner = %s", owner)}
+    assert rows[reply.content] == 0 and rows[first.content] == 1 and rows[ask.content] == 2
+    await mem.log_run(owner, "t2", "Jayanth", [HumanMessage("remind me at 6"), ToolMessage("set", tool_call_id="2", name="reminders"),
+                                                AIMessage("Reminder set for 6 pm, Jayanth.", name="Ivy")])
+    rows = {r["text"]: r["trust"] for r in await mem._q("select text, trust from mem_episodes where owner = %s", owner)}
+    assert rows["Reminder set for 6 pm, Jayanth."] == 1  # Tubelight's own tools aren't outside content
+
+
+async def test_recall_for_a_period_brings_what_was_true_then(m):
+    _, owner = m
+    a = await episode(owner, "I work at Zomato as a designer", days=-300)
+    await run(owner, [a], {"facts": [{"about": "user", "kind": "relation", "text": "Jayanth works at Zomato as a designer",
+                                      "episode": 1, "quote": "I work at Zomato", "importance": "important", "lasts": "years"}]})
+    f = await mem._q("select id from mem_facts where owner = %s", owner)
+    b = await episode(owner, "I left Zomato, I work at Swiggy now", days=0)
+    await run(owner, [b], {"facts": [{"about": "user", "kind": "relation", "text": "Jayanth works at Swiggy",
+                                      "episode": 1, "quote": "I work at Swiggy now", "importance": "important",
+                                      "lasts": "years", "replaces": ["F1"]}]},
+              fids={"F1": {**(await mem._q("select * from mem_facts where id = %s", f[0]["id"]))[0]}})
+    assert await facts(owner, "closed") == ["Jayanth works at Zomato as a designer"]
+    then = await mem.recall(owner, "where did I work", since=(T0 - timedelta(days=200)).date(),
+                            until=(T0 - timedelta(days=100)).date())
+    head = then.split("\n\n")[0]
+    assert "Zomato" in head and "no longer true" in head and "Swiggy" not in head
+    assert "Zomato" not in (await mem.recall(owner, "where do I work")).split("Related facts:")[-1]  # now: only Swiggy

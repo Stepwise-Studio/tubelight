@@ -34,6 +34,10 @@ PROVIDERS: dict[str, dict[str, str]] = {
     # Workers AI (OpenAI-compatible). Model ids look like cloudflare:@cf/openai/gpt-oss-120b.
     "cloudflare": {"base": f"https://api.cloudflare.com/client/v4/accounts/{config.env('CF_ACCOUNT_ID')}/ai/v1",
                    "key": "CF_API_TOKEN", "name": "Cloudflare Workers AI", "default": "cloudflare:@cf/openai/gpt-oss-120b"},
+    # Azure AI Foundry (student credits, not free): model ids are deployment names, azure:gpt-4.1-mini. Only used where
+    # a setting names it (MEM_MODEL); never a fallback and never listed for teammates, so chat can't spend the credits.
+    "azure": {"base": config.env("MICROSOFT_AZURE_ENDPOINT").split("/openai/v1")[0] + "/openai/v1",
+              "key": "MICROSOFT_AZURE_API_KEY", "name": "Azure AI Foundry", "default": ""},
 }
 # With CF_GATEWAY_ID set, every provider goes through Cloudflare AI Gateway (retries, caching, logs, rate limits).
 GATEWAY_PATH = {"openrouter": "openrouter", "groq": "groq", "mistral": "mistral/v1", "cloudflare": "workers-ai/v1"}
@@ -70,7 +74,7 @@ def _headers(provider: str) -> dict[str, str] | None:
 
 def fallbacks() -> list[str]:
     ids = [m.strip() for m in config.env("LLM_FALLBACKS").split(",") if m.strip()] or \
-        [p["default"] for p in PROVIDERS.values()]
+        [p["default"] for p in PROVIDERS.values() if p["default"]]
     return [m for m in ids if key(parse(m)[0])]
 
 
@@ -257,7 +261,7 @@ async def free_tool_models() -> list[dict[str, Any]]:
     global _models
     if _models[1] and _models[0] > time.time():
         return _models[1]
-    live = [p for p in PROVIDERS if key(p)]
+    live = [p for p in PROVIDERS if key(p) and p != "azure"]
     async with httpx.AsyncClient(timeout=20) as c:
         results = await asyncio.gather(*(_list(p, c) for p in live), return_exceptions=True)
     out = [m for r in results if isinstance(r, list) for m in r]
