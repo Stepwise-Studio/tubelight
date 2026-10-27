@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""The Tubelight driver as an MCP server over standard input/output, for Claude Code, Claude Desktop, Codex, Cursor or
+"""Snoofy as an MCP server over standard input/output, for Claude Code, Claude Desktop, Codex, Cursor or
 any MCP client: read and use this computer's apps and arrange its windows. Logs go to standard error.
 
-    claude mcp add tubelight -- python3 /path/to/snoofy_mcp.py
+    claude mcp add snoofy -- python3 /path/to/snoofy_mcp.py
 """
 import json
 import sys

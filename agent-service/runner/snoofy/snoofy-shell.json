@@ -1,7 +1,7 @@
 {
   "uuid": "snoofy@stepwise.studio",
   "name": "Snoofy",
-  "description": "Lets the Tubelight driver list, move and resize windows (one D-Bus call each). Nothing runs until it's asked.",
+  "description": "Snoofy's part inside GNOME Shell: lists, moves and resizes windows, takes a global shortcut and draws a small status pill, for computer-use agents. Nothing runs until it's asked.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
-  "url": "https://tubelight.stepwise.studio"
+  "url": "https://github.com/Stepwise-Studio/snoofy"
 }

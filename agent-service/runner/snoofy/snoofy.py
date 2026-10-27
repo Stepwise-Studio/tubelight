@@ -1,7 +1,7 @@
-"""Using this computer's apps for a teammate: the Linux side of computer use, after arc-driver on macOS.
+"""Snoofy: computer use for Linux (GNOME). An agent reads this computer's apps and works in them, and arranges windows.
 
 Apps are read through the desktop's accessibility layer (AT-SPI): a window becomes a snapshot of what's on screen in
-it, each element with an id, a role, a name, a value and what can be done to it. A teammate acts on an element by id:
+it, each element with an id, a role, a name, a value and what can be done to it. An agent acts on an element by id:
 click, type or set its text, set a value, focus, read its text. Those go straight to the app (in the background: the
 pointer and the window in front stay as they are). Keys go to the window in front, through GNOME's remote-desktop
 interface (Wayland lets nothing else type).
@@ -10,7 +10,7 @@ Every action is checked against the app as it is when it runs: if the element mo
 went since the snapshot, nothing happens and a fresh snapshot comes back instead. After acting it waits for the app
 to settle (until its accessibility events go quiet), then returns the new snapshot.
 
-The user turns this on in the Tubelight window ("Let teammates use your apps").
+Window control, the global hotkey and the status pill live in Snoofy's GNOME Shell extension (snoofy-shell.js).
 """
 import json
 import shutil
@@ -320,7 +320,7 @@ def observe(app_name: str, window: str = "") -> dict:
 
 
 def text(snap: dict) -> str:
-    """A snapshot as a teammate reads it: one line per element, indented by depth."""
+    """A snapshot as an agent reads it: one line per element, indented by depth."""
     lines = [f"Snapshot {snap['snapshot']}: {snap['app']}, window “{snap['window']}”"]
     base = min((e["depth"] for e in snap["elements"]), default=1)
     for e in snap["elements"]:
@@ -802,6 +802,14 @@ def place(window: str, monitor=None, where: str = "", size: str = "", state: str
         last = rect(now)
         if still >= (8 if target else 5):
             break
+    centred = bool(size) or where in ("center", "centre", "middle")
+    if centred and target and (now["w"], now["h"]) != tuple(target[2:]):
+        # The app has a minimum or fixed size, and the window manager dropped the move with the resize: centre it
+        # again at the size it took.
+        area = mons[now["monitor"]]["area"]
+        _shell("Place", {"id": w["id"], "px": [(area["w"] - now["w"]) // 2, (area["h"] - now["h"]) // 2, now["w"], now["h"]]})
+        time.sleep(0.03)
+        now = next((x for x in _shell("List")["windows"] if x["id"] == w["id"]), now)
     m = mons[now["monitor"]] if 0 <= now["monitor"] < len(mons) else {"name": "?"}
     return {**now, "monitor_name": m["name"]}
 

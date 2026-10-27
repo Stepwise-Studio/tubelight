@@ -1,4 +1,4 @@
-# snoofy
+# Snoofy
 
 Computer use for Linux (GNOME on Wayland). An agent reads an app's window as a list of elements and acts on them **in
 the background** (your pointer and the window in front stay where they are), and arranges windows across monitors
@@ -10,10 +10,10 @@ nothing from PyPI: it uses the system's own accessibility stack (AT-SPI) and a s
 Needs `python3-gi` (installed on GNOME desktops) and GNOME 45 or newer.
 
 ```bash
-claude mcp add tubelight -- python3 /path/to/snoofy_mcp.py
+claude mcp add snoofy -- python3 /path/to/snoofy_mcp.py
 ```
 
-Then call the `setup` tool once (or run `python3 -c "import snoofy as d; print(d.install_windows())"`)
+Then call the `setup` tool once (or run `python3 -c "import snoofy; print(snoofy.install_windows())"`)
 and log out and back in: GNOME loads new shell extensions only at log-in. `status` shows what's working.
 
 ## Tools
@@ -42,6 +42,15 @@ and log out and back in: GNOME loads new shell extensions only at log-in. `statu
 - **Windows**: Wayland lets no app move another's window, so the extension does it inside the shell: 1–12 ms a
   call; `place_window` waits until the app has really taken the new size (≤ 300 ms) and says where it ended up.
 - **Keys**: through GNOME's remote-desktop interface, the only way to type on Wayland.
+- **For apps that build on it** (a voice assistant, say): the extension also takes a global shortcut
+  (`Hotkey("<Super>z")`, signal `Summon` a few ms after the press) and draws a small status pill by the pointer
+  (`Pill({"state": "listening", "text": "…", "level": 0.4})`), on `org.gnome.Shell /studio/stepwise/Snoofy`.
+
+## Develop
+
+```bash
+python3 -m pytest test_snoofy.py
+```
 
 ## Measured (GNOME 50, laptop)
 
@@ -51,3 +60,7 @@ and log out and back in: GNOME loads new shell extensions only at log-in. `statu
 | Set 200 characters + settle | ~200 ms |
 | Button click + settle + fresh read | ~450 ms (≈260 ms of it is GTK's own button delay) |
 | Move/resize a window, confirmed | 20–90 ms (shell call 1–12 ms) |
+
+## License
+
+MIT, © Stepwise Studio. See [LICENSE](LICENSE).

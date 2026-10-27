@@ -1,11 +1,11 @@
-"""The driver's own logic that needs no desktop: how monitors, sizes and windows are named, and the MCP handshake.
-(It drives AT-SPI and the shell for real in evals/computer_use.py.)"""
+"""Snoofy's own logic that needs no desktop: how monitors, sizes and windows are named, and the MCP handshake.
+(Run: python3 -m pytest test_snoofy.py. The real desktop is exercised by the app that embeds it.)"""
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "snoofy"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 D = pytest.importorskip("snoofy")  # needs the system's PyGObject
 M = pytest.importorskip("snoofy_mcp")
 
