@@ -11,7 +11,10 @@ Guardrails live here, in code, not in the prompt:
   happens through `commit`, after the user approved a preview (screenshot + the text on the page) and only if the page
   still shows exactly what they approved (fingerprint).
 - Passwords: teammates never type into a password field. The user signs in themselves from the live view (takeover);
-  while they hold the browser, teammates can't act in it.
+  while they hold the browser, teammates can't act in it. What they type there can be saved (passwords.py) and then
+  filled by the server itself (fill_login), only on that site: the model never sees it.
+- Time: an OK lasts GRANT_S; 5 minutes before the end the teammate is told (`ending`) and asks for more if it needs
+  it (a Keep going card); unanswered, its next step waits on that card.
 - Reading for `read_page` happens in a throwaway incognito context: no cookies, so a link can't act as the user.
 """
 import asyncio
@@ -139,6 +142,7 @@ class Tab:
         self.ids: dict[int, str] = {}
         self.count = [0, 0]  # snapshots, element ids
         self.cursor: dict | None = None  # where the teammate last pointed and what it did there (the live view's cursor)
+        self.captured: dict = {}  # what the user typed into a sign-in, to save if they say so (memory only, 10 min)
 
     async def cdp(self, method: str, params: dict | None = None, timeout: float = 30) -> dict:
         self.used = self.browser.used = time.time()
@@ -374,12 +378,12 @@ ALIASES = {"twitter.com": "x.com", "x.com": "twitter.com"}
 
 
 def grant(owner_id: str, *sites: str) -> list[str]:
-    g = _grants.setdefault(owner_id, {})
+    g, until = _grants.setdefault(owner_id, {}), time.time() + GRANT_S
     out = []
     for s in sites:
         if site := site_of(s):
             for one in {site, ALIASES.get(site, site)}:
-                g[one] = time.time() + GRANT_S
+                g[one] = until
             out.append(site)
     return out
 
@@ -387,6 +391,27 @@ def grant(owner_id: str, *sites: str) -> list[str]:
 def granted(owner_id: str) -> list[str]:
     now = time.time()
     return sorted(s for s, until in (_grants.get(owner_id) or {}).items() if until > now)
+
+
+_warned: set[tuple[str, str, float]] = set()
+_last: dict[tuple[str, str], str] = {}  # (owner, tab) -> the page it was last on (reopened after a pause)
+
+
+def last_url(owner_id: str, tab: str) -> str:
+    return _last.get((owner_id, tab), "")
+
+
+def ending(owner_id: str) -> str:
+    """Once per OK, 5 minutes before it runs out: a note telling the teammate to ask for more time if the task needs it
+    (at minute 15 of 20). Unanswered, the OK runs out and the teammate's next step waits on the card: nothing lost."""
+    now = time.time()
+    for site, until in sorted((_grants.get(owner_id) or {}).items(), key=lambda kv: kv[1]):
+        if 0 < until - now <= 5 * 60 and (owner_id, site, until) not in _warned:
+            _warned.update({(owner_id, site, until), (owner_id, ALIASES.get(site, site), until)})
+            return (f"\n\n⏱ Their OK for {site} ends in {max(1, round((until - now) / 60))} min. If the task needs longer, "
+                    f"call browser_use with site {site}, more_time true and what's left as the task now; if it'll be done "
+                    "by then, carry on.")
+    return ""
 
 
 def allowed(owner_id: str, url: str) -> bool:
@@ -481,6 +506,8 @@ async def snapshot(b: Tab) -> dict:
     b.count[0] += 1
     sid = f"b{b.count[0]}"
     b.snaps[sid] = {"url": url, "elements": {e["id"]: e for e in elements}, "at": time.time()}
+    if url.startswith("http"):
+        _last[(b.owner_id, b.key)] = url
     for old in list(b.snaps)[:-20]:
         b.snaps.pop(old, None)
     blocked, b.blocked = b.blocked, ""
@@ -517,7 +544,8 @@ def text(snap: dict) -> str:
         lines.append(f"(only the first {MAX_ELEMENTS} elements; scroll with KEYS page_down to see more)")
     if snap.get("login"):
         lines.append("This is a sign-in page. Never type a password or a code, and never ask for one in chat: call "
-                     "browser_signin with this site, and they sign in themselves.")
+                     "browser_fill_login with this site (their saved password, filled by the server); if none is "
+                     "saved, browser_signin, and they sign in themselves.")
     return "\n".join(lines)
 
 
@@ -1008,9 +1036,14 @@ async def _user_input(b: Tab, m: dict) -> dict | None:
         await b.cdp("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": W / 2, "y": H / 2, "deltaX": 0, "deltaY": float(m.get("dy", 0))})
     elif kind == "text":
         await b.cdp("Input.insertText", {"text": str(m.get("v", ""))[:2000]})
+        await _capture(b)
     elif kind == "key":
+        if str(m.get("k", "")).lower() == "enter":
+            await _capture(b)  # before the page moves on
         for _ in range(max(1, min(int(m.get("n", 1)), 200))):
             await _key(b, str(m.get("k", "")))
+        if str(m.get("k", "")).lower() == "backspace":
+            await _capture(b)
     elif kind == "back":
         await b.cdp("Runtime.evaluate", {"expression": "history.back()"})
     elif kind == "go":
@@ -1018,6 +1051,84 @@ async def _user_input(b: Tab, m: dict) -> dict | None:
         if url:
             await b.cdp("Page.navigate", {"url": url if re.match(r"https?://", url) else "https://" + url})
     return None
+
+
+# ------------------------------------------------------------------ saved sign-ins (passwords.py keeps them)
+CAPTURE = """(() => { const a = document.activeElement; if (!a || a.tagName !== 'INPUT') return null;
+  const t = (a.type || '').toLowerCase(), ac = (a.autocomplete || '').toLowerCase(), v = e => e.offsetParent !== null;
+  const isUser = e => e.type === 'email' || /username|email/.test(e.autocomplete || '') || /user|mail|login|phone|identifier/i.test(e.name + ' ' + e.id);
+  if (t === 'password') { const u = [...(a.form || document).querySelectorAll('input')].find(e => e !== a && v(e) && isUser(e));
+    return {kind: 'password', value: a.value, user: u ? u.value : ''} }
+  return isUser(a) || ac.includes('username') ? {kind: 'user', value: a.value} : null })()"""
+# Marks the sign-in fields on the page (a visible username/email box, a visible password box) for fill_login.
+FIELDS = """(() => { const v = e => e.offsetParent !== null && !e.disabled && !e.readOnly;
+  const ins = [...document.querySelectorAll('input')].filter(v); document.querySelectorAll('[data-tl-fill]').forEach(e => e.removeAttribute('data-tl-fill'));
+  const pw = ins.find(e => (e.type || '').toLowerCase() === 'password');
+  const user = ins.find(e => e !== pw && (e.type === 'email' || /username|email/.test(e.autocomplete || '') ||
+    /user|mail|login|phone|identifier|session_key/i.test(e.name + ' ' + e.id) || (!pw && e.type === 'text' && ins.length <= 3)));
+  if (user) user.setAttribute('data-tl-fill', 'user'); if (pw) pw.setAttribute('data-tl-fill', 'pw');
+  return {user: !!user, pw: !!pw} })()"""
+
+
+async def _capture(b: Tab) -> None:
+    """Keeps what the user is typing into a sign-in (in this tab's memory only), so they can save it afterwards."""
+    try:
+        r = await b.cdp("Runtime.evaluate", {"expression": CAPTURE, "returnByValue": True})
+        got = (r.get("result") or {}).get("value")
+        if not got or not got.get("value"):
+            return
+        site = site_of((await _url(b))[0])
+        c = b.captured if b.captured.get("site") == site else {"site": site, "user": "", "secret": ""}
+        if got["kind"] == "password":
+            c["secret"], c["user"] = got["value"], got.get("user") or c["user"]
+        else:
+            c["user"] = got["value"]
+        c["at"] = time.time()
+        b.captured = c
+    except Exception:
+        pass  # never in the way of their typing
+
+
+def captured(owner_id: str, tab: str) -> dict:
+    """The sign-in the user just typed in this tab ({site, user, secret}), if any, in the last 10 minutes."""
+    t = _browsers[owner_id].tabs.get(tab) if owner_id in _browsers else None
+    c = t.captured if t else {}
+    return c if c.get("secret") and time.time() - c.get("at", 0) < 600 else {}
+
+
+def forget_captured(owner_id: str, tab: str) -> None:
+    t = _browsers[owner_id].tabs.get(tab) if owner_id in _browsers else None
+    if t:
+        t.captured = {}
+
+
+async def fill_login(owner_id: str, tab: str, site: str, username: str, secret: str) -> dict:
+    """Types a saved sign-in into the page (only on that very site) and presses Enter. The secret goes from the
+    server straight into the field; the teammate gets the page after, never the password."""
+    b = await _tab(owner_id, tab)
+    async with b.lock:
+        if b.takeover:
+            raise Busy("They're using the browser themselves right now. Wait for them, then try again.")
+        url, _ = await _url(b)
+        host = (urlparse(url).hostname or "").lower()
+        if not url.startswith("https://") or not any(host == s or host.endswith("." + s) for s in {site, ALIASES.get(site, site)}):
+            raise PermissionError(f"The tab is on {host or 'no page'}, not {site}: open {site}'s sign-in page first "
+                                  "(browser_look), then fill.")
+        found = ((await b.cdp("Runtime.evaluate", {"expression": FIELDS, "returnByValue": True})).get("result") or {}).get("value") or {}
+        filled = []
+        for mark, value, what in (("user", username, "username"), ("pw", secret, "password")):
+            if found.get(mark) and value:
+                await _point(b, None, f"filling the {what}")
+                await b.cdp("Runtime.evaluate", {"expression": f"(() => {{ const e = document.querySelector('[data-tl-fill={mark}]'); "
+                                                               "e.focus(); e.select(); })()"})
+                await b.cdp("Input.insertText", {"text": value})
+                filled.append(what)
+        if not filled:
+            raise LookupError("No sign-in box on this page: open the site's sign-in page (or press its Sign in button) "
+                              "and fill again.")
+        await _key(b, "Enter")
+        await settle(b)
+        return {"status": "done", "did": f"filled the {' and '.join(filled)} and pressed Enter", **await snapshot(b)}
 
 
 # ------------------------------------------------------------------ lifecycle

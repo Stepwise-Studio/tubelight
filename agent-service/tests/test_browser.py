@@ -174,3 +174,75 @@ async def test_a_scheduled_post_is_preapproved_once_word_for_word(env):
     assert not await browser.preapproved(o, "dev", {"site": "x.com", "text": "shipping tubelight today"})
     assert await browser.preapproved(o, "sol", {"site": "x.com", "text": "Shipping Tubelight today"})
     assert not await browser.preapproved(o, "sol", {"site": "x.com", "text": "Shipping Tubelight today"})  # used up
+
+
+def test_the_ok_asks_for_more_time_once_near_its_end(monkeypatch):
+    owner = OWNER + "-time"
+    B.revoke(owner)
+    B.grant(owner, "x.com")
+    assert B.ending(owner) == ""  # 20 minutes left: nothing to say
+    now = __import__("time").time()
+    monkeypatch.setattr(B.time, "time", lambda: now + 16 * 60)
+    note = B.ending(owner)
+    assert "more_time true" in note and "4 min" in note
+    assert B.ending(owner) == ""  # once per OK (x.com and its twitter.com alias alike)
+    B.grant(owner, "x.com")  # they said keep going: a new OK, warned again near its end
+    monkeypatch.setattr(B.time, "time", lambda: now + 32 * 60)
+    assert "more_time" in B.ending(owner)
+    B.revoke(owner)
+
+
+async def test_saved_passwords_are_encrypted_and_never_listed(env, tmp_path, monkeypatch):
+    from app import memory, passwords
+    monkeypatch.setattr(passwords, "KEY", tmp_path / "secrets" / "passwords.key")
+    monkeypatch.setattr(passwords, "_fernet", [])
+    o = "00000000-0000-0000-0000-0000000000ab"
+    await passwords.save(o, "x.com", "me@example.com", "hunter2-secret")
+    raw = (await memory.store.aget(("passwords", o), "x.com")).value
+    assert "hunter2" not in str(raw) and (tmp_path / "secrets" / "passwords.key").stat().st_mode & 0o777 == 0o600
+    listed = await passwords.sites(o)
+    assert listed[0]["username"] == "me@example.com" and "secret" not in listed[0] and "hunter2" not in str(listed)
+    assert await passwords.get(o, "x.com") == ("me@example.com", "hunter2-secret")
+    assert not passwords.allowed(o, "x.com")
+    passwords.allow(o, "x.com")
+    assert passwords.allowed(o, "x.com") and not passwords.allowed(o, "linkedin.com")
+    await passwords.forget(o, "x.com")
+    assert await passwords.get(o, "x.com") is None and not passwords.allowed(o, "x.com")
+
+
+LOGIN_PAGE = """<form onsubmit="event.preventDefault(); document.body.innerHTML = '<h1>Welcome ' + this.u.value + '</h1>' +
+  (this.p.value === 'hunter2-secret' ? '<p>right password</p>' : '<p>wrong</p>')">
+  <input name="u" type="email" aria-label="Email"><input name="p" type="password" aria-label="Password">
+  <button>Log in</button></form>"""
+
+
+@needs_chromium
+async def test_a_saved_sign_in_is_kept_and_filled_on_its_own_site_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(B, "DATA", tmp_path / "browser")
+    monkeypatch.setitem(B.FAKE, "site.test", LOGIN_PAGE)
+    monkeypatch.setitem(B.FAKE, "other.test", LOGIN_PAGE)
+    owner = OWNER + "-pw"
+    B.grant(owner, "site.test", "other.test")
+    try:
+        # The user signs in by hand (Sign in screen): what they type is kept for saving, in the tab's memory only.
+        snap = await B.look(owner, "https://site.test/", tab="sol")
+        t = B._browsers[owner].tabs["sol"]
+        by = lambda s, name: next(e for e in s["elements"] if e["name"] == name)  # noqa: E731
+        for field, text in (("Email", "me@example.com"), ("Password", "hunter2-secret")):
+            await t.cdp("DOM.focus", {"backendNodeId": by(snap, field)["backend"]})
+            await B._user_input(t, {"t": "text", "v": text})
+        assert B.captured(owner, "sol") == {"site": "site.test", "user": "me@example.com", "secret": "hunter2-secret",
+                                            "at": B.captured(owner, "sol")["at"]}
+        B.forget_captured(owner, "sol")
+        assert B.captured(owner, "sol") == {}
+
+        # A teammate fills it: only on that site, and the page after never shows the password.
+        await B.look(owner, "https://other.test/", tab="sol")
+        with pytest.raises(PermissionError):
+            await B.fill_login(owner, "sol", "site.test", "me@example.com", "hunter2-secret")
+        await B.look(owner, "https://site.test/", tab="sol")
+        got = await B.fill_login(owner, "sol", "site.test", "me@example.com", "hunter2-secret")
+        assert "username and password" in got["did"] and "right password" in B.text(got)
+        assert "hunter2" not in B.text(got)
+    finally:
+        await B.stop(owner)

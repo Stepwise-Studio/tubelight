@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Platform, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
-  Brain02Icon, BrowserIcon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, Plug01Icon,
+  Brain02Icon, BrowserIcon, Key01Icon, DashboardSpeed01Icon, LaptopIcon, Logout01Icon, Plug01Icon,
   Settings02Icon, SmartPhone01Icon,
 } from '@hugeicons/core-free-icons'
 
@@ -313,6 +313,8 @@ function BrowserRow() {
     <>
       <Divider />
       <ListRow title="Browser" subtitle={summary} icon={BrowserIcon} chevron onPress={() => router.push('/browser')} />
+      <Divider />
+      <ListRow title="Saved passwords" subtitle="Teammates sign you back in; they never see them" icon={Key01Icon} chevron onPress={() => router.push('/passwords')} />
     </>
   )
 }

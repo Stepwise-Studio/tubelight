@@ -13,6 +13,7 @@ import array
 import base64
 import json
 import math
+import re
 import threading
 import time
 import urllib.parse
@@ -31,6 +32,11 @@ KEEP_S = 90  # the card stays this long after that, to read (× or the shortcut 
 VOICE_LEVEL = 0.12  # a microphone level this loud counts as them talking (it keeps the session open)
 TAIL_S = 0.35  # the microphone stays shut this long after the reply stops playing (the room's echo)
 CHUNK = 1280  # 40 ms of 16 kHz mono 16-bit
+# A yes is checked against what they actually said (Gemini's transcript of their words), never taken from the model.
+YES = re.compile(r"\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|post it|send it|confirm(ed)?|correct|please do|haan|"
+                 r"go for it|sounds good)\b", re.I)
+NO = re.compile(r"\b(no|nope|not|don'?t|stop|cancel|wait|hold on|nahi|mat)\b", re.I)
+COMMIT_KEYS = re.compile(r"^(ctrl|control|meta|super|cmd|mod)\+(enter|return)$", re.I)  # sends a post or message
 
 
 def _later(ctx: GLib.MainContext, fn, *args) -> None:
@@ -109,7 +115,8 @@ class Session:
         self.pending = b""
         self.speaking_until = 0.0
         self.last = time.monotonic()
-        self.turns: list[dict] = []  # the card's conversation: {you, reply, detail, closed}
+        self.turns: list[dict] = []  # the card's conversation: {you, reply, detail, closed, at}
+        self.asked: dict[str, float] = {}  # a risky step -> when they were asked about it
         self.tasks = 0
         self.verb = ""
         self.over = False
@@ -251,7 +258,7 @@ class Session:
     def _turn(self, new: bool = False) -> dict:
         """The exchange being spoken now; a new one when they start talking after the last one finished."""
         if not self.turns or new and self.turns[-1]["closed"]:
-            self.turns.append({"you": "", "reply": "", "detail": "", "closed": False})
+            self.turns.append({"you": "", "reply": "", "detail": "", "closed": False, "at": time.monotonic()})
         return self.turns[-1]
 
     def _view(self) -> list[dict]:
@@ -296,21 +303,50 @@ class Session:
             return s.close_windows(str(a["app"]))
         if name == "look_at_app":
             return s.text(s.observe(str(a["app"]), str(a.get("window") or "")))[:9000]
+        if name == "open_website":
+            r = s.open_url(str(a["url"]), a.get("new_tab", True) is not False, str(a.get("browser") or ""))
+            return s.text(r)[:9000]
+        if name == "read_page":
+            r = s.page(str(a.get("browser") or ""))
+            return f"{r['app']}, “{r['window']}”:\n{r['text']}" + ("\n(cut here: the page goes on)" if r["truncated"] else "")
         if name == "act_in_app":
             sid, eid, action = str(a["snapshot"]), str(a["element"]), str(a.get("action") or "CLICK").upper()
             e = s.element(sid, eid)
-            if action in ("CLICK", "DOUBLE_CLICK") and s.risky(e["name"]) and not a.get("confirmed"):
-                return (f"Not pressed: “{e['name']}” could delete, send or pay for something. Ask them out loud; only if "
-                        "they say yes, call again with confirmed true.")
+            if action in ("CLICK", "DOUBLE_CLICK") and s.risky(e["name"]):
+                if not self._confirmed(f"press “{e['name']}”", a, s.typed(sid)):
+                    return self._ask(f"press “{e['name']}”", s.typed(sid))
             r = s.act(sid, eid, action, str(a.get("value") or ""))
             head = " ".join(str(r[k]) for k in ("status", "did", "why") if r.get(k))
             if r.get("reacted") is False:
                 head += " (the app showed no change)"
             return (head + "\n" + s.text(r))[:9000]
         if name == "press_keys":
+            sent = next((k for k in a.get("keys") or [] if COMMIT_KEYS.match(str(k).strip())), None)
+            if sent and not self._confirmed(f"press {sent}", a, []):
+                return self._ask(f"press {sent} (it sends what's written)", [])
             r = s.keys([str(k) for k in a.get("keys") or []][:12], str(a.get("app") or ""))
             return r.get("did", "pressed") + ("" if r.get("reacted") is not False else " (the app showed no change)")
         return f"No tool called {name}."
+
+    def _ask(self, step: str, typed: list[str]) -> str:
+        """A step that posts, sends, deletes or pays: nothing happens until they say yes out loud."""
+        self.asked[step.split(" (")[0]] = time.monotonic()
+        said = "; ".join(f"“{t[:300]}”" for t in typed)
+        self._turn()["detail"] = f"Waiting for your yes: {step}" + (f"\nWritten: {said}" if said else "")
+        return (f"Not done yet: {step} can't be undone. Say exactly what will happen" + (f" (what's written: {said})" if said
+                else "") + " and ask them. Only after they say yes, call again with confirmed true.")
+
+    def _confirmed(self, step: str, a: dict, typed: list[str]) -> bool:
+        """True only when they were asked about this step and said yes since (in their own words, not the model's)."""
+        at = self.asked.get(step)
+        if not a.get("confirmed") or at is None:
+            return False
+        said = " ".join(t["you"] for t in self.turns if t.get("at", 0) > at and t["you"].strip())
+        ok = bool(YES.search(said)) and not NO.search(said)
+        if ok:
+            self.asked.pop(step, None)
+            self._turn()["detail"] = ""
+        return ok
 
     def _done(self, fc: dict, result: str) -> None:
         self.tasks -= 1
@@ -379,6 +415,10 @@ def _doing(name: str, a: dict) -> str:
     if name == "act_in_app":
         what = {"TYPE": "Typing", "READ": "Reading", "SCROLL_TO": "Scrolling", "FOCUS": "Focusing"}
         return what.get(str(a.get("action", "")).upper(), "Clicking") + (f" in {app}" if app else "…")
+    if name == "open_website":
+        return "Opening " + str(a.get("url") or "the page").removeprefix("https://").removeprefix("www.")[:40]
+    if name == "read_page":
+        return "Reading the page"
     return {"open_app": f"Opening {app}", "close_app": f"Closing {app}", "press_keys": f"Pressing keys in {app}".strip(),
             "list_windows": "Looking at your windows", "look_at_app": f"Looking at {app}",
             "run_task": "Asking your teammate: " + str(a.get("request") or "")[:70]}.get(name, "Working…")

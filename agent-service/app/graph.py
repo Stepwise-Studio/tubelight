@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, brief, browser, computers, ground, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
+from . import automations, brief, browser, computers, passwords, ground, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -317,7 +317,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "them). To work IN an app (click, type, fill forms, menus): computer_look reads its window as elements with ids; "
                      "computer_use(app, task) asks them once per task; then computer_act on those ids, computer_keys for "
                      "shortcuts, computer_subtask to hand off a run of simple steps. Prefer this over commands for anything "
-                     "done in an app's window. To move, resize, maximize or minimize windows or send one to another "
+                     "done in an app's window. The web: computer_browse opens a site in their own browser (signed in "
+                     "as them; its password manager fills sign-ins, so never ask for or type a password) and "
+                     "computer_read_page reads a whole page; then computer_use + computer_act as with any app. To move, resize, maximize or minimize windows or send one to another "
                      "monitor (\"put Firefox on my laptop screen\", \"left half\"): computer_place_window at once, no "
                      "asking (computer_windows lists monitors and windows). Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
                      "\"Close <name>\") on the closable ones. To close or quit an app always call computer_close_app with "
@@ -798,6 +800,9 @@ def make_gate(ctx: RunCtx):
                 continue  # the user turned off "ask before commands" for this computer's chat
             if tc["name"] == "browser_use" and ctx.proactive and ctx.event_type not in ("delegate", "phone_request"):
                 continue  # an automation or follow-up they set up browses on its own; ⚑ commits still ask (or were pre-approved)
+            if tc["name"] == "browser_fill_login" and (ctx.proactive and ctx.event_type not in ("delegate", "phone_request")
+                                                       or passwords.allowed(ctx.owner_id, browser.site_of(str(tc["args"].get("site") or "")))):
+                continue  # a run they set up to work alone, or the next step of a sign-in they just OK'd
             if tc["name"] == "browser_commit":
                 try:  # the screen, the button and the text as they are now: what they approve is what gets pressed
                     draft = await browser.preview(ctx.owner_id, tc["args"], tab=tm["id"])

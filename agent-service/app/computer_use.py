@@ -33,8 +33,24 @@ def grant(owner_id: str, cid: str, *apps: str) -> None:
 
 
 def granted(owner_id: str, cid: str, app: str) -> bool:
-    now, want = time.time(), app.strip().lower()
-    return any(until > now and (a in want or want in a) for a, until in (_grants.get((owner_id, cid)) or {}).items())
+    """While they're using it, an OK doesn't run out: each use keeps it going for another GRANT_S."""
+    now, want, g = time.time(), app.strip().lower(), _grants.get((owner_id, cid)) or {}
+    hit = next((a for a, until in g.items() if until > now and (a in want or want in a)), None)
+    if hit:
+        g[hit] = now + GRANT_S
+    return hit is not None
+
+
+# Posting, sending, deleting, paying on their computer: the teammate says exactly what will happen and asks in the chat;
+# their next message has to be a yes. Checked here against what they wrote, never taken from the model.
+YES = re.compile(r"\b(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|post it|send it|confirm(ed)?|correct|please do|haan|"
+                 r"go for it|sounds good|approved?)\b", re.I)
+NO = re.compile(r"\b(no|nope|not|don'?t|stop|cancel|wait|hold on|nahi|mat)\b", re.I)
+asked: dict[tuple[str, str, str], float] = {}  # (owner, computer, element or "keys") -> when they were asked
+
+
+def said_yes(text: str) -> bool:
+    return bool(YES.search(text)) and not NO.search(text)
 
 
 def any_granted(owner_id: str, cid: str) -> bool:

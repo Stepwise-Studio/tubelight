@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "16"  # 16: the hotkey (say it, it's done), windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "17"  # 17: websites in your own browser (open, read whole pages), posts/sends only after a yes; 16: the hotkey (say it, it's done), windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -513,12 +513,28 @@ def _with_text(d, r: dict) -> dict:
 
 def ui_act(c: dict, a: dict) -> dict:
     d = _driver(c, a)
+    e = d.element(a["snapshot"], a["element"])
+    if str(a["action"]).upper() in ("CLICK", "DOUBLE_CLICK") and d.risky(e["name"]) and not a.get("confirmed"):
+        return {"status": "needs_ok", "step": f"press “{e['name']}”", "typed": d.typed(a["snapshot"])}
     return _with_text(d, d.act(a["snapshot"], a["element"], a["action"], str(a.get("value") or "")))
 
 
 def ui_keys(c: dict, a: dict) -> dict:
     d = _driver(c, a)
+    sent = next((k for k in a["keys"] if re.match(r"^(ctrl|control|meta|super|cmd|mod)\+(enter|return)$", str(k).strip(), re.I)), None)
+    if sent and not a.get("confirmed"):
+        return {"status": "needs_ok", "step": f"press {sent}", "typed": []}
     return _with_text(d, d.keys(list(a["keys"]), a.get("app") or ""))
+
+
+def ui_open(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    r = d.open_url(a["url"], a.get("new_tab", True) is not False, a.get("browser") or "")
+    return {"snapshot": r["snapshot"], "app": r["app"], "text": d.text(r)}
+
+
+def ui_page(c: dict, a: dict) -> dict:
+    return _driver(c, a).page(a.get("browser") or "")
 
 
 def ui_windows(c: dict, a: dict) -> dict:
@@ -740,7 +756,7 @@ def box_close(c: dict, a: dict) -> str:
 
 OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
        "quit_app": quit_app, "screenshot": screenshot,
-       "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch, "ui_windows": ui_windows, "ui_place": ui_place,
+       "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch, "ui_open": ui_open, "ui_page": ui_page, "ui_windows": ui_windows, "ui_place": ui_place,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close,
        "sync_dirs": sync_dirs, "sync_scan": sync_scan, "sync_push": sync_push}

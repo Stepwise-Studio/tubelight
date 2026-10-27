@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, browser, mail, results, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, browser, passwords, mail, results, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -102,24 +102,24 @@ INTERNAL = {
     "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read", "inbox": "read",
-    "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
+    "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_fill_login": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
     "read_file": "read", "open_repo": "read", "run_shell": "draft", "write_file": "draft", "git_push": "act",
     "ask_user": "read", "connect_app": "read", "ask_teammate": "read", "new_chat": "read",
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_windows": "read", "computer_place_window": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_browse": "read", "computer_read_page": "read", "computer_windows": "read", "computer_place_window": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
 PROMPTS = {"ask_user", "connect_app", "browser_signin"}
 LABELS = {
     "browser_use": "Asking to use the browser", "browser_look": "Looking at a web page", "browser_act": "Using a web page",
-    "browser_keys": "Pressing keys on a web page", "browser_subtask": "Working on a web page", "browser_commit": "Pressing the button",
+    "browser_keys": "Pressing keys on a web page", "browser_subtask": "Working on a web page", "browser_commit": "Pressing the button", "browser_fill_login": "Signing you in",
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_browse": "Opening a website", "computer_read_page": "Reading the page", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -256,6 +256,10 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"Upload {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]} to Google Drive{where}"[:80]
     if name == "computer_close_app":
         return f"Close {str(args.get('name') or 'an app')}"[:80]
+    if name == "browser_fill_login":
+        return f"Sign in to {args.get('site') or 'a site'} with your saved password"[:80]
+    if name == "browser_use" and args.get("more_time"):
+        return f"Keep going on {args.get('site') or 'the site'} for 20 more min: {str(args.get('task') or '')}"[:80]
     if name == "browser_use":
         return f"Use the browser on {args.get('site') or 'a site'}: {str(args.get('task') or '')}"[:80]
     if name == "computer_use":
@@ -578,12 +582,17 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 got = await work
             except (browser.Busy, browser.NeedsOK, PermissionError, LookupError, ValueError, RuntimeError) as e:
                 return str(e)
-            return got if isinstance(got, str) else (cu.head(got) + "\n" + browser.text(got)).strip()
+            out = got if isinstance(got, str) else (cu.head(got) + "\n" + browser.text(got)).strip()
+            return out + browser.ending(owner)
 
-        async def browser_use(site: str, task: str) -> str:
+        async def browser_use(site: str, task: str, more_time: bool = False) -> str:
             sites = browser.grant(owner, *re.split(r"[,\s]+", site))
             if not sites:
                 return "site: the website's address, like x.com."
+            if more_time:
+                # the browser may have closed while the card waited (5 idle minutes): back to the page it was on
+                got = await _b(browser.look(owner, browser.last_url(owner, tab), tab=tab, label=tm["name"]))
+                return f"They said keep going: 20 more minutes on {', '.join(sites)}. Carry on where you were.\n" + got
             got = await _b(browser.look(owner, sites[0], tab=tab, label=tm["name"]))
             return (f"They OK'd the browser on {', '.join(sites)} for: {task} (20 minutes). Work through it with "
                     "browser_act (browser_subtask for a run of simple steps). A ⚑ button (post, send, buy...) goes "
@@ -619,6 +628,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def browser_signin(site: str, reason: str = "", url: str = "") -> str:
             return "handled by the graph"
 
+        async def browser_fill_login(site: str) -> str:
+            host = browser.site_of(site)
+            saved = await passwords.get(owner, host)
+            if not saved:
+                return f"No saved password for {host}. Call browser_signin: they sign in themselves (and can save it)."
+            passwords.allow(owner, host)  # the next step of this sign-in (a password page after the username one)
+            return await _b(browser.fill_login(owner, tab, host, *saved))
+
         async def browser_commit(snapshot: str, element: str, what: str) -> str:
             return await _b(browser.commit(owner, snapshot, element, tab=tab))
 
@@ -643,11 +660,18 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "approve the exact text now; at `when` (their local time, like 2026-10-28T09:30) you publish "
                             "it without asking again, as long as the text is unchanged. site: like x.com. text: the whole "
                             "post, final."),
+            StructuredTool.from_function(coroutine=browser_fill_login, name="browser_fill_login",
+                description="Sign in with the password they saved in Tubelight for this site: the server types it "
+                            "into the sign-in page open in your tab and presses Enter (you never see it). They OK it "
+                            "once per sign-in. A site that asks for the username first, then the password: call it "
+                            "again on the password page. Nothing saved, or a code is asked for: browser_signin."),
             StructuredTool.from_function(coroutine=browser_use, name="browser_use",
                 description="Ask to use Tubelight's web browser on a site for a task (post, reply, fill a form, change a "
                             "setting): once per task, they OK it, then you can act on that site for 20 minutes. Its sign-ins "
                             "are theirs (they sign in themselves). site: the address, like x.com (several: comma-separated). "
-                            "task: what you'll do, in a line they read before saying yes. Answers with the page."),
+                            "task: what you'll do, in a line they read before saying yes. Answers with the page. "
+                            "more_time: true when the OK is about to run out and the task isn't done: task then says "
+                            "what's left; they get a Keep going card."),
             StructuredTool.from_function(coroutine=browser_look, name="browser_look",
                 description="Read the browser's page: every link, button, field and text, each with an id ([e12]). url: go "
                             "there first (only sites they allowed)."),
@@ -1312,15 +1336,47 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 return "Open apps and windows (▶ in front): " + cu.apps_line(await computers.call(dev, "ui_apps", {"full": True}, 20))
             return _snap(await computers.call(dev, "ui_look", {"app": app, "window": window, "full": True}, 30))
 
-        async def computer_act(snapshot: str, element: str, action: str, value: str = "") -> str:
+        async def _yes_since(key: tuple, confirmed: bool) -> bool:
+            """They were asked about this step and their reply in this chat since then is a yes."""
+            at = cu.asked.get(key)
+            if not confirmed or at is None:
+                return False
+            rows = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "sender_type": "eq.user",
+                                                "created_at": f"gt.{datetime.fromtimestamp(at, UTC).isoformat()}",
+                                                "order": "created_at.desc", "limit": "3", "select": "text"})
+            ok = cu.said_yes(" ".join(r.get("text") or "" for r in rows))
+            if ok:
+                cu.asked.pop(key, None)
+            return ok
+
+        def _ask(key: tuple, got: dict) -> str:
+            cu.asked[key] = time.time()
+            said = "; ".join(f"“{t[:300]}”" for t in got.get("typed") or [])
+            return (f"Not done: {got['step']} can't be undone. Tell them exactly what will happen"
+                    + (f" (what's written: {said})" if said else "") + ", ask them, and stop here. Only after they reply "
+                    "yes in the chat, call this again with confirmed true: their own reply is checked.")
+
+        async def computer_act(snapshot: str, element: str, action: str, value: str = "", confirmed: bool = False) -> str:
             app = ctx.ui_snaps.get(snapshot)
             if app is None:
                 return "Look at the app first (computer_look) and act on that snapshot's ids."
             if action.upper() != "READ" and not cu.granted(ctx.owner_id, dev, app):
                 return f"Ask first: call computer_use with app {app!r} and the task; they OK it once."
+            key = (ctx.owner_id, dev, element)
             got = await computers.call(dev, "ui_act", {"snapshot": snapshot, "element": element, "action": action,
-                                                       "value": value, "full": True}, 40)
+                                                       "value": value, "confirmed": await _yes_since(key, confirmed),
+                                                       "full": True}, 40)
+            if got.get("status") == "needs_ok":
+                return _ask(key, got)
             return cu.head(got) + "\n" + _snap(got)
+
+        async def computer_browse(url: str, new_tab: bool = True, browser: str = "") -> str:
+            got = await computers.call(dev, "ui_open", {"url": url, "new_tab": new_tab, "browser": browser, "full": True}, 45)
+            return f"Opened in {got.get('app')}. To click or type here, computer_use with app {got.get('app')!r} first.\n" + _snap(got)
+
+        async def computer_read_page(browser: str = "") -> str:
+            got = await computers.call(dev, "ui_page", {"browser": browser, "full": True}, 45)
+            return f"{got['app']}, “{got['window']}”:\n{got['text']}" + ("\n(cut here: the page goes on)" if got.get("truncated") else "")
 
         async def computer_windows() -> str:
             got = await computers.call(dev, "ui_windows", {"full": True}, 20)
@@ -1341,10 +1397,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return (f"{w['app']} “{w['title'][:60]}” is now on {w['monitor_name']}, {w['w']}x{w['h']} at {w['x']},{w['y']}"
                     + "".join(f", {k}" for k in ("maximized", "minimized") if w[k]) + ".")
 
-        async def computer_keys(keys: list[str], app: str = "") -> str:
+        async def computer_keys(keys: list[str], app: str = "", confirmed: bool = False) -> str:
             if not cu.any_granted(ctx.owner_id, dev):
                 return "Ask first: call computer_use with the app and the task; they OK it once."
-            got = await computers.call(dev, "ui_keys", {"keys": keys[:12], "app": app, "full": True}, 30)
+            key = (ctx.owner_id, dev, "keys")
+            got = await computers.call(dev, "ui_keys", {"keys": keys[:12], "app": app, "full": True,
+                                                        "confirmed": await _yes_since(key, confirmed)}, 30)
+            if got.get("status") == "needs_ok":
+                return _ask(key, got)
             return f"{cu.head(got)} (in front: {got.get('front') or 'unknown'})\n" + _snap(got)
 
         async def computer_subtask(app: str, goal: str, inputs: list[str] | None = None, done_when: str = "", max_steps: int = 12) -> str:
@@ -1405,7 +1465,17 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "TYPE (value: a field's new text; in a document it's written at the cursor), REPLACE (a document's whole text: "
                             "only when they asked for that), SET_VALUE (sliders, spin boxes), FOCUS, READ (its full "
                             "text), SCROLL_TO. If the app changed since the snapshot nothing happens and you get the new "
-                            "screen to decide again. Answers with the app's screen after it settles."),
+                            "screen to decide again. Answers with the app's screen after it settles. A button that "
+                            "posts, sends, deletes or pays answers 'Not done': say exactly what will happen, ask, stop; "
+                            "after their yes in the chat, call again with confirmed true."),
+            StructuredTool.from_function(coroutine=computer_browse, name="computer_browse",
+                description="Open a website in their own browser on this computer (signed in as them, their password "
+                            "manager fills sign-ins: never ask for or type a password) and get the screen with ids. "
+                            "url: an address or words to search. new_tab false: the tab in front. browser: only if "
+                            "they name one. Clicking and typing in it is computer_act after computer_use."),
+            StructuredTool.from_function(coroutine=computer_read_page, name="computer_read_page",
+                description="The whole page in their browser's front tab on this computer as text, the parts below "
+                            "the fold too (an article, a thread, search results, a feed)."),
             StructuredTool.from_function(coroutine=computer_windows, name="computer_windows",
                 description="List the computer's monitors (which is the laptop's own screen) and its windows: id, app, "
                             "title, which monitor, size and place, maximized/minimized/focused."),

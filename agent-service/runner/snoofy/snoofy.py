@@ -196,8 +196,10 @@ def _value(n: dict) -> str:
     return ""
 
 
-def _read(dest: str, root: str) -> list[dict]:
-    """Every showing node under `root`, in tree order, read with the calls of each level in flight together."""
+def _read(dest: str, root: str, whole: bool = False) -> list[dict]:
+    """Every showing node under `root`, in tree order, read with the calls of each level in flight together. `whole`:
+    a web page's text in full, off-screen parts too (page())."""
+    cap = 4000 if whole else MAX_TEXT
     ctx = GLib.MainContext.new()
     ctx.push_thread_default()
     try:
@@ -258,11 +260,11 @@ def _read(dest: str, root: str) -> list[dict]:
                 if I_VALUE in ifaces and role in VALUE_ROLES:
                     call(path, PROPS, "Get", GLib.Variant("(ss)", (I_VALUE, "CurrentValue")),
                          lambda v: v and n.__setitem__("current", float(v[0])))
-                if I_TEXT in ifaces and role in TEXT_ROLES:
+                if I_TEXT in ifaces and (role in TEXT_ROLES or whole and web and role not in ("document web", "document frame")):
                     def count(v) -> None:
                         n["count"] = int(v[0]) if v else 0
                         if n["count"] and role != "password text":
-                            call(n["path"], I_TEXT, "GetText", GLib.Variant("(ii)", (0, min(n["count"], MAX_TEXT))),
+                            call(n["path"], I_TEXT, "GetText", GLib.Variant("(ii)", (0, min(n["count"], cap))),
                                  lambda t: t and n.__setitem__("text", t[0]))
                     call(path, PROPS, "Get", GLib.Variant("(ss)", (I_TEXT, "CharacterCount")), count)
             for i, (d, p) in enumerate((got["kids"][0] if got["kids"] else [])[:400]):
@@ -433,6 +435,9 @@ def act(sid: str, element: str, action: str, value: str = "") -> dict:
     if role != e["role"] or name_ != e["name"]:
         return {"status": "stale", "why": "that element changed or went away", **observe(snap["app"])}
     action = action.upper()
+    if action in ("TYPE", "TYPE_TEXT", "SET_TEXT", "REPLACE") and e["role"] == "password text":
+        raise PermissionError("That's a password field: Snoofy never types passwords. The browser's own password "
+                              "manager fills it, or they type it themselves.")
     with _events.on(dest) as ev:
         did = _do(dest, path, e, action, value)
         reacted = ev.settle()
@@ -458,6 +463,13 @@ def element(sid: str, eid: str) -> dict:
     if eid not in snap["elements"]:
         raise LookupError(f"No element {eid} in snapshot {sid}.")
     return snap["elements"][eid]
+
+
+def typed(sid: str) -> list[str]:
+    """What's written in a snapshot's text fields (a post, a message): read back to the user before it's sent."""
+    snap = _snaps.get(sid) or {}
+    return [e["value"] for e in (snap.get("elements") or {}).values()
+            if "TYPE" in e["actions"] and e["value"] and e["role"] != "password text"][:4]
 
 
 def _ok(v) -> bool:
@@ -901,3 +913,89 @@ def close_windows(spec: str) -> str:
     for w in hit:
         _shell("Place", {"id": w["id"], "state": "close"})
     return f"Closed {len(hit)} window{'s' if len(hit) != 1 else ''} of {hit[0]['app']}."
+
+
+# ------------------------------------------------------------------ web pages, in the user's own browser
+# The user's browser as they use it every day (their sign-ins, their password manager), read and driven like any app:
+# no debug port, no second profile. Opening a page is the keyboard (a new tab or the address bar), reading one is the
+# accessibility tree, off-screen parts included.
+BROWSERS = ("zen", "firefox", "chrome", "chromium", "brave", "edge", "vivaldi", "librewolf", "opera", "epiphany")
+BLOCK_ROLES = {"section", "paragraph", "heading", "list", "list item", "table", "table row", "table cell",
+               "column header", "row header", "form", "article", "landmark", "block quote", "panel", "grouping",
+               "document web", "document frame", "footer", "header", "description list", "definition", "term",
+               "entry", "text", "combo box", "push button", "button", "check box", "radio button", "menu", "dialog"}
+
+
+def browser(name: str = "") -> str:
+    """The browser to use: the one named, else an open one (the one in front first), else the system's default."""
+    if name:
+        return name
+    open_ = [a for a in apps() if any(b in a["app"].lower() for b in BROWSERS)]
+    open_.sort(key=lambda a: not any(w["active"] for w in a["windows"]))
+    if open_:
+        return open_[0]["app"]
+    got = _s(lambda: subprocess.run(["xdg-settings", "get", "default-web-browser"], capture_output=True, text=True,
+                                    timeout=5).stdout.strip(), "")
+    return got.removesuffix(".desktop").replace("_", ".").rsplit(".", 1)[-1] or "firefox"
+
+
+def open_url(url: str, new_tab: bool = True, app_name: str = "") -> dict:
+    """Opens a page in the user's browser (a new tab, or this tab), waits for it to load and returns the screen."""
+    name = browser(app_name)
+    if not any(_flat(name) in _flat(a["app"]) or _flat(a["app"]) in _flat(name) for a in apps()):
+        r = launch(name)
+        name, new_tab = r.get("app") or name, False  # a fresh window already has an empty tab
+    keys(["ctrl+t" if new_tab else "ctrl+l", f"text:{url.strip()}", "enter"], name)
+    with _events.on(None) as ev:  # the page loading: wait for the browser to go quiet (8 s at most)
+        ev.settle(quiet=0.6, idle=1.5, most=8)
+    return observe(name)
+
+
+def page(app_name: str = "", limit: int = 30000) -> dict:
+    """The whole page in the browser's front tab as text, off-screen parts too: headings, paragraphs with their links
+    in place ([like this]), list items, fields and buttons. Act on it through observe()'s ids."""
+    app, name, index, win = _find(browser(app_name))
+    nodes = [n for n in _read(win.app.bus_name, win.path, whole=True) if n["web"]]
+    by_order = {n["order"]: n for n in nodes}
+    used: set = set()
+
+    def inline(n: dict) -> str:  # its text, with the links and spans inside it written in (block children: own lines)
+        out, k = [], 0
+        for ch in n.get("text", ""):
+            if ch != "\ufffc":
+                out.append(ch)
+                continue
+            c, k = by_order.get(n["order"] + (k,)), k + 1
+            if c and c["role"] not in BLOCK_ROLES:
+                used.add(c["path"])
+                s_ = inline(c) or c["name"]
+                out.append(f"[{s_}]" if c["role"] == "link" else s_)
+            else:
+                out.append("\n")
+        return "\n".join(" ".join(line.split()) for line in "".join(out).split("\n") if line.strip())
+
+    lines: list[str] = []
+    for n in nodes:
+        if n["path"] in used or n["role"] in ("document web", "document frame"):
+            continue
+        body = inline(n) if "text" in n else ""
+        role = n["role"]
+        if role == "heading":
+            body = "## " + (body or n["name"])
+        elif role == "list item":
+            body = "- " + body if body else ""
+        elif role == "link":
+            body = f"[{body or n['name']}]"
+        elif role in ("push button", "button", "toggle button"):
+            body = f"[button: {n['name'] or body}]"
+        elif role in ("entry", "combo box", "password text"):
+            body = f"[field “{n['name']}”" + ("" if role == "password text" else f" = {n.get('text', '')!r}") + "]"
+        elif role in ("image", "img") and n["name"]:
+            body = f"[image: {n['name']}]"
+        elif not body:
+            continue
+        if lines and (lines[-1] == body or lines[-1].endswith(f": {body}]") or lines[-1] == f"[{body}]"):
+            continue  # a button's or link's label, said again
+        lines.append(body)
+    out = "\n".join(lines)
+    return {"app": name, "window": _s(win.get_name), "text": out[:limit], "truncated": len(out) > limit}

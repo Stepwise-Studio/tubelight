@@ -11,7 +11,7 @@ import { TextInput, View, type LayoutChangeEvent } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ArrowLeft01Icon, Cancel01Icon, Logout01Icon, SquareLock02Icon, ViewIcon, ViewOffIcon } from '@hugeicons/core-free-icons'
+import { ArrowLeft01Icon, Cancel01Icon, Key01Icon, Logout01Icon, SquareLock02Icon, ViewIcon, ViewOffIcon } from '@hugeicons/core-free-icons'
 
 import { AgentCursor, type Cursor } from '@/components/agent-cursor'
 import { ScreenHeader } from '@/components/screen-header'
@@ -150,11 +150,23 @@ export default function BrowserScreen() {
 
   // Typing into a page field: send what changed since the last keystroke (backspaces, then the new text).
   const typeLive = (next: string) => { link.type(next); setInput(next) }
-  const giveBack = () => { send({ t: 'takeover', on: false }); setFocus(null); setInput(''); link.forget(); setHidden(true) }
+  // Signed in by hand: offer to keep that password, so a teammate can sign them back in later (the server fills it).
+  const offerSave = async (tab?: string) => {
+    if (!tab) return
+    try {
+      const got = await api<{ site: string; username?: string }>(`/browser/passwords/captured?tab=${encodeURIComponent(tab)}`)
+      if (!got.site) return
+      if (!(await confirm({ title: `Save your ${got.site} password?`, confirmLabel: 'Save',
+        body: `Teammates can then sign you back in${got.username ? ` as ${got.username}` : ''} when ${got.site} logs you out. It’s kept encrypted on your server and they never see it.` }))) return
+      await api('/browser/passwords', { method: 'POST', json: { tab } })
+      toast({ title: 'Password saved' })
+    } catch { /* nothing to save, or offline: they can sign in again next time */ }
+  }
+  const giveBack = () => { send({ t: 'takeover', on: false }); setFocus(null); setInput(''); link.forget(); setHidden(true); offerSave(signin ? undefined : st?.tab) }
   const signedIn = async () => {
     try {
       await api(`/approvals/${signin}`, { method: 'POST', json: { action: 'signed_in' } })
-      giveBack(); haptic.success(); router.back()
+      giveBack(); haptic.success(); router.back(); offerSave(signinTab)
     } catch (e) { toast({ title: 'Unable to hand it back', body: (e as Error).message, tone: 'error' }) }
   }
 
@@ -211,7 +223,10 @@ export default function BrowserScreen() {
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
       <ScreenHeader title={signin ? `Sign in to ${site}` : 'Browser'}
         subtitle={signin ? `Type on the page itself: ${mate?.name ?? 'your teammate'} never sees your password` : !stopped && st?.url ? st.url.replace(/^https?:\/\/(www\.)?/, '') : 'On your server'}
-        right={<IconButton icon={Logout01Icon} accessibilityLabel="Sign out of every site" onPress={signOut} />} />
+        right={<View style={{ flexDirection: 'row' }}>
+          <IconButton icon={Key01Icon} accessibilityLabel="Saved passwords" onPress={() => router.push('/passwords')} />
+          <IconButton icon={Logout01Icon} accessibilityLabel="Sign out of every site" onPress={signOut} />
+        </View>} />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <View style={{ flex: 1, padding: 16, paddingBottom: 8 }}>
           {!stopped && !signin && (st?.tabs.length ?? 0) > 1 && (

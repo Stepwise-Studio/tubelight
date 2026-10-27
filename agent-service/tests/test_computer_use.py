@@ -94,3 +94,23 @@ async def test_the_named_element_wins_over_a_wrong_id(env):
     screen = "[e14] button “4” (click)\n[e19] button “3” (click)"
     fake.script[:] = [AIMessage(json.dumps({"action": "CLICK", "element": "e14", "name": "3", "why": "first digit"}))]
     assert (await computer_use.decide("3+4", [], "", [], screen))["element"] == "e19"
+
+
+def test_a_post_or_send_needs_their_own_yes():
+    from app import computer_use as cu
+    for yes in ("yes", "Yeah go ahead", "ok post it", "haan", "sure, send it"):
+        assert cu.said_yes(yes), yes
+    for no in ("no", "wait, change the last line", "don't send it", "post on X: hello", "", "hmm"):
+        assert not cu.said_yes(no), no
+
+
+def test_an_ok_keeps_going_while_used(monkeypatch):
+    from app import computer_use as cu
+    now = __import__("time").time()
+    cu.grant("o", "pc", "Zen")
+    monkeypatch.setattr(cu.time, "time", lambda: now + 15 * 60)
+    assert cu.granted("o", "pc", "zen")  # used at minute 15: good for another 20
+    monkeypatch.setattr(cu.time, "time", lambda: now + 30 * 60)
+    assert cu.granted("o", "pc", "zen")
+    monkeypatch.setattr(cu.time, "time", lambda: now + 55 * 60)
+    assert not cu.granted("o", "pc", "zen")  # 25 idle minutes: it ran out

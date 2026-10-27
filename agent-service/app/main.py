@@ -23,7 +23,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, browser, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, browser, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, passwords, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -2100,6 +2100,39 @@ async def browser_stop(user: User = Depends(current_user)):
 @app.post("/browser/sign-out")
 async def browser_sign_out(user: User = Depends(current_user)):
     await browser.sign_out(user["id"])
+    return {"ok": True}
+
+
+@app.get("/browser/passwords")
+async def browser_passwords(user: User = Depends(current_user)):
+    """The sign-ins saved in Tubelight (site, username, when): never the passwords."""
+    return {"items": await passwords.sites(user["id"])}
+
+
+@app.get("/browser/passwords/captured")
+async def browser_password_captured(tab: str, user: User = Depends(current_user)):
+    """After they signed in on a tab: the site and username to offer saving (not the password)."""
+    c = browser.captured(user["id"], tab)
+    return {"site": c["site"], "username": c["user"]} if c else {"site": ""}
+
+
+class SavePassword(BaseModel):
+    tab: str
+
+
+@app.post("/browser/passwords")
+async def browser_password_save(body: SavePassword, user: User = Depends(current_user)):
+    c = browser.captured(user["id"], body.tab)
+    if not c:
+        raise HTTPException(404, "Nothing to save: sign in on the page first.")
+    await passwords.save(user["id"], c["site"], c["user"], c["secret"])
+    browser.forget_captured(user["id"], body.tab)
+    return {"ok": True, "site": c["site"]}
+
+
+@app.delete("/browser/passwords/{site}")
+async def browser_password_forget(site: str, user: User = Depends(current_user)):
+    await passwords.forget(user["id"], site)
     return {"ok": True}
 
 
