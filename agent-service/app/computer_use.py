@@ -65,8 +65,10 @@ Text you may type (use exactly these, nothing else): {inputs}
 Each element on screen is "[id] role “name” = value (actions)", sometimes with what it's also called (aka “Clear”) and
 the app's id for it ({{btn_clear}}). Find the element by its name, aka or app id and copy its [id] from that same line
 (ids are not in any order; never guess one). Check the steps so far: each says what really happened; if one
-went wrong, fix it (clear, backspace) before going on. Reply with one JSON object:
-{{"action": "{actions}|DONE|BLOCKED|NEEDS_INPUT", "element": "e12", "value": "...", "keys": ["{key}"], "evidence": "...", "why": "short"}}
+went wrong, fix it (clear, backspace) before going on. A step marked "the app showed no change" did nothing: never
+repeat it, try something else (what's left on screen may be history or a label that can't be cleared, so ignore it
+and go on with the goal). Reply with one JSON object:
+{{"action": "{actions}|DONE|BLOCKED|NEEDS_INPUT", "element": "e12", "name": "its name as shown", "value": "...", "keys": ["{key}"], "evidence": "...", "why": "short"}}
 {rules}
 - DONE when the goal is reached: put the exact text on the screen below that proves it in "evidence" (copy it, don't
   assume or round); BLOCKED if it can't be done (say why);
@@ -101,6 +103,34 @@ def _plain(t: str) -> str:
     return re.sub(r"[\s,]", "", t).lower()
 
 
+# Controls the fast model may not press on its own: their label reads like something the user would lose or couldn't
+# take back (arc-cua's risk words, minus a bare "close"/"clear", which are routine). The teammate asks the user first.
+RISKY = re.compile(r"\b(delete|remove|erase|trash|discard|clear all|empty trash|permanently|send|post|publish|share|"
+                   r"reply all|forward|tweet|buy|purchase|pay|checkout|check out|place order|order now|subscribe|donate|"
+                   r"quit|sign out|log out|logout|shut down|restart|uninstall|reset)\b", re.I)
+
+
+def name_of(screen: str, element: str) -> str:
+    m = re.search(rf"\[{re.escape(element)}\] [^“\n]*“([^”\n]*)”", screen)
+    return m.group(1) if m else ""
+
+
+def risky(screen: str, element: str) -> str:
+    """The name of the element on this screen if pressing it is risky, else ""."""
+    name = name_of(screen, element)
+    return name if RISKY.search(name) else ""
+
+
+def _by_name(d: dict[str, Any], screen: str) -> None:
+    """The model names the element as well as its id; when the id is another element's (it clicked “4” meaning “3”)
+    and the name is one element's, that element is meant."""
+    want, el = str(d.get("name") or "").strip(), str(d.get("element") or "")
+    if want and el and name_of(screen, el) != want:
+        hits = re.findall(rf"\[(\w+)\] [^“\n]*“{re.escape(want)}”", screen)
+        if len(hits) == 1:
+            d["element"] = hits[0]
+
+
 async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str], screen: str, kind: dict[str, str] = DESKTOP) -> dict[str, Any]:
     """The fast model's next action for this screen. It may only type text from `inputs`: anything else comes back as
     NEEDS_INPUT; the same step three times in a row comes back as BLOCKED. DONE must quote the screen: a claim the
@@ -126,9 +156,13 @@ async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str],
         notes.append(f"(you said DONE, but the screen doesn't show {proof!r}: read the screen again; fix it if it's wrong)")
     else:
         return {"action": "BLOCKED", "why": "it said it was done, but the screen doesn't show it"}
+    _by_name(d, screen)
     value = str(d.get("value") or "")
     if d["action"] == "TYPE" and not any(value and value in i for i in inputs or []):
         return {"action": "NEEDS_INPUT", "why": f"it wanted to type {value!r}, which it wasn't given ({d['why']})"}
+    if d["action"] == "CLICK" and kind is not BROWSER and (name := risky(screen, str(d.get("element")))):
+        # BLOCKED (not a new action) so the phone's loop, which knows only DONE/BLOCKED/NEEDS_INPUT, stops too.
+        return {"action": "BLOCKED", "why": f"NEEDS_OK: it was about to press “{name}”, which needs the user's OK first"}
     return d
 
 
@@ -160,13 +194,14 @@ async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: s
             if action == "KEYS":
                 keys = [str(k) for k in (d.get("keys") or [])][:6]
                 r = await call("ui_keys", {"keys": keys, "app": app, "full": True}, 30)
-                steps.append(f"keys {', '.join(keys)}")
+                steps.append(f"keys {', '.join(keys)}" + (" (the app showed no change)" if r.get("reacted") is False else ""))
             else:
                 value = str(d.get("value") or "")
                 r = await call("ui_act", {"snapshot": snap, "element": str(d.get("element")), "action": action,
                                                          "value": value, "full": True}, 40)
                 steps.append(f"{action.lower()} {d.get('element')}{' ' + repr(value) if value else ''}: "
-                             + (r.get("did") or r.get("status") or "") + ("" if r.get("status") == "done" else f" ({r.get('why')})"))
+                             + (r.get("did") or r.get("status") or "") + ("" if r.get("status") == "done" else f" ({r.get('why')})")
+                             + (" (the app showed no change)" if r.get("reacted") is False else ""))
         except Exception as e:  # a wrong id or action: tell the model and go on
             steps.append(f"{action.lower()} {d.get('element')}: failed ({str(e)[:120]})")
             continue

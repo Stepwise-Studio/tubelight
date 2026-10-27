@@ -75,3 +75,22 @@ async def test_done_must_be_on_screen(env, monkeypatch):
     fake.script[:] = [AIMessage(json.dumps({"action": "DONE", "evidence": "1000", "why": "ok"}))]
     d = await computer_use.decide("work out 125 x 8", [], "shows 1000", [], "[e1] text field “1,000” (type)")
     assert d["action"] == "DONE"  # commas and spaces don't matter
+
+
+async def test_risky_clicks_wait_for_the_user(env):
+    _, fake = env
+    screen = "[e1] push button “Delete Draft” (click)\n[e2] push button “Clear” (click)\n[e3] text “Send” = 'send me'"
+    fake.script[:] = [AIMessage(json.dumps({"action": "CLICK", "element": "e1", "why": "tidy up"}))]
+    d = await computer_use.decide("tidy up", [], "", [], screen)
+    assert d["action"] == "BLOCKED" and d["why"].startswith("NEEDS_OK") and "Delete Draft" in d["why"]
+    fake.script[:] = [AIMessage(json.dumps({"action": "CLICK", "element": "e2", "why": "clear"}))]
+    assert (await computer_use.decide("clear it", [], "", [], screen))["action"] == "CLICK"  # routine
+    fake.script[:] = [AIMessage(json.dumps({"action": "CLICK", "element": "e1", "why": "ok"}))]
+    assert (await computer_use.decide("x", [], "", [], screen, computer_use.BROWSER))["action"] == "CLICK"  # ⚑ gate there
+
+
+async def test_the_named_element_wins_over_a_wrong_id(env):
+    _, fake = env
+    screen = "[e14] button “4” (click)\n[e19] button “3” (click)"
+    fake.script[:] = [AIMessage(json.dumps({"action": "CLICK", "element": "e14", "name": "3", "why": "first digit"}))]
+    assert (await computer_use.decide("3+4", [], "", [], screen))["element"] == "e19"

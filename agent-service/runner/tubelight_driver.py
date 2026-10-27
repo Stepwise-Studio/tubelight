@@ -139,7 +139,7 @@ def _value(acc, role: str, states: set) -> str:
         n = _s(txt.get_character_count, 0)
         if role == "password text":
             return "•" * min(n, 8)
-        return _s(lambda: txt.get_text(0, min(n, MAX_TEXT))) + ("…" if n > MAX_TEXT else "")
+        return _s(lambda: Atspi.Text.get_text(acc, 0, min(n, MAX_TEXT))) + ("…" if n > MAX_TEXT else "")
     return ""
 
 
@@ -264,14 +264,16 @@ class _Events:
             _s(lambda k=kind: self.listener.register(k), None)
         return self
 
-    def settle(self, quiet: float = 0.15, idle: float = 0.6, most: float = 2.0) -> None:
+    def settle(self, quiet: float = 0.15, idle: float = 0.6, most: float = 2.0) -> bool:
+        """Waits for the app to finish reacting; False when it announced nothing (the action most likely did nothing)."""
         began = time.time()
         while time.time() - began < most:
             time.sleep(0.05)
             if not self.n and time.time() - began >= idle:
-                return  # the app didn't react
+                return False
             if self.n and time.time() - self.last >= quiet:
-                return
+                return True
+        return bool(self.n)
 
     def __exit__(self, *exc) -> None:
         for kind in ("object:children-changed", "object:state-changed", "object:property-change", "object:text-changed",
@@ -302,8 +304,8 @@ def act(sid: str, element: str, action: str, value: str = "") -> dict:
     action = action.upper()
     with _events as ev:
         did = _do(acc, e, action, value)
-        ev.settle()
-    return {"status": "done", "did": did, **observe(snap["app"], snap["title"])}
+        reacted = ev.settle()
+    return {"status": "done", "did": did, "reacted": reacted, **observe(snap["app"], snap["title"])}
 
 
 def _do(acc, e: dict, action: str, value: str) -> str:
@@ -344,7 +346,7 @@ def _do(acc, e: dict, action: str, value: str) -> str:
         if txt is None:
             return e["name"] or e["value"]
         n = _s(txt.get_character_count, 0)
-        return _s(lambda: txt.get_text(0, min(n, 12000)))
+        return _s(lambda: Atspi.Text.get_text(acc, 0, min(n, 12000)))
     if action == "SCROLL_TO":
         if not _s(lambda: acc.get_component_iface().scroll_to(Atspi.ScrollType.ANYWHERE), False):
             raise ValueError("It can't be scrolled into view.")
@@ -435,9 +437,9 @@ def keys(sequence: list[str], app_name: str = "") -> dict:
             else:
                 _remote.keys(k)
             time.sleep(0.03)
-        ev.settle()
+        reacted = ev.settle()
     front = next((a["app"] for a in apps() if any(w["active"] for w in a["windows"])), "")
-    out = {"status": "done", "did": f"pressed {', '.join(sequence)}", "front": front}
+    out = {"status": "done", "did": f"pressed {', '.join(sequence)}", "reacted": reacted, "front": front}
     target = app_name or front
     if target:
         try:
