@@ -1318,7 +1318,7 @@ async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_
     if body.screen.strip():
         system += "\n\nWhat was in front when they pressed the hotkey (seen, not said):\n" + body.screen
     try:
-        token = await live.mint(live.setup(tm, system, desktop=True, voice=body.voice or live.DESKTOP_VOICE))
+        token = await live.mint(live.setup(tm, system, desktop=True, voice=body.voice))
     except httpx.HTTPError:
         log.exception("desktop live token failed")
         raise HTTPException(502, "Could not start voice. Try again in a moment.")

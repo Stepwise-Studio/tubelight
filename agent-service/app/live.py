@@ -6,19 +6,17 @@ the app turns into a normal chat message to the teammate (apps, approvals, memor
 back as the tool result for Gemini to speak.
 """
 import datetime
-import hashlib
 from typing import Any
 
 import httpx
 
 from . import brief, config, connectors, db, graph, mem, memory, mind
 
-VOICES = ["Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr"]
-# Every prebuilt Live voice a computer's hotkey may ask for (runner config "voice"); the desktop's default is warm.
-ALL_VOICES = {*VOICES, "Sulafat", "Despina", "Achernar", "Vindemiatrix", "Callirrhoe", "Autonoe", "Erinome", "Laomedeia",
+VOICE = "Despina"  # every voice mode speaks with her (the user's pick, 2026-10-27: smooth and natural)
+# Every prebuilt Live voice a computer's hotkey may ask for instead (runner config "voice").
+ALL_VOICES = {"Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr", "Sulafat", "Despina", "Achernar", "Vindemiatrix", "Callirrhoe", "Autonoe", "Erinome", "Laomedeia",
               "Pulcherrima", "Gacrux", "Algieba", "Schedar", "Umbriel", "Iapetus", "Enceladus", "Rasalgethi", "Achird",
               "Zubenelgenubi", "Sadachbia", "Sadaltager", "Alnilam", "Algenib"}
-DESKTOP_VOICE = "Sulafat"
 
 SPEAKING = """## How you talk (this is a live voice call)
 - Talk like a person on a phone call: warm, relaxed, natural. One to three short sentences, then stop and let them talk.
@@ -106,10 +104,6 @@ DESKTOP = """## On their computer (they pressed the hotkey)
 - Sound like a warm, relaxed person sitting next to them: natural pace, short sentences, no announcer voice."""
 
 
-def voice_for(tm: dict) -> str:
-    return VOICES[int(hashlib.md5(tm["id"].encode()).hexdigest(), 16) % len(VOICES)]
-
-
 async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
     now = graph.local_now(ctx)
     shelf = memory.ns("user", ctx.owner_id)
@@ -155,7 +149,7 @@ def setup(tm: dict, system: str, desktop: bool = False, voice: str = "") -> dict
         "model": f"models/{config.LIVE_MODEL}",
         "generationConfig": {
             "responseModalities": ["AUDIO"],
-            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice if voice in ALL_VOICES else voice_for(tm)}}},
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice if voice in ALL_VOICES else VOICE}}},
         },
         "systemInstruction": {"parts": [{"text": system}]},
         "tools": [_desktop_tools()] if desktop else [RUN_TASK],
