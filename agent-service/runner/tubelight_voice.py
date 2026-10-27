@@ -96,6 +96,7 @@ class Session:
         self.heard, self.said, self.turns = "", "", []
         self.tasks = 0
         self.over = False
+        print("voice: listening", flush=True)
         self.v.pill(state="listening", text="Listening…")
         self.mic = self._mic()
         self.out = self._speaker()
@@ -160,8 +161,14 @@ class Session:
                 screen += snoofy.text(snoofy.observe(front))[:6000]
         except Exception:
             pass
-        status, got = self.v.api(self.v.load(), "/runner/voice", {"screen": screen}, timeout=20)
+        try:
+            status, got = self.v.api(self.v.load(), "/runner/voice", {"screen": screen}, timeout=20)
+        except OSError as e:  # no internet (a power cut takes the router down), or the server is down
+            print(f"voice: can't reach the server ({e})", flush=True)
+            _later(self.ctx, self.end, "Can't reach Tubelight: check the internet and try again", "error")
+            return
         if status != 200 or not got:
+            print(f"voice: no session ({status}: {(got or {}).get('detail')})", flush=True)
             _later(self.ctx, self.end, (got or {}).get("detail") or "Couldn't start voice", "error")
             return
         _later(self.ctx, self._connect, got["token"])
@@ -176,7 +183,8 @@ class Session:
         try:
             ws = sess.websocket_connect_finish(res)
         except GLib.Error as e:
-            self.end(f"Couldn't reach the voice service ({e.message})", "error")
+            print(f"voice: Gemini Live refused or unreachable ({e.message})", flush=True)
+            self.end("Can't reach the voice service: check the internet and try again", "error")
             return
         if self.over:
             ws.close(1000, None)
@@ -293,6 +301,7 @@ class Session:
         if self.over:
             return
         self.over = True
+        print(f"voice: ended{': ' + why if why else ''}", flush=True)
         for p in (self.mic, self.out):
             p.set_state(Gst.State.NULL)
         if self.ws:
