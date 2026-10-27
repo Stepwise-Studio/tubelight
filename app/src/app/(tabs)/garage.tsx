@@ -62,7 +62,7 @@ interface Receipt {
 interface Live { run: Run; doing?: string }
 
 /** What a sheet of runs shows: every run today, or one outcome. */
-type Jobs = 'all' | 'posted' | 'quiet' | 'failed' | 'found'
+type Jobs = 'all' | 'posted' | 'quiet' | 'failed'
 
 const BLUE = ['#3f7cff', '#1f50e3'] as const
 const BLUE_MID = '#2f66f1' // behind inline faces, so their rings melt into the card
@@ -373,8 +373,6 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
   for (const r of done) if (r.outcome in counts) counts[r.outcome as keyof typeof counts]++
   const worked = [...new Set(done.flatMap((r) => r.apps))]
   const busy = [...new Map(live.map((l) => [l.run.teammate_id, ws.teammate(l.run.teammate_id)])).values()].filter((t): t is Teammate => !!t)
-  // Automations that had something to tell today: counted here, each one's reply is a tap away in the sheet.
-  const found = new Set(done.filter((r) => r.automation_id && r.outcome === 'posted').map((r) => r.automation_id)).size
   const overdue = due.filter((t) => dueLabel(t.due!).overdue)
 
   return (
@@ -405,8 +403,7 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
               <> <Faces people={busy} /> <B>{names(busy.map((t) => t.name))}</B> {busy.length > 1 ? 'are' : 'is'} working right now.</>
             ) : null}
             {next ? <> Next up <Chip icon={next.reminder ? BellRingIcon : next.auto ? WorkflowIcon : Calendar03Icon} /> <B onPress={() => onNext(next)}>{next.title}</B> {next.day.toLowerCase() === 'today' ? 'at' : next.day.toLowerCase()} <B>{next.time}</B>.</> : null}
-            {found > 0 && <> <Chip icon={WorkflowIcon} /> <B onPress={() => onJobs('found')}>{plural(found, 'automation')}</B> found something for you.</>}
-            {autos.length > 0 && <> <B onPress={onAutos}>{plural(autos.length, 'automation')}</B> {autos.length === 1 ? 'runs' : 'run'} again today, next at <B onPress={onAutos}>{clock(new Date(autos[0].next_run!))}</B>.</>}
+            {autos.length > 0 && <> <Chip icon={WorkflowIcon} /> <B onPress={onAutos}>{plural(autos.length, 'automation')}</B> {autos.length === 1 ? 'runs' : 'run'} again today, next at <B onPress={onAutos}>{clock(new Date(autos[0].next_run!))}</B>.</>}
             {due.length > 0 && (
               <> <Chip icon={CheckmarkCircle02Icon} /> <B onPress={() => router.navigate('/tasks')}>{plural(due.length, 'to-do')}</B> {due.length === 1 ? 'is' : 'are'} due{overdue.length ? <>, <B onPress={() => router.navigate('/tasks')}>{overdue.length} overdue</B></> : ' today'}: {due.length > 2 ? `${due.slice(0, 2).map((t) => t.title).join(', ')} and ${due.length - 2} more` : list(due.map((t) => t.title))}.</>
             )}
@@ -576,10 +573,8 @@ const Moment = memo(function Moment({ r, last, onOpen }: { r: Receipt; last: boo
 function JobsSheet({ which, receipts, onClose, onOpen }: { which: Jobs | null; receipts: Receipt[]; onClose: () => void; onOpen: (r: Receipt) => void }) {
   const [last, setLast] = useState<Jobs>('all')
   if (which && which !== last) setLast(which)
-  const shown = last === 'all' ? receipts
-    : last === 'found' ? receipts.filter((r) => r.automation_id && r.outcome === 'posted') : receipts.filter((r) => r.outcome === last)
+  const shown = last === 'all' ? receipts : receipts.filter((r) => r.outcome === last)
   const title = last === 'all' ? `${plural(shown.length, 'job')} today`
-    : last === 'found' ? 'What automations found today'
     : last === 'posted' ? `${shown.length} posted: they had something to tell you`
       : last === 'quiet' ? `${shown.length} quiet: checked, nothing new` : `${shown.length} failed`
   return (
