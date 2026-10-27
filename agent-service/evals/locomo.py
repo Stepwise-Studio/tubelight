@@ -18,7 +18,8 @@ Differences, stated with every result:
   to its budget, instead of Mem0's top-30 memory list.
 - Text turns only, as Mem0's adder did (images' captions are left out).
 Memory is built by app/mem.py exactly as on the server (extraction by MEM_MODEL, the gate, linking, profiles), in a
-scratch Postgres (TL_TEST_PG). Extraction uses GEMINI_BENCH_API_KEY, a separate free quota, so the live app keeps its own.
+scratch Postgres (TL_TEST_PG). Extraction uses GEMINI_BENCH_API_KEY (or the key BENCH_KEY names), a separate free quota,
+so the live app keeps its own.
 Results: evals/data/bench/results/ (gitignored; the dataset is fetched from snap-research/locomo).
 """
 import asyncio
@@ -36,8 +37,9 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 _env = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
-if _env.get("GEMINI_BENCH_API_KEY"):  # before app.config reads it
-    os.environ["GEMINI_API_KEY"] = _env["GEMINI_BENCH_API_KEY"]
+_bench = os.environ.get("BENCH_KEY", "GEMINI_BENCH_API_KEY")  # a second free project's key splits a long ingest
+if _env.get(_bench):  # before app.config reads it
+    os.environ["GEMINI_API_KEY"] = _env[_bench]
 
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
 
@@ -263,8 +265,8 @@ def report() -> None:
         path = _results(kind)
         if not path.exists():
             continue
-        rows = [json.loads(r) for r in path.read_text().splitlines()]
-        by = defaultdict(list)
+        rows = list({(r["sample"], r["i"]): r for r in map(json.loads, reversed(path.read_text().splitlines()))}.values())
+        by = defaultdict(list)  # (each question once: two runs may overlap; the first answer counts)
         for r in rows:
             by[r["category"]].append(r["label"])
         print(f"\nLoCoMo, {kind} ({MODEL} answers and judges; {len({r['sample'] for r in rows})} conversations, "
