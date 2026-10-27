@@ -226,10 +226,12 @@ class Session:
         self.v.pill(state="working", text=_doing(name, args))
 
         def run() -> None:
+            began = time.monotonic()
             try:
                 result = self._do(name, args)
             except Exception as e:  # the model hears why and says so
                 result = f"That didn't work: {e}"
+            print(f"voice: {name} {json.dumps(args)[:200]} -> {result[:200]!r} ({(time.monotonic() - began) * 1000:.0f} ms)", flush=True)
             _later(self.ctx, self._done, fc, result)
         threading.Thread(target=run, daemon=True).start()
 
@@ -249,6 +251,19 @@ class Session:
             return f"{r.get('app') or a['app']} is {'open' if r.get('status') == 'opened' else 'already open'}."
         if name == "close_app":
             return s.close_windows(str(a["app"]))
+        if name == "look_at_app":
+            return s.text(s.observe(str(a["app"]), str(a.get("window") or "")))[:9000]
+        if name == "act_in_app":
+            sid, eid, action = str(a["snapshot"]), str(a["element"]), str(a.get("action") or "CLICK").upper()
+            e = s.element(sid, eid)
+            if action in ("CLICK", "DOUBLE_CLICK") and s.risky(e["name"]) and not a.get("confirmed"):
+                return (f"Not pressed: “{e['name']}” could delete, send or pay for something. Ask them out loud; only if "
+                        "they say yes, call again with confirmed true.")
+            r = s.act(sid, eid, action, str(a.get("value") or ""))
+            head = " ".join(str(r[k]) for k in ("status", "did", "why") if r.get(k))
+            if r.get("reacted") is False:
+                head += " (the app showed no change)"
+            return (head + "\n" + s.text(r))[:9000]
         if name == "press_keys":
             r = s.keys([str(k) for k in a.get("keys") or []][:12], str(a.get("app") or ""))
             return r.get("did", "pressed") + ("" if r.get("reacted") is not False else " (the app showed no change)")
@@ -310,4 +325,5 @@ def _doing(name: str, a: dict) -> str:
         return f"Moving {a.get('window', 'the window')}" + (f" → {where}" if where else "")
     return {"open_app": f"Opening {a.get('app', '')}", "close_app": f"Closing {a.get('app', '')}",
             "press_keys": "Pressing keys", "list_windows": "Looking at your windows",
+            "look_at_app": f"Looking at {a.get('app', 'the app')}", "act_in_app": "Working in the app",
             "run_task": str(a.get("request") or "Working on it")[:90]}.get(name, "Working…")

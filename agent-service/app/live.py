@@ -69,8 +69,18 @@ DESKTOP_TOOLS = {"functionDeclarations": [
      "parameters": {"type": "OBJECT", "properties": {"app": _S}, "required": ["app"]}},
     {"name": "close_app", "description": "Close an app the way its close button would (unsaved work prompts as usual).",
      "parameters": {"type": "OBJECT", "properties": {"app": _S}, "required": ["app"]}},
-    {"name": "press_keys", "description": "Press keys in an app: chords like ctrl+t, ctrl+s, space, or text:words to type.",
-     "parameters": {"type": "OBJECT", "properties": {"keys": {"type": "ARRAY", "items": _S}, "app": _S}, "required": ["keys"]}},
+    {"name": "press_keys", "description": "Press keys in an app (its window gets the keyboard): chords like ctrl+l, "
+     "ctrl+t, enter, page_down, page_up, space, or text:words to type.",
+     "parameters": {"type": "OBJECT", "properties": {"keys": {"type": "ARRAY", "items": _S}, "app": _S}, "required": ["keys", "app"]}},
+    {"name": "look_at_app", "description": "Read an app's window: every button, field, link, item and text on screen, each "
+     "with an id like e12 and what can be done to it. app: its name (Zen, Files, Settings...). window: part of a title.",
+     "parameters": {"type": "OBJECT", "properties": {"app": _S, "window": _S}, "required": ["app"]}},
+    {"name": "act_in_app", "description": "Do one thing to one element from look_at_app (or the last act_in_app): action "
+     "CLICK, DOUBLE_CLICK (open an item), RIGHT_CLICK, TYPE (value: the field's new text), FOCUS, READ, SCROLL_TO. Answers "
+     "with the screen after; if the app changed first, nothing happens and you get the new screen. confirmed: only after "
+     "they said yes out loud to a button that deletes, sends or pays.",
+     "parameters": {"type": "OBJECT", "properties": {"snapshot": _S, "element": _S, "action": _S, "value": _S,
+                                                     "confirmed": {"type": "BOOLEAN"}}, "required": ["snapshot", "element", "action"]}},
 ]}
 
 DESKTOP = """## On their computer (they pressed the hotkey)
@@ -78,6 +88,13 @@ DESKTOP = """## On their computer (they pressed the hotkey)
   monitor, open, close, keys): call the tool straight away, no confirming, and say at most a few words after
   ("Done.", "On your laptop screen."). Several windows: one call each, back to back.
 - When you're unsure which window they mean, call list_windows first rather than asking.
+- Inside an app (go to a website, search, type in a box, click, select, read what's on screen): look_at_app, then
+  act_in_app on its ids, one step at a time, checking each answer. A website: press_keys ["ctrl+l", "text:<address>",
+  "enter"] in the browser. A search box: TYPE into it, then press_keys ["enter"]. Scrolling: press_keys ["page_down"]
+  (or page_up) with the app. It's done only when the screen you got back shows it: never say it worked otherwise.
+- While you work through steps, say nothing between them (no "continuing", no "still working"): one short line when
+  it's done, or what stopped you.
+- Buttons that delete, send, post or pay: ask them out loud first and press only after a clear yes (confirmed).
 - Anything else that needs their apps, files, mail or the crew: run_task, as usual. Its answer also lands in the chat
   with you on their phone.
 - They can't see a chat here, only a small pill with a line of text: never say "in the chat below"."""

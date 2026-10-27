@@ -13,6 +13,7 @@ to settle (until its accessibility events go quiet), then returns the new snapsh
 Window control, the global hotkey and the status pill live in Snoofy's GNOME Shell extension (snoofy-shell.js).
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -106,10 +107,13 @@ def apps() -> list[dict]:
 def _find(app_name: str, window: str = ""):
     """The app (by name, or a window title it has) and one window: the named one, else its active one, else its first."""
     want, wtitle = app_name.strip().lower(), window.strip().lower()
+    flat = re.sub(r"[^a-z0-9]", "", want)  # the window list's "org.gnome.TextEditor" is AT-SPI's "gnome-text-editor"
     hits = []
     for app, name, wins in _apps():
         titles = [(j, w, _s(w.get_name).lower()) for j, w in wins]
-        if want and want not in name.lower() and not any(want in t for _, _, t in titles):
+        named = re.sub(r"[^a-z0-9]", "", name.lower())
+        if want and want not in name.lower() and not (flat and named and (flat in named or named in flat)) \
+                and not any(want in t or wtitle and wtitle in t for _, _, t in titles):
             continue
         hits.append((app, name, titles))
     if not hits:
@@ -428,6 +432,27 @@ def act(sid: str, element: str, action: str, value: str = "") -> dict:
         did = _do(dest, path, e, action, value)
         reacted = ev.settle()
     return {"status": "done", "did": did, "reacted": reacted, **observe(snap["app"], snap["title"])}
+
+
+# Labels that read like something the user would lose or couldn't take back (arc-cua's risk words, minus the routine
+# "close" and "clear"). Callers ask the user before pressing one: act() itself doesn't refuse, the caller decides.
+RISKY = re.compile(r"\b(delete|remove|erase|trash|discard|clear all|empty trash|permanently|send|post|publish|share|"
+                   r"reply all|forward|tweet|buy|purchase|pay|checkout|check out|place order|order now|subscribe|donate|"
+                   r"quit|sign out|log out|logout|shut down|restart|uninstall|reset)\b", re.I)
+
+
+def risky(name: str) -> bool:
+    return bool(RISKY.search(name or ""))
+
+
+def element(sid: str, eid: str) -> dict:
+    """One element of a snapshot, as observe() returned it."""
+    snap = _snaps.get(sid)
+    if not snap:
+        raise LookupError(f"Snapshot {sid} is gone; look again.")
+    if eid not in snap["elements"]:
+        raise LookupError(f"No element {eid} in snapshot {sid}.")
+    return snap["elements"][eid]
 
 
 def _ok(v) -> bool:
