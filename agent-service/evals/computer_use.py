@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from statistics import median
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "driver"))
 sys.path.append("/usr/lib/python3/dist-packages")  # the system's gi (AT-SPI), as the runner uses it
 import tubelight_driver as D  # noqa: E402
 

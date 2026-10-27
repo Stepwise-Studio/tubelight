@@ -317,7 +317,9 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "them). To work IN an app (click, type, fill forms, menus): computer_look reads its window as elements with ids; "
                      "computer_use(app, task) asks them once per task; then computer_act on those ids, computer_keys for "
                      "shortcuts, computer_subtask to hand off a run of simple steps. Prefer this over commands for anything "
-                     "done in an app's window. Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
+                     "done in an app's window. To move, resize, maximize or minimize windows or send one to another "
+                     "monitor (\"put Firefox on my laptop screen\", \"left half\"): computer_place_window at once, no "
+                     "asking (computer_windows lists monitors and windows). Running apps: computer_apps; show them as a List with a \"Close\" button (reply "
                      "\"Close <name>\") on the closable ones. To close or quit an app always call computer_close_app with "
                      "its name (it runs at once; never kill, pkill or killall); if the name isn't in your last "
                      "computer_apps list, call computer_apps first to get it exactly.")

@@ -1,0 +1,7 @@
+{
+  "uuid": "windows@tubelight.stepwise.studio",
+  "name": "Tubelight Windows",
+  "description": "Lets the Tubelight driver list, move and resize windows (one D-Bus call each). Nothing runs until it's asked.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://tubelight.stepwise.studio"
+}

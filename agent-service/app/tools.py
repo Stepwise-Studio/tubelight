@@ -108,7 +108,7 @@ INTERNAL = {
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_windows": "read", "computer_place_window": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
@@ -119,7 +119,7 @@ LABELS = {
     "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -1322,6 +1322,25 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                                                        "value": value, "full": True}, 40)
             return cu.head(got) + "\n" + _snap(got)
 
+        async def computer_windows() -> str:
+            got = await computers.call(dev, "ui_windows", {"full": True}, 20)
+            if "state" in got:
+                return got["state"]["message"]
+            mons = {m["index"]: m for m in got["monitors"]}
+            return ("Monitors: " + "; ".join(f"{m['index'] + 1} {m['name']}{' (laptop screen)' if m['builtin'] else ''} "
+                                             f"{m['w']}x{m['h']}" for m in got["monitors"])
+                    + "\nWindows (top first): " + "; ".join(
+                        f"[{w['id']}] {w['app']} “{w['title'][:60]}” on {mons.get(w['monitor'], {}).get('name', '?')} "
+                        f"{w['w']}x{w['h']} at {w['x']},{w['y']}" + "".join(f" {k}" for k in ("maximized", "minimized", "focused") if w[k])
+                        for w in reversed(got["windows"])))
+
+        async def computer_place_window(window: str, monitor: str = "", where: str = "", size: str = "",
+                                        state: str = "", focus: bool = False) -> str:
+            w = await computers.call(dev, "ui_place", {"window": window, "monitor": monitor, "where": where, "size": size,
+                                                       "state": state, "focus": focus, "full": True}, 20)
+            return (f"{w['app']} “{w['title'][:60]}” is now on {w['monitor_name']}, {w['w']}x{w['h']} at {w['x']},{w['y']}"
+                    + "".join(f", {k}" for k in ("maximized", "minimized") if w[k]) + ".")
+
         async def computer_keys(keys: list[str], app: str = "") -> str:
             if not cu.any_granted(ctx.owner_id, dev):
                 return "Ask first: call computer_use with the app and the task; they OK it once."
@@ -1382,15 +1401,25 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "an id ([e12]) and what can be done to it. app empty: lists the open apps and windows. "
                             "window: part of a window's title, when it has several."),
             StructuredTool.from_function(coroutine=computer_act, name="computer_act",
-                description="Do one thing to one element of a snapshot from computer_look/computer_act: action CLICK, "
+                description="Do one thing to one element of a snapshot from computer_look/computer_act: action CLICK, DOUBLE_CLICK (open/activate an item), RIGHT_CLICK (its own menu), "
                             "TYPE (value: a field's new text; in a document it's written at the cursor), REPLACE (a document's whole text: "
                             "only when they asked for that), SET_VALUE (sliders, spin boxes), FOCUS, READ (its full "
                             "text), SCROLL_TO. If the app changed since the snapshot nothing happens and you get the new "
                             "screen to decide again. Answers with the app's screen after it settles."),
+            StructuredTool.from_function(coroutine=computer_windows, name="computer_windows",
+                description="List the computer's monitors (which is the laptop's own screen) and its windows: id, app, "
+                            "title, which monitor, size and place, maximized/minimized/focused."),
+            StructuredTool.from_function(coroutine=computer_place_window, name="computer_place_window",
+                description="Move or resize a window, instantly. window: its id from computer_windows, or an app name or "
+                            "part of its title. monitor: laptop, external, other, left, right, primary, a number from 1 or "
+                            "a monitor's name. where: left/right/top/bottom (halves), top-left etc., left-third, "
+                            "center-third, right-third, left-two-thirds, right-two-thirds, center, full. size: 1280x800, "
+                            "60% or 70%x80% (centred). state: maximize, restore, minimize, fullscreen, unfullscreen. "
+                            "focus: bring it to the front. Answers with where it really ended up."),
             StructuredTool.from_function(coroutine=computer_keys, name="computer_keys",
-                description="Press keys in the window in front: chords like \"enter\", \"ctrl+s\", \"ctrl+l\", "
+                description="Press keys in an app (app: its name; its window gets the keyboard for the keys, then the user's window gets it back; empty: the window in front): chords like \"enter\", \"ctrl+s\", \"ctrl+l\", "
                             "\"page_down\", \"alt+left\", or \"text:words to type\". Use after FOCUS on a field when "
-                            "a field has no TYPE, or for shortcuts. app: whose screen to answer with."),
+                            "a field has no TYPE, or for shortcuts."),
             StructuredTool.from_function(coroutine=computer_subtask, name="computer_subtask",
                 description="Hand a run of simple steps in an app (fill a form, go through settings, find and open an "
                             "item) to a fast helper that clicks through it and reports DONE, BLOCKED or NEEDS_INPUT with "

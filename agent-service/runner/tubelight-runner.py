@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "16"  # 16: reads text fields (they all read empty before), says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "16"  # 16: windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -71,7 +71,8 @@ def note(**fields) -> None:
 
 # Updates: newer runner files land in ~/.local/share/tubelight (no sudo needed); whichever copy is newest runs.
 UPDATES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tubelight"
-PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "tubelight_driver.py")
+PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "tubelight_driver.py", "tubelight-windows.js",
+         "tubelight-windows.json")
 
 
 def version_of(text: str) -> int:
@@ -474,11 +475,21 @@ def _driver(c: dict, a: dict):
     if not c.get("use_apps"):
         raise PermissionError("Using apps is off on this computer. Turn on “Let teammates use your apps” in Tubelight there.")
     here = Path(__file__).resolve().parent
-    if not (here / "tubelight_driver.py").exists():  # updated from a runner that didn't know this part yet
-        (here / "tubelight_driver.py").write_bytes(fetch(c, "tubelight_driver.py"))
+    for part in ("tubelight_driver.py", "tubelight-windows.js", "tubelight-windows.json"):
+        if not (here / part).exists():  # updated from a runner that didn't know this part yet
+            (here / part).write_bytes(fetch(c, part))
     sys.path.insert(0, str(here))
     import tubelight_driver
+    if not _windows_checked:  # window control: the shell extension, put in place once (it loads at the next log-in)
+        _windows_checked.append(True)
+        try:
+            tubelight_driver.install_windows()
+        except Exception as e:  # never in the way of using apps; the state shows in ui_windows
+            print(f"window control: {e}", file=sys.stderr)
     return tubelight_driver
+
+
+_windows_checked: list = []
 
 
 def ui_apps(c: dict, a: dict) -> list:
@@ -506,6 +517,18 @@ def ui_act(c: dict, a: dict) -> dict:
 def ui_keys(c: dict, a: dict) -> dict:
     d = _driver(c, a)
     return _with_text(d, d.keys(list(a["keys"]), a.get("app") or ""))
+
+
+def ui_windows(c: dict, a: dict) -> dict:
+    d = _driver(c, a)
+    if d.windows_state()["state"] != "ready":
+        return {"state": d.windows_state()}
+    return d.windows()
+
+
+def ui_place(c: dict, a: dict) -> dict:
+    return _driver(c, a).place(a["window"], a.get("monitor"), a.get("where") or "", a.get("size") or "",
+                               a.get("state") or "", bool(a.get("focus")))
 
 
 def ui_launch(c: dict, a: dict) -> dict:
@@ -715,7 +738,7 @@ def box_close(c: dict, a: dict) -> str:
 
 OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
        "quit_app": quit_app, "screenshot": screenshot,
-       "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch,
+       "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch, "ui_windows": ui_windows, "ui_place": ui_place,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),
        "box_read": box_read, "box_write": box_write, "box_close": box_close,
        "sync_dirs": sync_dirs, "sync_scan": sync_scan, "sync_push": sync_push}
