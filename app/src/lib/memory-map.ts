@@ -128,3 +128,73 @@ export function spread(map: MemoryMap, from: number): number[][] {
   }
   return frames
 }
+
+// ------------------------------------------------------------------ drawing rules (shared with the off-device preview)
+// Calm colours: one muted hue per group, no glow. Brightness is fill opacity only, and every node keeps a full-opacity
+// ring, so a memory that has faded is quieter but never invisible.
+export const HUES = {
+  dark: ['#7ea6d8', '#62b3a8', '#a092d6', '#d29f6c', '#a3be72', '#cf92b4'],
+  light: ['#3a6db3', '#2b857a', '#6a5bbd', '#ad682b', '#5c8530', '#ad4f7d'],
+}
+export const fillOpacity = (recall: number) => 0.22 + 0.63 * recall
+
+export const LABEL_H = 20
+export const LABEL_PAD = 8  // each side
+const LABEL_MAX_W = 140
+/** A pill's width for a label whose text measures `textW` (Inter Display 12, measured with the real font: widths run
+ *  from under 4 to over 10 px a character, so no estimate is safe). The pill clips anything longer, so the box placed is
+ *  the box drawn and two labels can never overlap. */
+export const labelWidth = (textW: number) => Math.min(LABEL_MAX_W, Math.ceil(textW) + 2 * LABEL_PAD + 2)
+
+export interface LabelBox { i: number; x: number; y: number; w: number }
+type Box = [number, number, number, number]
+const hits = (a: Box, b: Box) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+
+/** Labels for the nodes in `order` (most deserving first), at most `budget` of them: each tries below, above, right,
+ *  left of its node, then on it, and takes the first spot that overlaps no other label and no other node's middle, and
+ *  stays on screen. */
+export function placeLabels(pts: { x: number; y: number; r: number }[], textW: number[], order: number[],
+  size: { w: number; h: number }, budget: number): LabelBox[] {
+  // a label may cross another node's rim, never its middle: every node stays visible, and a hub in a crowd still
+  // finds room for its name
+  const discs: Box[] = pts.map((p) => { const k = Math.max(4, p.r * 0.55); return [p.x - k, p.y - k, p.x + k, p.y + k] })
+  const placed: Box[] = [], out: LabelBox[] = []
+  for (const i of order) {
+    if (out.length >= budget) break
+    const { x, y, r } = pts[i], w = labelWidth(textW[i]), H = LABEL_H
+    // below, above, right, left; last, on its own disc (a crowded hub still gets its name)
+    const spots: [number, number][] = [[x - w / 2, y + r + 3], [x - w / 2, y - r - 3 - H], [x + r + 5, y - H / 2], [x - r - 5 - w, y - H / 2],
+      [x - w / 2, y - H / 2]]
+    for (const [lx, ly] of spots) {
+      const box: Box = [lx, ly, lx + w, ly + H]
+      if (box[0] < 4 || box[1] < 4 || box[2] > size.w - 4 || box[3] > size.h - 4) continue
+      if (placed.some((p) => hits(box, p)) || discs.some((d, j) => j !== i && hits(box, d))) continue
+      placed.push(box)
+      out.push({ i, x: lx, y: ly, w })
+      break
+    }
+  }
+  return out
+}
+
+/** Nudges overlapping nodes apart on screen (they keep `gap` px between rims), staying inside the frame. The layout
+ *  places centres by association distance and never looked at sizes, so big nodes sat on top of each other. Positions
+ *  move only as far as overlaps need; the reported stress is the layout's, before this. */
+export function separate(pts: { x: number; y: number; r: number }[], size: { w: number; h: number }, gap = 4) {
+  const p = pts.map((q) => ({ ...q }))
+  for (let it = 0; it < 60; it++) {
+    let moved = false
+    for (let i = 0; i < p.length; i++) {
+      for (let j = i + 1; j < p.length; j++) {
+        const dx = p[j].x - p[i].x, dy = p[j].y - p[i].y, d = Math.hypot(dx, dy) || 1e-3, need = p[i].r + p[j].r + gap
+        if (d >= need) continue
+        const push = (need - d) / 2, ux = dx / d, uy = dy / d
+        p[i].x -= ux * push; p[i].y -= uy * push; p[j].x += ux * push; p[j].y += uy * push
+        moved = true
+      }
+    }
+    for (const q of p) { q.x = Math.min(size.w - q.r - 2, Math.max(q.r + 2, q.x)); q.y = Math.min(size.h - q.r - 2, Math.max(q.r + 2, q.y)) }
+    if (!moved) break
+  }
+  return p
+}

@@ -1,8 +1,9 @@
 // Memory → Map: the people, projects and places memory holds, drawn from numbers memory computes (lib/memory-map.ts):
 // size = importance, brightness = how recallable right now, fibre = how much more often two come up together than
 // chance, distance = how related. Pinch and drag to look around; tap one to see it; "Recall from here" plays the real
-// spreading activation. Labels never overlap: the most important are placed first, the rest appear as you zoom in.
-import { BlurMask, Canvas, Circle, Path, Skia } from '@shopify/react-native-skia'
+// spreading activation. Labels never overlap each other or a node: the most important are placed first, more appear as
+// you zoom in. Tapping one brings it and what it's linked to forward and quiets the rest.
+import { Canvas, Circle, Path, Skia, useFont } from '@shopify/react-native-skia'
 import { router } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native'
@@ -10,14 +11,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
 
 import { api } from '@/lib/api'
-import { type GraphData, type MemoryMap, STEPS, layout, spread } from '@/lib/memory-map'
+import { type GraphData, HUES, LABEL_H, LABEL_PAD, type MemoryMap, STEPS, fillOpacity, layout, placeLabels, separate, spread } from '@/lib/memory-map'
+import { demoGraph } from '@/lib/memory-map-demo'
 import { useTheme } from '@/theme'
 import { Button, EmptyState, Press, Skeleton, Surface, Text, haptic, toast } from '@/ui'
 
-const HUES = {
-  dark: ['#93c5fd', '#5eead4', '#c4b5fd', '#fdba74', '#bef264', '#f9a8d4'],
-  light: ['#2563eb', '#0d9488', '#7c3aed', '#c2410c', '#4d7c0f', '#be185d'],
-}
 const KIND: Record<string, string> = { person: 'Person', org: 'Organisation', project: 'Project', place: 'Place', period: 'A chapter of your life', thing: 'Thing' }
 const PAD = 40
 const MAX_ZOOM = 5
@@ -26,9 +24,9 @@ const pct = (v: number) => (v >= 0.995 ? '100%' : v >= 0.1 ? `${Math.round(v * 1
 const ago = (days?: number) => (days === undefined ? 'never' : days < 1 ? 'today' : days < 2 ? 'yesterday' : `${Math.round(days)} days ago`)
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-export function MemoryMapView({ bottom }: { bottom: number }) {
+export function MemoryMapView({ bottom, demo = false }: { bottom: number; demo?: boolean }) {
   const { c, scheme } = useTheme()
-  const [data, setData] = useState<GraphData | null | undefined>(undefined)
+  const [data, setData] = useState<GraphData | null | undefined>(() => (demo ? demoGraph() : undefined))
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [view, setView] = useState({ k: 1, x: 0, y: 0 })
   const [picked, setPicked] = useState<number | null>(null)
@@ -36,10 +34,10 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
   const [step, setStep] = useState(0)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const load = useCallback(() => api<GraphData>('/memory/graph').then(setData, (e: Error) => {
+  const load = useCallback(() => demo ? undefined : api<GraphData>('/memory/graph').then(setData, (e: Error) => {
     setData((d) => d ?? null)
     toast({ title: 'Unable to load the map', body: e.message, tone: 'error' })
-  }), [])
+  }), [demo])
   useEffect(() => { load() }, [load])
   useEffect(() => () => { if (timer.current) clearInterval(timer.current) }, [])
 
@@ -67,17 +65,18 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
   )
   const live = useAnimatedStyle(() => ({ transform: [{ translateX: tx.get() }, { translateY: ty.get() }, { scale: s.get() }] }))
 
-  // layout → screen: fit into the canvas, then the committed zoom and pan
-  const at = useMemo(() => {
+  // layout → screen at the fitted view, nudged so no two nodes overlap (the layout places centres, not sizes)
+  const base = useMemo(() => {
     if (!map || !size.w) return null
     const xs = map.nodes.map((n) => n.x), ys = map.nodes.map((n) => n.y)
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
     const sc = Math.min((size.w - 2 * PAD) / Math.max(x1 - x0, 1e-6), (size.h - 2 * PAD) / Math.max(y1 - y0, 1e-6), 120)
-    return (x: number, y: number) => [
-      size.w / 2 + (x - (x0 + x1) / 2) * sc * view.k + view.x,
-      size.h / 2 + (y - (y0 + y1) / 2) * sc * view.k + view.y,
-    ] as const
-  }, [map, size, view])
+    return separate(map.nodes.map((n) => ({ x: size.w / 2 + (n.x - (x0 + x1) / 2) * sc, y: size.h / 2 + (n.y - (y0 + y1) / 2) * sc, r: n.r })), size)
+  }, [map, size])
+  // then the committed zoom and pan: distances grow with zoom, radii with its square root, so zooming makes no overlap
+  const pts = useMemo(() => (base ? base.map((p) => ({
+    x: size.w / 2 + (p.x - size.w / 2) * view.k + view.x, y: size.h / 2 + (p.y - size.h / 2) * view.k + view.y, r: p.r * Math.sqrt(view.k),
+  })) : []), [base, size, view])
 
   const stop = () => { if (timer.current) clearInterval(timer.current); timer.current = null }
   const play = (from: number) => {
@@ -92,26 +91,26 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
   const reset = () => { stop(); setFrames(null); setStep(0) }
 
   const fr = frames?.[step]
-  // labels: most important (or, while recalling, most reached) first; one that would overlap another is left off
-  const labelled = useMemo(() => {
-    if (!map || !at) return new Set<number>()
-    const order = map.nodes.map((_, i) => i).sort((a, b) => fr
-      ? fr[b] - fr[a]
-      : (map.nodes[b].mass + 0.2 * map.nodes[b].n) - (map.nodes[a].mass + 0.2 * map.nodes[a].n))
-    if (picked !== null) order.unshift(picked)
-    const placed: [number, number, number, number][] = [], out = new Set<number>()
-    for (const i of order) {
-      if (out.has(i)) continue
-      const n = map.nodes[i], [x, y] = at(n.x, n.y), r = n.r * Math.sqrt(view.k)
-      const w = Math.min(150, n.name.length * 7 + (fr && fr[i] > 0.001 ? 44 : 0))
-      const box: [number, number, number, number] = [x - w / 2, y + r + 2, x + w / 2, y + r + 20]
-      if (box[2] < 0 || box[0] > size.w || box[3] < 0 || box[1] > size.h) continue
-      if (placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) continue
-      placed.push(box)
-      out.add(i)
-    }
+  // what a tap brings forward: the picked node and everything linked to it
+  const near = useMemo(() => {
+    if (!map || picked === null) return null
+    const out = new Set([picked])
+    for (const e of map.edges) if (e.a === picked) out.add(e.b); else if (e.b === picked) out.add(e.a)
     return out
-  }, [map, at, fr, picked, size, view.k])
+  }, [map, picked])
+  // labels: the picked one and its links, or (while recalling) the most reached, or the most important; about ten at
+  // the fitted view and more as you zoom in, placed so none overlaps another label or a node
+  const texts = useMemo(() => (map ? map.nodes.map((n, i) => n.name + (fr && fr[i] > 0.001 ? ` · ${pct(fr[i])}` : '')) : []), [map, fr])
+  // measured with the label's own font; until it loads, the widest Inter Display gets (M: 10.6 px) so nothing overlaps
+  const font = useFont(require('@/assets/fonts/InterDisplay-Regular.ttf'), 12)
+  const textW = useMemo(() => texts.map((t) => (font ? font.measureText(t).width : t.length * 10.6)), [texts, font])
+  const labels = useMemo(() => {
+    if (!map || !pts.length) return []
+    const score = (i: number) => (fr ? fr[i] : (near?.has(i) ? 100 : 0) + map.nodes[i].mass + 0.2 * map.nodes[i].n)
+    const order = map.nodes.map((_, i) => i).filter((i) => !fr || fr[i] > 0.001).sort((a, b) => score(b) - score(a))
+    if (picked !== null) order.unshift(picked)
+    return placeLabels(pts, textW, [...new Set(order)], size, Math.round(10 * view.k) + (near?.size ?? 0))
+  }, [map, pts, textW, fr, near, picked, size, view.k])
 
   if (data === undefined) return <View style={{ flex: 1, padding: 16 }}><Skeleton height={360} radius={20} /></View>
   if (data === null) return <EmptyState title="The map isn't available" body="Check your connection and open it again." />
@@ -127,67 +126,67 @@ export function MemoryMapView({ bottom }: { bottom: number }) {
   const from = frames ? frames[0].indexOf(1) : -1
   const ranked = fr ? fr.map((v, i) => [v, i] as const).filter(([v, i]) => i !== from && v > 0.001).sort((a, b) => b[0] - a[0]).slice(0, 4) : []
   const zoomed = view.k > 1.01 || Math.abs(view.x) > 2 || Math.abs(view.y) > 2
-  const dim = (i: number) => !!fr && fr[i] <= 0.001
+  const dim = (i: number) => (fr ? fr[i] <= 0.001 : !!near && !near.has(i))
 
   return (
     <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: bottom, gap: 12 }}>
       <Surface style={{ flex: 1, overflow: 'hidden' }}>
         <View style={{ flex: 1 }} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
-          {at && (
+          {base && (
             <GestureDetector gesture={gesture}>
               <Animated.View style={[{ flex: 1 }, live]}>
                 <Canvas style={{ width: size.w, height: size.h }}>
                   {map.edges.map((e, i) => {
-                    const [ax, ay] = at(map.nodes[e.a].x, map.nodes[e.a].y), [bx, by] = at(map.nodes[e.b].x, map.nodes[e.b].y)
+                    const { x: ax, y: ay } = pts[e.a], { x: bx, y: by } = pts[e.b]
+                    const on = flow ? flow[i] > 1e-4 : false, f = flow ? flow[i] / flowMax : 0, w = e.w / wMax
+                    const mine = picked !== null && (e.a === picked || e.b === picked)
+                    // at rest only the stronger links show, faintly; a picked node's links and a recall's flow stand out
+                    const o = flow ? (on ? 0.25 + 0.75 * f : 0.05) : near ? (mine ? 0.75 : 0.04) : w < 0.15 ? 0 : 0.1 + 0.3 * w
+                    if (!o) return null
                     const p = Skia.Path.Make()
                     p.moveTo(ax, ay)
                     p.quadTo((ax + bx) / 2 + (ay - by) * 0.08, (ay + by) / 2 + (bx - ax) * 0.08, bx, by)
-                    const on = flow ? flow[i] > 1e-4 : false, f = flow ? flow[i] / flowMax : 0
-                    return <Path key={i} path={p} style="stroke" strokeCap="round" strokeWidth={0.6 + 1.8 * (e.w / wMax) + (on ? 2 * f : 0)}
-                      color={on ? c.tube : c.ink3} opacity={flow ? (on ? 0.25 + 0.75 * f : 0.08) : 0.32} />
+                    return <Path key={i} path={p} style="stroke" strokeCap="round" strokeWidth={0.75 + 1.75 * w + (on ? 2 * f : 0)}
+                      color={on || mine ? c.tube : c.ink3} opacity={o} />
                   })}
                   {map.nodes.map((n, i) => {
-                    const [x, y] = at(n.x, n.y), v = fr ? fr[i] / top : null
-                    return (
-                      <Circle key={`g${i}`} cx={x} cy={y} r={n.r * 1.6 * Math.sqrt(view.k)} color={dim(i) ? c.ink4 : hues[n.community % hues.length]}
-                        opacity={0.08 + 0.4 * (v === null ? n.recall : v)}>
-                        <BlurMask blur={9} style="normal" />
-                      </Circle>
-                    )
-                  })}
-                  {map.nodes.map((n, i) => {
-                    const [x, y] = at(n.x, n.y), v = fr ? fr[i] / top : null, r = n.r * Math.sqrt(view.k)
+                    const { x, y, r } = pts[i], v = fr ? fr[i] / top : null
                     const color = dim(i) ? c.ink4 : hues[n.community % hues.length]
-                    const o = v === null ? 0.4 + 0.6 * n.recall : 0.35 + 0.65 * Math.sqrt(v)
-                    // a chapter of your life is a ring: the people and things in it sit around it
-                    return n.kind === 'period'
-                      ? <Circle key={`c${i}`} cx={x} cy={y} r={r} color={color} opacity={o} style="stroke" strokeWidth={3} />
-                      : <Circle key={`c${i}`} cx={x} cy={y} r={r} color={color} opacity={o} />
+                    const fill = (v === null ? fillOpacity(n.recall) : 0.22 + 0.63 * Math.sqrt(v)) * (dim(i) ? 0.5 : 1)
+                    const ring = dim(i) ? 0.35 : 0.9
+                    // a chapter of your life is a ring only: the people and things in it sit around it
+                    return [
+                      n.kind === 'period' ? null : <Circle key={`f${i}`} cx={x} cy={y} r={r} color={color} opacity={fill} />,
+                      <Circle key={`c${i}`} cx={x} cy={y} r={r} color={color} opacity={ring} style="stroke" strokeWidth={n.kind === 'period' ? 2.5 : 1.25} />,
+                    ]
                   })}
                   {/* what memory isn't sure of yet: faint satellites around their entry (agent mem.py tentative facts) */}
                   {map.nodes.flatMap((n, i) => Array.from({ length: Math.min(n.unsure, 6) }, (_, j) => {
-                    const [x, y] = at(n.x, n.y), r = n.r * Math.sqrt(view.k) + 7, a = -Math.PI / 2 + (j * 2 * Math.PI) / Math.min(n.unsure, 6)
-                    return <Circle key={`u${i}-${j}`} cx={x + r * Math.cos(a)} cy={y + r * Math.sin(a)} r={2.5} color={c.ink2} opacity={dim(i) ? 0.2 : 0.55} />
+                    const { x, y } = pts[i], r = pts[i].r + 6, a = -Math.PI / 2 + (j * 2 * Math.PI) / Math.min(n.unsure, 6)
+                    return <Circle key={`u${i}-${j}`} cx={x + r * Math.cos(a)} cy={y + r * Math.sin(a)} r={2} color={c.ink3} opacity={dim(i) ? 0.15 : 0.5} />
                   }))}
-                  {sel && (() => { const [x, y] = at(sel.x, sel.y); return <Circle cx={x} cy={y} r={sel.r * Math.sqrt(view.k) + 4} color={c.tube} style="stroke" strokeWidth={1.5} /> })()}
+                  {picked !== null && <Circle cx={pts[picked].x} cy={pts[picked].y} r={pts[picked].r + 4} color={c.tube} style="stroke" strokeWidth={1.5} />}
                 </Canvas>
+                {/* touch targets: 44 pt around every node, whether or not it has a label */}
                 {map.nodes.map((n, i) => {
-                  const [x, y] = at(n.x, n.y), r = n.r * Math.sqrt(view.k)
-                  const share = fr && fr[i] > 0.001 ? ` · ${pct(fr[i])}` : ''
+                  const { x, y } = pts[i], t = Math.max(22, pts[i].r)
                   return (
-                    <Press key={n.id} radius={22} static onPress={() => { haptic.tap(); setPicked(i === picked ? null : i) }}
+                    <Press key={n.id} radius={t} static onPress={() => { haptic.tap(); setPicked(i === picked ? null : i) }}
                       accessibilityLabel={`${n.name}, ${KIND[n.kind] ?? n.kind}, ${n.facts} facts`}
-                      outerStyle={{ position: 'absolute', left: x - 75, top: y - Math.max(22, r), width: 150 }} style={{ alignItems: 'center' }}>
-                      <View style={{ height: Math.max(44, r * 2) }} />
-                      {labelled.has(i) && (
-                        <Text variant="footnote" numberOfLines={1} align="center" color={dim(i) ? 'ink3' : 'ink'}
-                          style={{ marginTop: -Math.max(0, 22 - r) + 2, textShadowColor: c.panel, textShadowRadius: 6, textShadowOffset: { width: 0, height: 0 } }}>
-                          {n.name}{share}
-                        </Text>
-                      )}
+                      outerStyle={{ position: 'absolute', left: x - t, top: y - t, width: 2 * t, height: 2 * t }}>
+                      <View style={{ width: 2 * t, height: 2 * t }} />
                     </Press>
                   )
                 })}
+                {labels.map((l) => (
+                  <View key={`l${l.i}`} pointerEvents="none" style={{
+                    position: 'absolute', left: l.x, top: l.y, width: l.w, height: LABEL_H, borderRadius: LABEL_H / 2,
+                    backgroundColor: c.panel, borderWidth: 1, borderColor: c.line, paddingHorizontal: LABEL_PAD - 1, justifyContent: 'center',
+                    opacity: dim(l.i) ? 0.55 : 1,
+                  }}>
+                    <Text variant="footnote" numberOfLines={1} align="center" color={dim(l.i) ? 'ink3' : 'ink'}>{texts[l.i]}</Text>
+                  </View>
+                ))}
               </Animated.View>
             </GestureDetector>
           )}

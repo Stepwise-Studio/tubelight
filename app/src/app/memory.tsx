@@ -1,7 +1,7 @@
 // Memory (Profile → Open memory): what the teammates know. Overview: you and how you like things, what's open, what
 // was learned lately and where from, and how far learning has got. People: everyone and everything known, each with
 // its own page. Lessons: each teammate's how-to notes (and older notes from before memory v2).
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import { FlatList, RefreshControl, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -33,7 +33,8 @@ const whose = (m: MemoryItem) => (m.scope === 'user' ? 'All teammates' : m.scope
 
 export default function MemoryScreen() {
   const insets = useSafeAreaInsets()
-  const [view, setView] = useState<'overview' | 'map' | 'people' | 'lessons'>('overview')
+  const { demo } = useLocalSearchParams<{ demo?: string }>()  // ?demo=map: the map with sample data
+  const [view, setView] = useState<'overview' | 'map' | 'people' | 'lessons'>(demo === 'map' ? 'map' : 'overview')
   return (
     <View style={{ flex: 1 }}>
       <ScreenHeader title="Memory" subtitle="What your teammates know, and where they learned it" />
@@ -43,7 +44,7 @@ export default function MemoryScreen() {
           options={[{ value: 'overview', label: 'Overview' }, { value: 'map', label: 'Map' }, { value: 'people', label: 'People' }, { value: 'lessons', label: 'Lessons' }]} />
       </View>
       {view === 'overview' ? <Overview bottom={insets.bottom + 32} onPeople={() => setView('people')} />
-        : view === 'map' ? <MemoryMapView bottom={insets.bottom + 24} />
+        : view === 'map' ? <MemoryMapView bottom={insets.bottom + 24} demo={demo === 'map'} />
         : view === 'people' ? <PeopleList bottom={insets.bottom + 24} />
           : <Lessons bottom={insets.bottom + 24} />}
     </View>
