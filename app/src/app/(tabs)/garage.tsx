@@ -6,7 +6,7 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { setStatusBarStyle } from 'expo-status-bar'
 import { LinearGradient } from 'expo-linear-gradient'
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Text as RNText, RefreshControl, ScrollView, View } from 'react-native'
 import Animated, { interpolate, runOnJS, useAnimatedRef, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -26,6 +26,7 @@ import { useTodayEvents, type PhoneEvent } from '@/lib/calendar'
 import { finishReminder, reminderNext, REPEATS, useReminders, type Reminder } from '@/lib/clock'
 import { ago, clock, whenLabel } from '@/lib/format'
 import { onReturn } from '@/lib/app-state'
+import { useGarageTone, type GarageTone } from '@/lib/garage-tone'
 import { liveChannel } from '@/lib/realtime'
 import { supabase } from '@/lib/supabase'
 import { dueLabel, isoDay, useFollowups, useTodos, type Followup, type Todo } from '@/lib/tasks'
@@ -64,9 +65,26 @@ interface Live { run: Run; doing?: string }
 /** What a sheet of runs shows: every run today, or one outcome. */
 type Jobs = 'all' | 'posted' | 'quiet' | 'failed'
 
-const BLUE = ['#3f7cff', '#1f50e3'] as const
-const BLUE_MID = '#2f66f1' // behind inline faces, so their rings melt into the card
-const DIM = 'rgba(255,255,255,0.6)'
+// The summary card's look: blue (white text) or cream (warm ink). One switch to compare them.
+const TONES: Record<Exclude<GarageTone, 'auto'>, Tone> = {
+  blue: { bg: ['#3f7cff', '#1f50e3'], mid: '#2f66f1', ink: '#fff', dim: 'rgba(255,255,255,0.6)', accent: '#1f50e3',
+    tile: '#fff', soft: 'rgba(255,255,255,0.12)', softOn: 'rgba(255,255,255,0.3)', line: 'rgba(255,255,255,0.18)', bar: 'light' },
+  cream: { bg: ['#fdfaf3', '#f3ead8'], mid: '#f8f1e4', ink: '#2a2116', dim: 'rgba(42,33,22,0.5)', accent: '#8a6a3c',
+    tile: '#fff', soft: 'rgba(42,33,22,0.06)', softOn: 'rgba(42,33,22,0.14)', line: 'rgba(42,33,22,0.1)', bar: 'dark' },
+  orange: { bg: ['#ff8a3d', '#ef5b1c'], mid: '#f8733a', ink: '#fff', dim: 'rgba(255,255,255,0.68)', accent: '#e4521a',
+    tile: '#fff', soft: 'rgba(255,255,255,0.14)', softOn: 'rgba(255,255,255,0.32)', line: 'rgba(255,255,255,0.22)', bar: 'light' },
+}
+interface Tone { bg: readonly [string, string]; mid: string; ink: string; dim: string; accent: string; tile: string; soft: string; softOn: string; line: string; bar: 'light' | 'dark' }
+type Day = 'quiet' | 'normal' | 'busy'
+// The day picks the card: a quiet day is cream, a normal one blue, a busy one orange.
+const DAY_TONE: Record<Day, Tone> = { quiet: TONES.cream, normal: TONES.blue, busy: TONES.orange }
+const ToneContext = createContext<Tone>(TONES.blue)
+const useTone = () => useContext(ToneContext)
+function dayOf(jobs: number, needs: number, working: number): Day {
+  if (needs >= 3 || working >= 2 || jobs >= 8) return 'busy'
+  if (jobs <= 1 && needs === 0 && working === 0) return 'quiet'
+  return 'normal'
+}
 const SHOWN = 4 // receipts before "Show more"
 const NONE: Receipt[] = []
 
@@ -100,11 +118,12 @@ const took = (ms: number | null) => (ms === null ? null : ms < 60000 ? `${Math.m
 
 function PlaceTile({ place, size, onBlue }: { place: string; size: number; onBlue?: boolean }) {
   const { c } = useTheme()
+  const tone = useTone()
   const p = PLACE[place]
   if (!p) return <BrandTile toolkit={place} size={size} />
   return (
     <Squircle style={{ width: size, height: size, borderRadius: size * 0.32, backgroundColor: onBlue ? '#fff' : c.panel2, borderWidth: 1, borderColor: onBlue ? 'transparent' : c.line, alignItems: 'center', justifyContent: 'center' }}>
-      <Icon icon={p.icon} size={Math.round(size * 0.58)} color={onBlue ? BLUE[1] : 'ink2'} />
+      <Icon icon={p.icon} size={Math.round(size * 0.58)} color={onBlue ? tone.accent : 'ink2'} />
     </Squircle>
   )
 }
@@ -147,7 +166,8 @@ export default function GarageTab() {
   const heroH = useSharedValue(400)
   const past = useSharedValue(false)
   const needsY = useRef(0)
-  const barFor = useCallback((over: boolean) => setStatusBarStyle(over && scheme !== 'dark' ? 'dark' : 'light'), [scheme])
+  const toneRef = useRef<Tone>(TONES.blue)
+  const barFor = useCallback((over: boolean) => setStatusBarStyle(over ? (scheme !== 'dark' ? 'dark' : 'light') : toneRef.current.bar), [scheme])
   const onScroll = useAnimatedScrollHandler((e) => {
     y.set(e.contentOffset.y)
     const over = e.contentOffset.y > heroH.get() - insets.top
@@ -165,7 +185,7 @@ export default function GarageTab() {
   useFocusEffect(useCallback(() => {
     const t = setTimeout(loadReceipts, 400)
     setFocused(true)
-    setStatusBarStyle(past.get() && scheme !== 'dark' ? 'dark' : 'light')
+    setStatusBarStyle(past.get() ? (scheme !== 'dark' ? 'dark' : 'light') : toneRef.current.bar)
     return () => { clearTimeout(t); setFocused(false); setStatusBarStyle(scheme === 'dark' ? 'light' : 'dark') }
   }, [loadReceipts, scheme, past]))
 
@@ -238,6 +258,13 @@ export default function GarageTab() {
   const onNeeds = useCallback(() => scroller.current?.scrollTo({ y: needsY.current - insets.top - 8, animated: true }), [scroller, insets.top])
   const onChanged = useCallback(() => { autos.load(); follow.refresh() }, [autos, follow])
   const needs = d.approvals.length + broken.length
+  const kind = dayOf(d.receipts?.length ?? 0, needs, d.live.length)
+  const pick = useGarageTone()
+  const tone = pick === 'auto' ? DAY_TONE[kind] : TONES[pick]
+  useEffect(() => {
+    toneRef.current = tone
+    if (focused && !past.get()) setStatusBarStyle(tone.bar)
+  }, [tone, focused, past])
 
   return (
     <View style={{ flex: 1, backgroundColor: c.canvas }}>
@@ -248,6 +275,7 @@ export default function GarageTab() {
         contentContainerStyle={{ paddingBottom: inset + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.ink3} colors={[c.tube]} progressBackgroundColor={c.panel} />}
       >
+        <ToneContext.Provider value={tone}>
         <Hero
           onHeight={onHeight}
           name={name}
@@ -266,6 +294,7 @@ export default function GarageTab() {
           onNeeds={onNeeds}
           onNext={onUpcoming}
         />
+        </ToneContext.Provider>
 
         {needs > 0 && (
           <View onLayout={(e) => { needsY.current = e.nativeEvent.layout.y }}>
@@ -351,7 +380,7 @@ export default function GarageTab() {
 
 /** A bright phrase in the hero; tappable ones open what they count. */
 function B({ children, onPress }: { children: ReactNode; onPress?: () => void }) {
-  return <RNText onPress={onPress} suppressHighlighting style={{ color: '#fff' }}>{children}</RNText>
+  return <RNText onPress={onPress} suppressHighlighting style={{ color: useTone().ink }}>{children}</RNText>
 }
 
 /** The day in one sentence, its highlights, and the outcome counts; every number opens what's behind it. */
@@ -364,6 +393,7 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
 }) {
   const insets = useSafeAreaInsets()
   const ws = useWorkspace()
+  const tone = useTone()
   const hour = new Date().getHours()
   const hello = hour < 5 ? 'Up late' : hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening'
   const done = receipts ?? []
@@ -378,23 +408,23 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
   return (
     <View onLayout={(e) => onHeight(e.nativeEvent.layout.height)} style={{ marginBottom: 20 }}>
       {/* The gradient rounds its own corners: clipping a wrapper (overflow hidden) costs a layer on every frame. */}
-      <LinearGradient colors={BLUE} start={{ x: 0, y: 0 }} end={{ x: 0.4, y: 1 }} style={{ paddingTop: insets.top + 10, paddingHorizontal: 20, paddingBottom: 16, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 }}>
+      <LinearGradient colors={tone.bg} start={{ x: 0, y: 0 }} end={{ x: 0.4, y: 1 }} style={{ paddingTop: insets.top + 10, paddingHorizontal: 20, paddingBottom: 16, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 40, marginBottom: 14, gap: 6 }}>
-          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 17, color: '#fff' }} accessibilityRole="header">Garage</Text>
+          <Text style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 17, color: tone.ink }} accessibilityRole="header">Garage</Text>
           {mode && (['busy', 'calm', 'hide'] as const).map((m) => (
             <Press key={m} radius={radius.pill} static onPress={() => router.setParams({ demo: m === 'hide' ? undefined : m })}
-              style={{ paddingHorizontal: 10, minHeight: 28, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: mode === m ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)' }}>
-              <Text variant="label" style={{ color: '#fff' }}>{m === 'busy' ? 'Busy day' : m === 'calm' ? 'Calm day' : 'Hide'}</Text>
+              style={{ paddingHorizontal: 10, minHeight: 28, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: mode === m ? tone.softOn : tone.soft }}>
+              <Text variant="label" style={{ color: tone.ink }}>{m === 'busy' ? 'Busy day' : m === 'calm' ? 'Calm day' : 'Hide'}</Text>
             </Press>
           ))}
         </View>
 
         {receipts === null ? (
           <View style={{ gap: 12, paddingVertical: 6 }}>
-            {[0.9, 0.75, 0.55].map((w) => <View key={w} style={{ height: 22, width: `${w * 100}%`, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.14)' }} />)}
+            {[0.9, 0.75, 0.55].map((w) => <View key={w} style={{ height: 22, width: `${w * 100}%`, borderRadius: 8, backgroundColor: tone.soft }} />)}
           </View>
         ) : (
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 23, lineHeight: 32, letterSpacing: -0.45, color: DIM }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 23, lineHeight: 32, letterSpacing: -0.45, color: tone.dim }}>
             {hello}{name ? <>, <B>{name}</B></> : null}. {crew.length ? (
               <>Your crew <Faces people={crew} /> finished <B onPress={() => onJobs('all')}>{plural(done.length, 'job')}</B> today</>
             ) : <>Nothing has run yet today</>}
@@ -413,13 +443,13 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
           </Text>
         )}
 
-        <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginTop: 16, marginBottom: 10 }} />
+        <View style={{ height: 1, backgroundColor: tone.line, marginTop: 16, marginBottom: 10 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32 }}>
           <Stat n={counts.posted} label="posted" onPress={() => onJobs('posted')} />
           <Stat n={counts.quiet} label="quiet" onPress={() => onJobs('quiet')} />
           {counts.failed > 0 && <Stat n={counts.failed} label="failed" onPress={() => onJobs('failed')} />}
           <View style={{ flex: 1 }} />
-          {worked.length > 0 && places(worked, 20, BLUE[1])}
+          {worked.length > 0 && places(worked, 20, tone.bg[1])}
         </View>
       </LinearGradient>
     </View>
@@ -429,17 +459,18 @@ const Hero = memo(function Hero({ name, receipts, needs, live, next, autos, due,
 function Faces({ people }: { people: Teammate[] }) {
   return (
     <View style={{ transform: [{ translateY: 6 }] }}>
-      <AvatarGroup size={24} max={6} ring={BLUE_MID} items={people.map((t) => ({ key: t.id, name: t.name, render: (s) => <TeammateAvatar teammate={t} size={s} interactive={false} paused /> }))} />
+      <AvatarGroup size={24} max={6} ring={useTone().mid} items={people.map((t) => ({ key: t.id, name: t.name, render: (s) => <TeammateAvatar teammate={t} size={s} interactive={false} paused /> }))} />
     </View>
   )
 }
 
 /** A white tile sitting inline in the hero sentence: an icon, or an app's logo. */
 function Chip({ icon, tile }: { icon: typeof Calendar03Icon; tile?: ReactNode }) {
+  const tone = useTone()
   return (
     <View style={{ transform: [{ translateY: 5 }] }}>
-      <Squircle style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {tile ?? <Icon icon={icon} size={17} color={BLUE[1]} strokeWidth={2} />}
+      <Squircle style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: tone.tile, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: tone === TONES.cream ? 1 : 0, borderColor: tone.line }}>
+        {tile ?? <Icon icon={icon} size={17} color={tone.accent} strokeWidth={2} />}
       </Squircle>
     </View>
   )
@@ -452,10 +483,11 @@ function Dot() {
 
 /** An outcome count; tap to see those runs. */
 function Stat({ n, label, onPress }: { n: number; label: string; onPress: () => void }) {
+  const tone = useTone()
   return (
     <Press radius={radius.pill} static onPress={onPress} disabled={!n} accessibilityLabel={`${n} ${label}. Show them`}
-      style={{ justifyContent: 'center', paddingHorizontal: 12, minHeight: 30, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' }}>
-      <Text variant="label" style={{ color: '#fff' }}>{n} {label}</Text>
+      style={{ justifyContent: 'center', paddingHorizontal: 12, minHeight: 30, borderRadius: radius.pill, backgroundColor: tone.soft }}>
+      <Text variant="label" style={{ color: tone.ink }}>{n} {label}</Text>
     </Press>
   )
 }

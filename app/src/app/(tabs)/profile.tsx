@@ -27,6 +27,7 @@ import { identities } from '@/lib/auth'
 import { useConnections } from '@/lib/catalog'
 import { useFocusLater } from '@/lib/focus'
 import { useSession } from '@/lib/session'
+import { setGarageTone, useGarageTone, type GarageTone } from '@/lib/garage-tone'
 import { supabase } from '@/lib/supabase'
 import type { MemoryOverview, Profile } from '@/lib/types'
 import { isPhone, useWorkspace } from '@/lib/workspace'
@@ -82,6 +83,7 @@ export default function ProfileScreen() {
           <PushSection />
           <Divider />
           <Appearance />
+          <GarageLook />
           <ImageModel />
         </Group>
         <Surface style={{ overflow: 'hidden' }}>
@@ -353,6 +355,18 @@ function Appearance() {
       { value: 'system', title: 'System', subtitle: 'Light or dark, as your phone is set' },
       { value: 'light', title: 'Light' },
       { value: 'dark', title: 'Dark' },
+    ]} />
+  )
+}
+
+function GarageLook() {
+  const tone = useGarageTone()
+  return (
+    <ChoiceRow label="Garage colour" value={tone} onChange={(v) => setGarageTone(v as GarageTone)} options={[
+      { value: 'auto', title: 'Auto', subtitle: 'Cream on quiet days, blue on normal ones, orange on busy ones' },
+      { value: 'cream', title: 'Cream' },
+      { value: 'blue', title: 'Blue' },
+      { value: 'orange', title: 'Orange' },
     ]} />
   )
 }
