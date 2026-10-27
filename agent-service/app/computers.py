@@ -40,6 +40,7 @@ FILES = {  # what the runner downloads: itself, and what it needs to build sandb
     "tubelight_driver.py": ROOT / "runner" / "snoofy" / "snoofy.py",  # runners ≤ 15 fetch it by its old name to update
     "snoofy-shell.js": ROOT / "runner" / "snoofy" / "snoofy-shell.js",
     "snoofy-shell.json": ROOT / "runner" / "snoofy" / "snoofy-shell.json",
+    "tubelight_voice.py": ROOT / "runner" / "tubelight_voice.py",
     "sandbox.Dockerfile": ROOT / "sandbox" / "Dockerfile",
     "squid.conf": ROOT / "deploy" / "squid.conf",
 }
@@ -464,6 +465,7 @@ def desktop_deb() -> tuple[str, bytes]:
         f"{opt}/tubelight-runner.py": ((runner / "tubelight-runner.py").read_bytes(), 0o755),
         f"{opt}/qrcodegen.py": ((runner / "qrcodegen.py").read_bytes(), 0o644),
         f"{opt}/tubelight_window.py": ((runner / "tubelight_window.py").read_bytes(), 0o644),
+        f"{opt}/tubelight_voice.py": ((runner / "tubelight_voice.py").read_bytes(), 0o644),
         **{f"{opt}/{n}": ((runner / "snoofy" / n).read_bytes(), 0o644)
            for n in ("snoofy.py", "snoofy-shell.js", "snoofy-shell.json")},
         f"{opt}/server.txt": (config.PUBLIC_URL.encode(), 0o644),
@@ -480,7 +482,8 @@ def desktop_deb() -> tuple[str, bytes]:
     control = {
         "control": ((
             f"Package: tubelight-desktop\nVersion: {version}\nArchitecture: all\nMaintainer: Tubelight <hello@stepwise.studio>\n"
-            "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, bubblewrap\nRecommends: docker.io, zenity\n"
+            "Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-soup-3.0, gir1.2-gstreamer-1.0, "
+            "gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, bubblewrap\nRecommends: docker.io, zenity\n"
             "Section: utils\nPriority: optional\nDescription: Let your Tubelight teammates work on this computer\n"
             " Link this computer to your Tubelight app with a QR code. Teammates can then read the folders you share,\n"
             " and change files or run commands there after you approve each step on your phone.\n").encode(), 0o644),

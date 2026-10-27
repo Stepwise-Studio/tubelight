@@ -1290,6 +1290,92 @@ async def runner_result(body: RunnerResult, who: tuple[str, str] = Depends(runne
     return {"ok": True}
 
 
+class RunnerVoice(BaseModel):
+    screen: str = Field("", max_length=8000)  # what was in front when they pressed the hotkey, as text
+
+
+async def _computer_chat(owner_id: str, cid: str) -> tuple[str, str]:
+    r = await computers.row(owner_id, cid)
+    if not r or not r.get("teammate_id"):
+        raise HTTPException(404, "This computer has no chat yet: open Tubelight on your phone once.")
+    return r["teammate_id"], f"dm:{r['teammate_id']}"
+
+
+@app.post("/runner/voice")
+async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_auth)):
+    """The hotkey: a single-use Gemini Live token as the computer's own teammate, with its local tools."""
+    if not config.env("GEMINI_API_KEY"):
+        raise HTTPException(503, "Voice needs a Gemini API key on the server.")
+    tm_id, thread_id = await _computer_chat(*who)
+    ctx = await runs.load_ctx(str(uuid.uuid4()), who[0], thread_id, "message", None)
+    tm = next((m for m in ctx.members if m["id"] == tm_id), ctx.members[0])
+    system = await live.instruction(ctx, tm, thread_id) + "\n\n" + live.DESKTOP
+    if body.screen.strip():
+        system += "\n\nWhat was in front when they pressed the hotkey (seen, not said):\n" + body.screen
+    try:
+        token = await live.mint(live.setup(tm, system, desktop=True))
+    except httpx.HTTPError:
+        log.exception("desktop live token failed")
+        raise HTTPException(502, "Could not start voice. Try again in a moment.")
+    return {"token": token, "model": config.LIVE_MODEL}
+
+
+class RunnerVoiceTask(BaseModel):
+    request: str = Field(min_length=1, max_length=4000)
+
+
+VOICE_TASK_WAIT_S = 90
+
+
+@app.post("/runner/voice/task")
+async def runner_voice_task(body: RunnerVoiceTask, who: tuple[str, str] = Depends(runner_auth)):
+    """run_task from the hotkey: a hidden message to the computer's teammate, answered with its reply (or what it's
+    waiting on), like the phone's voice mode, but waited for here."""
+    owner_id = who[0]
+    tm_id, thread_id = await _computer_chat(*who)
+    message = await db.insert("messages", {"thread_id": thread_id, "owner_id": owner_id, "sender_type": "user",
+                                           "text": body.request, "meta": {"voice_task": True}})
+    run_id = await runs.start(owner_id, thread_id, body.request, teammate_id=tm_id, message_id=message["id"])
+    await db.update("messages", {"id": f"eq.{message['id']}"}, {"run_id": run_id})
+    started = time.monotonic()
+    while time.monotonic() - started < VOICE_TASK_WAIT_S:
+        await asyncio.sleep(0.6)
+        fresh = await db.select("messages", {"thread_id": f"eq.{thread_id}", "created_at": f"gt.{message['created_at']}",
+                                             "sender_type": "neq.user", "order": "created_at.asc", "select": "kind,text,meta"})
+        run = await db.one("runs", {"id": f"eq.{run_id}"}) or {}
+        blocking = next((m for m in fresh if m["kind"] in ("approval", "question", "connect", "signin", "error")), None)
+        said = " ".join(m["text"] for m in fresh if m["kind"] == "text" and (m["text"] or "").strip()
+                        and not (m.get("meta") or {}).get("voice"))[:2000]
+        if blocking:
+            what = {"approval": "Waiting for their OK in the Tubelight app", "question": "The teammate needs an answer in the app",
+                    "connect": "An app needs connecting first, in the Tubelight app", "signin": "A sign-in is needed, in the Tubelight app",
+                    "error": "It failed"}[blocking["kind"]]
+            return {"result": f"{said} {what}: {blocking['text'][:400]}".strip()}
+        if run.get("status") not in ("running", None) and said:
+            return {"result": said}
+        if run.get("status") in ("failed", "cancelled"):
+            return {"result": f"It {run['status']}."}
+    return {"result": "Still working on it; the answer will be in the chat on their phone."}
+
+
+class RunnerTranscript(BaseModel):
+    turns: list[dict[str, str]]
+
+
+@app.post("/runner/voice/transcript")
+async def runner_voice_transcript(body: RunnerTranscript, who: tuple[str, str] = Depends(runner_auth)):
+    """What was said through the hotkey, saved into the computer's chat like a phone voice call."""
+    tm_id, thread_id = await _computer_chat(*who)
+    for t in body.turns[:200]:
+        text = str(t.get("text") or "").strip()
+        if text:
+            mine = t.get("role") == "user"
+            await db.insert("messages", {"thread_id": thread_id, "owner_id": who[0], "sender_type": "user" if mine else "teammate",
+                                         "teammate_id": None if mine else tm_id, "text": text[:4000], "kind": "text",
+                                         "meta": {"voice": True}})
+    return {"ok": True}
+
+
 class RunnerHello(BaseModel):
     name: str = Field("", max_length=80)
     os: str = Field("", max_length=40)

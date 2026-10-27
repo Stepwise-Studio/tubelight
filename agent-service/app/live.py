@@ -52,6 +52,37 @@ RUN_TASK = {"functionDeclarations": [{
 }]}
 
 
+# The hotkey on their computer (runner/tubelight_voice.py): these run on the computer itself, at once, with no trip
+# through the server; everything else goes to the computer's own chat through run_task.
+_S = {"type": "STRING"}
+DESKTOP_TOOLS = {"functionDeclarations": [
+    {"name": "list_windows", "description": "The computer's monitors (which is the laptop's own screen) and open windows.",
+     "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "place_window", "description": "Move or resize a window at once. window: an app name or part of its title. "
+     "monitor: laptop, external, other, left, right, primary, a number from 1 or a monitor's name. where: left, right, "
+     "top, bottom (halves), top-left, top-right, bottom-left, bottom-right, left-third, center-third, right-third, "
+     "left-two-thirds, right-two-thirds, center, full. size: 1280x800, 60% or 70%x80%. state: maximize, restore, "
+     "minimize, fullscreen, unfullscreen. focus: true to bring it to the front.",
+     "parameters": {"type": "OBJECT", "properties": {"window": _S, "monitor": _S, "where": _S, "size": _S, "state": _S,
+                                                     "focus": {"type": "BOOLEAN"}}, "required": ["window"]}},
+    {"name": "open_app", "description": "Open an app by name (Firefox, Files, Spotify, Settings...), or bring it up if it's open.",
+     "parameters": {"type": "OBJECT", "properties": {"app": _S}, "required": ["app"]}},
+    {"name": "close_app", "description": "Close an app the way its close button would (unsaved work prompts as usual).",
+     "parameters": {"type": "OBJECT", "properties": {"app": _S}, "required": ["app"]}},
+    {"name": "press_keys", "description": "Press keys in an app: chords like ctrl+t, ctrl+s, space, or text:words to type.",
+     "parameters": {"type": "OBJECT", "properties": {"keys": {"type": "ARRAY", "items": _S}, "app": _S}, "required": ["keys"]}},
+]}
+
+DESKTOP = """## On their computer (they pressed the hotkey)
+- They're at the computer and want it done now. Window and app commands (move, resize, maximize, minimize, put on a
+  monitor, open, close, keys): call the tool straight away, no confirming, and say at most a few words after
+  ("Done.", "On your laptop screen."). Several windows: one call each, back to back.
+- When you're unsure which window they mean, call list_windows first rather than asking.
+- Anything else that needs their apps, files, mail or the crew: run_task, as usual. Its answer also lands in the chat
+  with you on their phone.
+- They can't see a chat here, only a small pill with a line of text: never say "in the chat below"."""
+
+
 def voice_for(tm: dict) -> str:
     return VOICES[int(hashlib.md5(tm["id"].encode()).hexdigest(), 16) % len(VOICES)]
 
@@ -96,7 +127,7 @@ async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
     return "\n\n".join(lines)
 
 
-def setup(tm: dict, system: str) -> dict[str, Any]:
+def setup(tm: dict, system: str, desktop: bool = False) -> dict[str, Any]:
     return {
         "model": f"models/{config.LIVE_MODEL}",
         "generationConfig": {
@@ -104,7 +135,7 @@ def setup(tm: dict, system: str) -> dict[str, Any]:
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_for(tm)}}},
         },
         "systemInstruction": {"parts": [{"text": system}]},
-        "tools": [RUN_TASK],
+        "tools": [_desktop_tools()] if desktop else [RUN_TASK],
         "inputAudioTranscription": {},
         "outputAudioTranscription": {},
         # Server-side turn taking: a short pause ends the turn, and talking over the model interrupts it.
@@ -114,6 +145,12 @@ def setup(tm: dict, system: str) -> dict[str, Any]:
         },
         "contextWindowCompression": {"slidingWindow": {}},
     }
+
+
+def _desktop_tools() -> dict:
+    """The local tools plus run_task (switch_to_text needs the app's chat, which the hotkey doesn't have)."""
+    run_task = next(f for f in RUN_TASK["functionDeclarations"] if f["name"] == "run_task")
+    return {"functionDeclarations": [*DESKTOP_TOOLS["functionDeclarations"], run_task]}
 
 
 def dictation_setup() -> dict[str, Any]:

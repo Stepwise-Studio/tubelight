@@ -201,3 +201,23 @@ def test_the_runner_never_closes_the_desktop_or_without_full_access():
         with pytest.raises(PermissionError):
             r.quit_app(c, a)
     assert r.quit_app({"full_access": True}, {"name": "No such app", "full": True}) == "No such app isn't running."
+
+
+async def test_the_hotkey_hands_bigger_tasks_to_the_computers_chat(api, env):
+    from langchain_core.messages import AIMessage
+    from app import db
+    _, fake = env
+    code = computers.pair_code(OWNER)["code"]
+    claimed = await computers.claim(code, "laptop", "Linux")
+    tm = (await computers.row(OWNER, claimed["id"]))["teammate_id"]
+    await db.insert("threads", {"id": f"dm:{tm}", "owner_id": OWNER, "kind": "dm", "teammate_id": tm})  # a trigger, in Postgres
+    fake.script[:] = [AIMessage("Found Ravi's invoice and opened it.")]
+    r = await api.post("/runner/voice/task", json={"request": "open Ravi's invoice"},
+                       headers={"Authorization": f"Bearer {claimed['token']}"})
+    assert r.status_code == 200 and "Ravi's invoice" in r.json()["result"]
+    asked = await db.select("messages", {"thread_id": f"eq.dm:{tm}", "sender_type": "eq.user"})
+    assert asked[-1]["meta"] == {"voice_task": True}  # hidden in the chat, like the phone's voice tasks
+    r = await api.post("/runner/voice/transcript", json={"turns": [{"role": "user", "text": "open Ravi's invoice"}]},
+                       headers={"Authorization": f"Bearer {claimed['token']}"})
+    assert r.status_code == 200
+    assert (await api.post("/runner/voice/task", json={"request": "x"})).status_code == 401  # only a linked computer

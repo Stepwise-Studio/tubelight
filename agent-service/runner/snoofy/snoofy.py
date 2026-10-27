@@ -629,7 +629,7 @@ PRESETS = {  # where: x, y, w, h as parts of the monitor's work area
     "left-third": (0, 0, 1 / 3, 1), "center-third": (1 / 3, 0, 1 / 3, 1), "right-third": (2 / 3, 0, 1 / 3, 1),
     "left-two-thirds": (0, 0, 2 / 3, 1), "right-two-thirds": (1 / 3, 0, 2 / 3, 1),
 }
-STATES = {"maximize", "unmaximize", "minimize", "fullscreen", "unfullscreen"}
+STATES = {"maximize", "unmaximize", "minimize", "fullscreen", "unfullscreen", "close"}
 
 
 def _shell(method: str, arg=None) -> dict:
@@ -822,3 +822,13 @@ def _lend(app_name: str) -> str | None:
     _shell("Place", {"id": mine[-1]["id"], "focus": True})
     time.sleep(0.04)  # the app hears it has the keyboard
     return front["id"] if front else None
+
+
+def close_windows(spec: str) -> str:
+    """Closes an app's windows the way their close buttons would (by app name: all of them; by title: that one)."""
+    wins = _shell("List")["windows"]
+    low = spec.strip().lower()
+    hit = [w for w in wins if low in w["app"].lower()] or [_window(spec, wins)]
+    for w in hit:
+        _shell("Place", {"id": w["id"], "state": "close"})
+    return f"Closed {len(hit)} window{'s' if len(hit) != 1 else ''} of {hit[0]['app']}."

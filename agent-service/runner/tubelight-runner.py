@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "16"  # 16: windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "16"  # 16: the hotkey (say it, it's done), windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -72,7 +72,7 @@ def note(**fields) -> None:
 # Updates: newer runner files land in ~/.local/share/tubelight (no sudo needed); whichever copy is newest runs.
 UPDATES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tubelight"
 PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "snoofy.py", "snoofy-shell.js",
-         "snoofy-shell.json")
+         "snoofy-shell.json", "tubelight_voice.py")
 
 
 def version_of(text: str) -> int:
@@ -762,6 +762,19 @@ def handle(c: dict, job: dict) -> None:
             time.sleep(2)
 
 
+_voice: list = []
+
+
+def start_voice(c: dict) -> None:
+    """The hotkey (Snoofy's pill + Gemini Live): once using apps is on. It checks the switch again on every press."""
+    here = Path(__file__).resolve().parent
+    if not (here / "tubelight_voice.py").exists():
+        (here / "tubelight_voice.py").write_bytes(fetch(c, "tubelight_voice.py"))
+    sys.path.insert(0, str(here))
+    import tubelight_voice
+    tubelight_voice.Voice(load, api, lambda: _driver(load(), {"full": True})).start()
+
+
 def run() -> None:
     docker = docker_ok()
     if docker:
@@ -781,6 +794,12 @@ def run() -> None:
                 print("Downloaded a newer runner; switching to it.", flush=True)
                 os.execv(sys.executable, [sys.executable, str(UPDATES / "tubelight-runner.py"), "run"])
         c = load()  # linking, sharing and pausing (from the window or the CLI) apply without a restart
+        if c.get("token") and c.get("use_apps") and not _voice:
+            _voice.append(True)
+            try:
+                start_voice(c)
+            except Exception as e:  # no GStreamer or Soup here: everything else works without the hotkey
+                print(f"voice: off ({e})", flush=True)
         if not c.get("token") or c.get("paused"):
             note(online=False, paused=bool(c.get("paused")))
             time.sleep(3)
