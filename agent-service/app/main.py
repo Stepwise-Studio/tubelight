@@ -1296,6 +1296,7 @@ async def runner_result(body: RunnerResult, who: tuple[str, str] = Depends(runne
 
 class RunnerVoice(BaseModel):
     screen: str = Field("", max_length=8000)  # what was in front when they pressed the hotkey, as text
+    voice: str = Field("", max_length=40)  # the computer's chosen voice (runner config "voice")
 
 
 async def _computer_chat(owner_id: str, cid: str) -> tuple[str, str]:
@@ -1317,7 +1318,7 @@ async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_
     if body.screen.strip():
         system += "\n\nWhat was in front when they pressed the hotkey (seen, not said):\n" + body.screen
     try:
-        token = await live.mint(live.setup(tm, system, desktop=True))
+        token = await live.mint(live.setup(tm, system, desktop=True, voice=body.voice or live.DESKTOP_VOICE))
     except httpx.HTTPError:
         log.exception("desktop live token failed")
         raise HTTPException(502, "Could not start voice. Try again in a moment.")

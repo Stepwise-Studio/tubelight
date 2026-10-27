@@ -26,7 +26,9 @@ from gi.repository import Gio, GLib, Gst, Soup  # noqa: E402
 LIVE_WS = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"
 SHELL = ("org.gnome.Shell", "/studio/stepwise/Snoofy", "studio.stepwise.Snoofy")
 HOTKEY = "<Super>z"
-IDLE_S = 10  # the session ends this long after the last thing said or done
+IDLE_S = 30  # it stops listening this long after the last thing said, heard or done
+KEEP_S = 90  # the card stays this long after that, to read (× or the shortcut closes it sooner)
+VOICE_LEVEL = 0.12  # a microphone level this loud counts as them talking (it keeps the session open)
 TAIL_S = 0.35  # the microphone stays shut this long after the reply stops playing (the room's echo)
 CHUNK = 1280  # 40 ms of 16 kHz mono 16-bit
 
@@ -54,6 +56,7 @@ class Voice:
         self.ctx.push_thread_default()
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
         self.bus.signal_subscribe(SHELL[0], SHELL[2], "Summon", SHELL[1], None, 0, lambda *_: self.toggle())
+        self.bus.signal_subscribe(SHELL[0], SHELL[2], "Dismiss", SHELL[1], None, 0, lambda *_: self.dismiss())
         # The shell forgets the shortcut when it restarts (a log-in): take it again whenever it appears.
         Gio.bus_watch_name_on_connection(self.bus, SHELL[0], 0, lambda *_: self._grab(), None)
         GLib.MainLoop.new(self.ctx, False).run()
@@ -68,6 +71,19 @@ class Voice:
 
     def pill(self, **a) -> None:
         self.bus.call(*SHELL, "Pill", GLib.Variant("(s)", (json.dumps(a),)), None, 0, 1000, None, None)
+
+    def linger(self, seconds: float) -> None:
+        """Hide the card after a while, unless a new session took it over by then."""
+        self._lingering = getattr(self, "_lingering", 0) + 1
+        mine = self._lingering
+        src = GLib.timeout_source_new(int(seconds * 1000))
+        src.set_callback(lambda *_: (self.session is None and mine == self._lingering and self.pill(state="hide")) and False)
+        src.attach(self.ctx)
+
+    def dismiss(self) -> None:
+        """× on the card: it closed itself; stop listening too."""
+        if self.session:
+            self.session.end("Stopped")
 
     def toggle(self) -> None:
         c = self.load()
@@ -138,6 +154,8 @@ class Session:
             chunk, self.pending = self.pending[:CHUNK], self.pending[CHUNK:]
             samples = array.array("h", chunk)
             level = math.sqrt(sum(s * s for s in samples[::8]) / max(1, len(samples) // 8)) / 6000
+            if level > VOICE_LEVEL:
+                self.last = time.monotonic()  # they're talking, even before any words come back
             if self.tasks == 0:
                 self.v.pill(level=min(1.0, level))
             if self.ws:
@@ -163,7 +181,8 @@ class Session:
         except Exception:
             pass
         try:
-            status, got = self.v.api(self.v.load(), "/runner/voice", {"screen": screen}, timeout=20)
+            status, got = self.v.api(self.v.load(), "/runner/voice", {"screen": screen, "voice": self.v.load().get("voice") or ""},
+                                     timeout=20)
         except OSError as e:  # no internet (a power cut takes the router down), or the server is down
             print(f"voice: can't reach the server ({e})", flush=True)
             _later(self.ctx, self.end, "Can't reach Tubelight: check the internet and try again", "error")
@@ -324,13 +343,12 @@ class Session:
             p.set_state(Gst.State.NULL)
         if self.ws:
             self.ws.close(1000, None)
-        if why and state == "error":
-            self.v.pill(state="error", verb=why, turns=self._view())
-            src = GLib.timeout_source_new(3000)
-            src.set_callback(lambda *_: self.v.pill(state="hide") and False)
-            src.attach(self.ctx)
-        else:
+        if why == "Stopped":
             self.v.pill(state="hide")
+        else:  # the card stays to be read: the conversation, and what ended it
+            self.v.pill(state="error" if state == "error" else "done", verb=why if state == "error" else "Super+Z to talk again",
+                        turns=self._view())
+            self.v.linger(KEEP_S if self.turns else 4)
         turns = [{"role": r, "text": t[k].strip()} for t in self.turns for r, k in (("user", "you"), ("teammate", "reply"))
                  if t[k].strip()]
         if turns:

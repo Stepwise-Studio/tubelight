@@ -14,6 +14,11 @@ import httpx
 from . import brief, config, connectors, db, graph, mem, memory, mind
 
 VOICES = ["Puck", "Kore", "Charon", "Aoede", "Fenrir", "Leda", "Orus", "Zephyr"]
+# Every prebuilt Live voice a computer's hotkey may ask for (runner config "voice"); the desktop's default is warm.
+ALL_VOICES = {*VOICES, "Sulafat", "Despina", "Achernar", "Vindemiatrix", "Callirrhoe", "Autonoe", "Erinome", "Laomedeia",
+              "Pulcherrima", "Gacrux", "Algieba", "Schedar", "Umbriel", "Iapetus", "Enceladus", "Rasalgethi", "Achird",
+              "Zubenelgenubi", "Sadachbia", "Sadaltager", "Alnilam", "Algenib"}
+DESKTOP_VOICE = "Sulafat"
 
 SPEAKING = """## How you talk (this is a live voice call)
 - Talk like a person on a phone call: warm, relaxed, natural. One to three short sentences, then stop and let them talk.
@@ -97,7 +102,8 @@ DESKTOP = """## On their computer (they pressed the hotkey)
 - Buttons that delete, send, post or pay: ask them out loud first and press only after a clear yes (confirmed).
 - Anything else that needs their apps, files, mail or the crew: run_task, as usual. Its answer also lands in the chat
   with you on their phone.
-- They can't see a chat here, only a small pill with a line of text: never say "in the chat below"."""
+- They can see a small card with what's said and the full answers, but no chat: never say "in the chat below".
+- Sound like a warm, relaxed person sitting next to them: natural pace, short sentences, no announcer voice."""
 
 
 def voice_for(tm: dict) -> str:
@@ -144,12 +150,12 @@ async def instruction(ctx: "graph.RunCtx", tm: dict, thread_id: str) -> str:
     return "\n\n".join(lines)
 
 
-def setup(tm: dict, system: str, desktop: bool = False) -> dict[str, Any]:
+def setup(tm: dict, system: str, desktop: bool = False, voice: str = "") -> dict[str, Any]:
     return {
         "model": f"models/{config.LIVE_MODEL}",
         "generationConfig": {
             "responseModalities": ["AUDIO"],
-            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_for(tm)}}},
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice if voice in ALL_VOICES else voice_for(tm)}}},
         },
         "systemInstruction": {"parts": [{"text": system}]},
         "tools": [_desktop_tools()] if desktop else [RUN_TASK],
