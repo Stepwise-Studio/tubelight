@@ -1,5 +1,5 @@
 // Windows for the Tubelight driver: GNOME on Wayland lets no app move another app's window, so the shell does it.
-// D-Bus, on the shell's own name: org.gnome.Shell /studio/stepwise/Tubelight/Windows studio.stepwise.Tubelight.Windows
+// D-Bus, on the shell's own name: org.gnome.Shell /studio/stepwise/Snoofy studio.stepwise.Snoofy
 //   List() -> JSON {windows, monitors}            every normal window and every monitor's work area
 //   Place(JSON) -> JSON {window}                  one window: monitor, size/place, state, focus, in one call
 // Geometry is worked out here so a move is one round trip.
@@ -9,7 +9,7 @@ import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const XML = `<node><interface name="studio.stepwise.Tubelight.Windows">
+const XML = `<node><interface name="studio.stepwise.Snoofy">
   <method name="List"><arg type="s" direction="out" name="json"/></method>
   <method name="Place"><arg type="s" direction="in" name="json"/><arg type="s" direction="out" name="json"/></method>
 </interface></node>`;
@@ -131,7 +131,7 @@ class Service {
 export default class TubelightWindows extends Extension {
     enable() {
         this._dbus = Gio.DBusExportedObject.wrapJSObject(XML, new Service());
-        this._dbus.export(Gio.DBus.session, '/studio/stepwise/Tubelight/Windows');
+        this._dbus.export(Gio.DBus.session, '/studio/stepwise/Snoofy');
     }
 
     disable() {

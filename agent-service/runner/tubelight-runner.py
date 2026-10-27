@@ -71,8 +71,8 @@ def note(**fields) -> None:
 
 # Updates: newer runner files land in ~/.local/share/tubelight (no sudo needed); whichever copy is newest runs.
 UPDATES = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "tubelight"
-PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "tubelight_driver.py", "tubelight-windows.js",
-         "tubelight-windows.json")
+PARTS = ("tubelight-runner.py", "tubelight_window.py", "qrcodegen.py", "snoofy.py", "snoofy-shell.js",
+         "snoofy-shell.json")
 
 
 def version_of(text: str) -> int:
@@ -468,25 +468,25 @@ def screenshot(c: dict, a: dict) -> dict:
             "monitors": [f"{i} {m['name']}" for i, m in enumerate(screens, 1)]}
 
 
-# ------------------------------------------------------------------ using apps (tubelight_driver: AT-SPI + keys)
+# ------------------------------------------------------------------ using apps (snoofy: AT-SPI + keys)
 def _driver(c: dict, a: dict):
     if not full(c, a):
         raise PermissionError("Using apps needs full access.")
     if not c.get("use_apps"):
         raise PermissionError("Using apps is off on this computer. Turn on “Let teammates use your apps” in Tubelight there.")
     here = Path(__file__).resolve().parent
-    for part in ("tubelight_driver.py", "tubelight-windows.js", "tubelight-windows.json"):
+    for part in ("snoofy.py", "snoofy-shell.js", "snoofy-shell.json"):
         if not (here / part).exists():  # updated from a runner that didn't know this part yet
             (here / part).write_bytes(fetch(c, part))
     sys.path.insert(0, str(here))
-    import tubelight_driver
+    import snoofy
     if not _windows_checked:  # window control: the shell extension, put in place once (it loads at the next log-in)
         _windows_checked.append(True)
         try:
-            tubelight_driver.install_windows()
+            snoofy.install_windows()
         except Exception as e:  # never in the way of using apps; the state shows in ui_windows
             print(f"window control: {e}", file=sys.stderr)
-    return tubelight_driver
+    return snoofy
 
 
 _windows_checked: list = []

@@ -618,9 +618,9 @@ def launch(name: str) -> dict:
     raise TimeoutError(f"{info.get_display_name()} was started but no window showed up in 10 s.")
 
 
-# ------------------------------------------------------------------ windows (Tubelight Windows, a GNOME Shell extension)
+# ------------------------------------------------------------------ windows (Snoofy, a GNOME Shell extension)
 # On Wayland no app may move another's window: the shell does it for us, one D-Bus call per move (1-12 ms).
-EXT = "windows@tubelight.stepwise.studio"
+EXT = "snoofy@stepwise.studio"
 EXT_DIR = Path.home() / ".local/share/gnome-shell/extensions" / EXT
 HERE = Path(__file__).resolve().parent
 PRESETS = {  # where: x, y, w, h as parts of the monitor's work area
@@ -635,7 +635,7 @@ STATES = {"maximize", "unmaximize", "minimize", "fullscreen", "unfullscreen"}
 def _shell(method: str, arg=None) -> dict:
     bus = Gio.bus_get_sync(Gio.BusType.SESSION)
     try:
-        r = bus.call_sync("org.gnome.Shell", "/studio/stepwise/Tubelight/Windows", "studio.stepwise.Tubelight.Windows",
+        r = bus.call_sync("org.gnome.Shell", "/studio/stepwise/Snoofy", "studio.stepwise.Snoofy",
                           method, GLib.Variant("(s)", (json.dumps(arg),)) if arg is not None else None,
                           GLib.VariantType("(s)"), 0, 3000, None)
     except GLib.Error as e:
@@ -649,7 +649,7 @@ def windows_state() -> dict:
     """Whether window control works here: ready, not installed, or installed but waiting for the next log-in."""
     try:
         Gio.bus_get_sync(Gio.BusType.SESSION).call_sync(
-            "org.gnome.Shell", "/studio/stepwise/Tubelight/Windows", "studio.stepwise.Tubelight.Windows", "List",
+            "org.gnome.Shell", "/studio/stepwise/Snoofy", "studio.stepwise.Snoofy", "List",
             None, GLib.VariantType("(s)"), 0, 2000, None)
         return {"state": "ready", "message": "Window control is on."}
     except GLib.Error:
@@ -661,13 +661,13 @@ def windows_state() -> dict:
 
 
 def install_windows() -> dict:
-    """Puts the Tubelight Windows extension in place and turns it on (it starts working at the next log-in)."""
-    src = {n: HERE / n for n in ("tubelight-windows.js", "tubelight-windows.json")}
+    """Puts the Snoofy extension in place and turns it on (it starts working at the next log-in)."""
+    src = {n: HERE / n for n in ("snoofy-shell.js", "snoofy-shell.json")}
     if not all(p.exists() for p in src.values()):
         raise FileNotFoundError("The extension's files aren't next to the driver.")
     EXT_DIR.mkdir(parents=True, exist_ok=True)
     changed = False
-    for name, dst in (("tubelight-windows.js", "extension.js"), ("tubelight-windows.json", "metadata.json")):
+    for name, dst in (("snoofy-shell.js", "extension.js"), ("snoofy-shell.json", "metadata.json")):
         data = src[name].read_bytes()
         if not (EXT_DIR / dst).exists() or (EXT_DIR / dst).read_bytes() != data:
             (EXT_DIR / dst).write_bytes(data)

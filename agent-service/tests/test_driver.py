@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "driver"))
-D = pytest.importorskip("tubelight_driver")  # needs the system's PyGObject
-M = pytest.importorskip("tubelight_mcp")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "snoofy"))
+D = pytest.importorskip("snoofy")  # needs the system's PyGObject
+M = pytest.importorskip("snoofy_mcp")
 
 MONS = [{"index": 0, "x": 0, "y": 0, "name": "LG 27\"", "connector": "HDMI-1", "builtin": False, "primary": True},
         {"index": 1, "x": 2560, "y": 0, "name": "Built-in display", "connector": "eDP-1", "builtin": True, "primary": False}]

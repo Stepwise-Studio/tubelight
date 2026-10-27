@@ -1,4 +1,4 @@
-"""Computer use evals on this laptop's real desktop: the driver (runner/tubelight_driver.py) and the fast helper
+"""Computer use evals on this laptop's real desktop: the driver (runner/snoofy.py) and the fast helper
 (computer_use.subtask) on throwaway apps only: Calculator and a standalone text editor on a scratch file (a plain
 editor launch would restore the user's open documents). Measured like arc-cua's BENCHMARKS.md: driver timings, then
 each task N times with its pass rate, success checked outside the model (the app's own text).
@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 from statistics import median
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "driver"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runner" / "snoofy"))
 sys.path.append("/usr/lib/python3/dist-packages")  # the system's gi (AT-SPI), as the runner uses it
-import tubelight_driver as D  # noqa: E402
+import snoofy as D  # noqa: E402
 
 from app import computer_use as cu, config  # noqa: E402
 

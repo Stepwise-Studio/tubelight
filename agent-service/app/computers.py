@@ -36,9 +36,10 @@ FILES = {  # what the runner downloads: itself, and what it needs to build sandb
     "tubelight-runner.py": ROOT / "runner" / "tubelight-runner.py",
     "qrcodegen.py": ROOT / "runner" / "qrcodegen.py",
     "tubelight_window.py": ROOT / "runner" / "tubelight_window.py",
-    "tubelight_driver.py": ROOT / "runner" / "driver" / "tubelight_driver.py",
-    "tubelight-windows.js": ROOT / "runner" / "driver" / "tubelight-windows.js",
-    "tubelight-windows.json": ROOT / "runner" / "driver" / "tubelight-windows.json",
+    "snoofy.py": ROOT / "runner" / "snoofy" / "snoofy.py",
+    "tubelight_driver.py": ROOT / "runner" / "snoofy" / "snoofy.py",  # runners ≤ 15 fetch it by its old name to update
+    "snoofy-shell.js": ROOT / "runner" / "snoofy" / "snoofy-shell.js",
+    "snoofy-shell.json": ROOT / "runner" / "snoofy" / "snoofy-shell.json",
     "sandbox.Dockerfile": ROOT / "sandbox" / "Dockerfile",
     "squid.conf": ROOT / "deploy" / "squid.conf",
 }
@@ -457,14 +458,14 @@ def desktop_deb() -> tuple[str, bytes]:
     """Tubelight for desktop (Ubuntu/Debian): the runner, its window (GTK 4) and a user service, linked to this
     server. Built on request so the address inside is always this one."""
     runner = ROOT / "runner"
-    version = f"1.0.{int(max(p.stat().st_mtime for p in [*runner.iterdir(), *(runner / 'driver').iterdir()] if p.is_file()))}"
+    version = f"1.0.{int(max(p.stat().st_mtime for p in [*runner.iterdir(), *(runner / 'snoofy').iterdir()] if p.is_file()))}"
     opt = "opt/tubelight"
     data = {
         f"{opt}/tubelight-runner.py": ((runner / "tubelight-runner.py").read_bytes(), 0o755),
         f"{opt}/qrcodegen.py": ((runner / "qrcodegen.py").read_bytes(), 0o644),
         f"{opt}/tubelight_window.py": ((runner / "tubelight_window.py").read_bytes(), 0o644),
-        **{f"{opt}/{n}": ((runner / "driver" / n).read_bytes(), 0o644)
-           for n in ("tubelight_driver.py", "tubelight-windows.js", "tubelight-windows.json")},
+        **{f"{opt}/{n}": ((runner / "snoofy" / n).read_bytes(), 0o644)
+           for n in ("snoofy.py", "snoofy-shell.js", "snoofy-shell.json")},
         f"{opt}/server.txt": (config.PUBLIC_URL.encode(), 0o644),
         "usr/share/icons/hicolor/256x256/apps/tubelight.png": ((runner / "tubelight.png").read_bytes(), 0o644),
         "usr/share/applications/studio.stepwise.Tubelight.desktop": ((

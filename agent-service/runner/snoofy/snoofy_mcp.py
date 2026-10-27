@@ -2,7 +2,7 @@
 """The Tubelight driver as an MCP server over standard input/output, for Claude Code, Claude Desktop, Codex, Cursor or
 any MCP client: read and use this computer's apps and arrange its windows. Logs go to standard error.
 
-    claude mcp add tubelight -- python3 /path/to/tubelight_mcp.py
+    claude mcp add tubelight -- python3 /path/to/snoofy_mcp.py
 """
 import json
 import sys
@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import tubelight_driver as D  # noqa: E402
+import snoofy as D  # noqa: E402
 
 VERSION = "0.1.0"
 PROTOCOL = "2025-06-18"
@@ -87,7 +87,7 @@ def handle(msg: dict) -> dict | None:
         return None  # a notification (initialized, cancelled): nothing to answer
     if method == "initialize":
         result = {"protocolVersion": msg.get("params", {}).get("protocolVersion", PROTOCOL),
-                  "capabilities": {"tools": {}}, "serverInfo": {"name": "tubelight-driver", "version": VERSION}}
+                  "capabilities": {"tools": {}}, "serverInfo": {"name": "snoofy", "version": VERSION}}
     elif method == "ping":
         result = {}
     elif method == "tools/list":

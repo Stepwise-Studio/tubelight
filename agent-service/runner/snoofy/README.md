@@ -1,4 +1,4 @@
-# tubelight-driver
+# snoofy
 
 Computer use for Linux (GNOME on Wayland). An agent reads an app's window as a list of elements and acts on them **in
 the background** (your pointer and the window in front stay where they are), and arranges windows across monitors
@@ -10,10 +10,10 @@ nothing from PyPI: it uses the system's own accessibility stack (AT-SPI) and a s
 Needs `python3-gi` (installed on GNOME desktops) and GNOME 45 or newer.
 
 ```bash
-claude mcp add tubelight -- python3 /path/to/tubelight_mcp.py
+claude mcp add tubelight -- python3 /path/to/snoofy_mcp.py
 ```
 
-Then call the `setup` tool once (or run `python3 -c "import tubelight_driver as d; print(d.install_windows())"`)
+Then call the `setup` tool once (or run `python3 -c "import snoofy as d; print(d.install_windows())"`)
 and log out and back in: GNOME loads new shell extensions only at log-in. `status` shows what's working.
 
 ## Tools

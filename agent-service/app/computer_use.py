@@ -1,4 +1,4 @@
-"""Computer use: a teammate works in the apps on the user's own computer (runner/tubelight_driver.py does the reading
+"""Computer use: a teammate works in the apps on the user's own computer (runner/snoofy.py does the reading
 and acting there, through Linux accessibility).
 
 - One OK per task, not per click: `computer_use(app, task)` asks once; the user's OK lets that teammate act in that
