@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 
 from . import computer_use as cu
-from . import automations, brief, browser, passwords, mail, results, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
+from . import automations, brief, browser, passwords, playbooks, mail, results, clock, computers, config, connectors, db, documents, files, followups, knowledge, images, llm, mem, memory, mind, phone, push, repo, sandbox, todos, usage, vault
 
 if TYPE_CHECKING:
     from .graph import RunCtx
@@ -99,7 +99,7 @@ def builder(tm: dict) -> bool:
 
 
 INTERNAL = {
-    "remember": "read", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
+    "remember": "read", "playbook": "read", "browser_save": "read", "browser_attach": "act", "recall": "read", "search_chat": "read", "chat_stats": "read", "model_usage": "read", "follow_up": "read", "spawn_helper": "read",
     "automate": "read", "app_events": "read", "repo_context": "read", "repo_note": "read",
     "web_search": "read", "read_page": "read", "read_attachments": "read", "save_attachments": "read", "inbox": "read",
     "browser_signin": "read", "browser_use": "act", "schedule_post": "act", "browser_commit": "act", "browser_fill_login": "act", "browser_look": "read", "browser_act": "read", "browser_keys": "read", "browser_subtask": "read",
@@ -116,7 +116,7 @@ PROMPTS = {"ask_user", "connect_app", "browser_signin"}
 LABELS = {
     "browser_use": "Asking to use the browser", "browser_look": "Looking at a web page", "browser_act": "Using a web page",
     "browser_keys": "Pressing keys on a web page", "browser_subtask": "Working on a web page", "browser_commit": "Pressing the button", "browser_fill_login": "Signing you in",
-    "remember": "Saving to memory", "recall": "Searching memory", "search_chat": "Searching the chat",
+    "remember": "Saving to memory", "playbook": "Checking its playbooks", "browser_save": "Saving from the page", "browser_attach": "Attaching a file", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
     "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_browse": "Opening a website", "computer_read_page": "Reading the page", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
@@ -256,6 +256,8 @@ def title(name: str, args: dict[str, Any]) -> str:
         return f"Upload {str(args.get('path', '?')).rstrip('/').rsplit('/', 1)[-1]} to Google Drive{where}"[:80]
     if name == "computer_close_app":
         return f"Close {str(args.get('name') or 'an app')}"[:80]
+    if name == "browser_attach":
+        return f"Attach {str(args.get('file') or 'a file').rsplit('/', 1)[-1]} on the web page"[:80]
     if name == "browser_fill_login":
         return f"Sign in to {args.get('site') or 'a site'} with your saved password"[:80]
     if name == "browser_use" and args.get("more_time"):
@@ -315,6 +317,22 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         await db.activity(ctx.owner_id, "memory_write", scope, run_id=ctx.run_id, thread_id=ctx.thread_id,
                           teammate_id=tm["id"], input={"text": text, "scope": scope}, output={"key": key})
         return "Saved."
+
+    async def playbook(action: Literal["save", "read", "list", "delete"], name: str = "", when: str = "", steps: str = "") -> str:
+        if action == "list":
+            rows = await playbooks.all_(ctx.owner_id)
+            return "\n".join(f"- {r['name']}: {r['when']}" for r in rows) or "No playbooks yet."
+        if action == "read":
+            hit = await playbooks.find(ctx.owner_id, name)
+            return f"{hit['name']} ({hit['when']}):\n{hit['steps']}" if hit else f"No playbook called {name}."
+        if action == "delete":
+            return "Deleted." if await playbooks.remove(ctx.owner_id, name) else f"No playbook called {name}."
+        if not (name.strip() and when.strip() and steps.strip()):
+            return "To save: name (2-4 words), when (the requests it's for) and steps (their words, as they gave them)."
+        did = await playbooks.save(ctx.owner_id, name, when, steps, tm["name"])
+        await db.activity(ctx.owner_id, "memory_write", "playbook", run_id=ctx.run_id, thread_id=ctx.thread_id,
+                          teammate_id=tm["id"], input={"name": name, "when": when}, output={"did": did})
+        return f"Playbook “{name.strip()}” {did}. Every teammate follows it from now on."
 
     async def recall(query: str) -> str:
         spaces = [memory.ns("teammate", tm["id"]), memory.ns("user", ctx.owner_id)]
@@ -628,6 +646,49 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def browser_signin(site: str, reason: str = "", url: str = "") -> str:
             return "handled by the graph"
 
+        async def _file(file: str) -> tuple[str, bytes] | str:
+            """A file to attach: one made this turn (a generated image) or a Vault file by path or name."""
+            want = file.strip().strip("/").lower()
+            made = [a for a in ctx.outgoing.get(tm["id"], []) if not want or want in a["name"].lower()]
+            if made and (not want or "generated" in want or want == made[-1]["name"].lower()):
+                return made[-1]["name"], await files._download(ctx.owner_id, made[-1]["path"])
+            every = vault.visible(await vault.items(ctx.owner_id))
+            rows, by_id = [r for r in every if r["kind"] == "file"], {r["id"]: r for r in every}
+
+            def full(r: dict) -> str:
+                parts, at = [], r
+                while at:
+                    parts.append(at["name"])
+                    at = by_id.get(at.get("parent") or "")
+                return "/".join(reversed(parts)).lower()
+            hits = [r for r in rows if full(r) == want] or [r for r in rows if r["name"].lower() == want.rsplit("/", 1)[-1]]
+            if len(hits) != 1:
+                return (f"{'Several files' if hits else 'No file'} called {file} in the vault"
+                        + (": give its full path (vault search)." if hits else "."))
+            if hits[0]["size"] > browser.MAX_FILE:
+                return "That file is over 25 MB: too big to attach."
+            return hits[0]["name"], await asyncio.to_thread(vault.read_bytes, ctx.owner_id, hits[0]["id"])
+
+        async def browser_attach(file: str) -> str:
+            got = await _file(file)
+            if isinstance(got, str):
+                return got
+            return await _b(browser.attach(owner, tab, *got))
+
+        async def browser_save(snapshot: str, element: str, name: str = "", folder: str = "From the web") -> str:
+            try:
+                data, mime, src = await browser.save_file(owner, tab, snapshot, element)
+            except (LookupError, RuntimeError, browser.Busy) as e:
+                return str(e)
+            ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif",
+                   "application/pdf": ".pdf"}.get(mime, "")
+            base = name.strip() or src.split("?")[0].rsplit("/", 1)[-1][:60] or "download"
+            row = await vault.add_bytes(ctx.owner_id, base if "." in base[-6:] else base + ext, data,
+                                        await vault.ensure_folder(ctx.owner_id, folder), mime)
+            ctx.made.add(f"{folder.strip('/')}/{row['name']}".lower())
+            ctx.made.add(row["name"].lower())
+            return f"Saved to their vault as {folder.strip('/')}/{row['name']} ({len(data) / 1e6:.1f} MB). Attach it with browser_attach."
+
         async def browser_fill_login(site: str) -> str:
             host = browser.site_of(site)
             saved = await passwords.get(owner, host)
@@ -660,6 +721,16 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                             "approve the exact text now; at `when` (their local time, like 2026-10-28T09:30) you publish "
                             "it without asking again, as long as the text is unchanged. site: like x.com. text: the whole "
                             "post, final."),
+            StructuredTool.from_function(coroutine=browser_attach, name="browser_attach",
+                description="Attach a file to what you're writing on the page (a photo to a post, a CV to a form): "
+                            "first click the page's own add photo / attach button with browser_act, then call this. "
+                            "file: a vault path (vault search finds it), or the image you made with generate_image "
+                            "this turn (\"Generated image.jpg\"). They OK files from their vault; ones you made or "
+                            "saved yourself this turn go straight in. Posting it is still browser_commit."),
+            StructuredTool.from_function(coroutine=browser_save, name="browser_save",
+                description="Save an image (or a link's file) from the page into their vault, e.g. a picture another "
+                            "site made for you: snapshot + element of the image. name: a file name if you want one; "
+                            "folder: default 'From the web'. Then browser_attach can put it in a post."),
             StructuredTool.from_function(coroutine=browser_fill_login, name="browser_fill_login",
                 description="Sign in with the password they saved in Tubelight for this site: the server types it "
                             "into the sign-in page open in your tab and presses Enter (you never see it). They OK it "
@@ -1159,6 +1230,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def generate_image(prompt: str) -> str:
             att = await images.generate(ctx.owner_id, prompt)
             ctx.outgoing.setdefault(tm["id"], []).append({**att, "name": "Generated image.jpg"})
+            ctx.made.add("generated image.jpg")
             return "The image is attached to your reply; they see it in the chat. Say a line about it, don't describe it at length."
 
         tools.append(StructuredTool.from_function(
@@ -1210,6 +1282,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             description="Save a durable fact to long-term memory. scope: 'self' = your own notes, "
                         "'project' = shared with this project group, 'user' = the user's profile "
                         "(preferences, facts about them). Keep each fact short and self-contained."),
+        StructuredTool.from_function(
+            coroutine=playbook, name="playbook",
+            description="Playbooks = how they taught you to do something, step by step, for next time (\"whenever I "
+                        "ask for a LinkedIn post: draft it, make an image, attach it, save it as a draft\"). save: "
+                        "name (2-4 words), when (which requests it's for), steps: their steps exactly as they wrote or "
+                        "said them, numbered, never reworded or shortened (fill in only what they clearly meant; a "
+                        "change they ask for later: save again with the same name). read: one's steps. list, delete. "
+                        "Save only when they want it remembered or taught it for next time; a one-off request isn't one."),
         StructuredTool.from_function(
             coroutine=recall, name="recall", description="Search long-term memory (yours, the project's and the user's profile)."),
     ]

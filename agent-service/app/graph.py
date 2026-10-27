@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.types import interrupt
 
-from . import automations, brief, browser, computers, passwords, ground, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
+from . import automations, brief, browser, computers, passwords, playbooks, ground, config, connectors, db, floor, followups, genui, knowledge, llm, mem, memory, mind, push, reactions, repo, tools as T
 from .sandbox import Sandbox
 
 log = logging.getLogger(__name__)
@@ -67,6 +67,7 @@ class RunCtx:
     kb: dict = field(default_factory=dict)  # teammate id -> its knowledge base's file names (knowledge.py)
     sandboxes: dict[str, Sandbox | computers.Box] = field(default_factory=dict)
     outgoing: dict[str, list[dict]] = field(default_factory=dict)  # files a teammate attaches to its next reply
+    made: set[str] = field(default_factory=set)  # files a teammate made or saved this run (attaching them needs no OK)
     ui_snaps: dict[str, str] = field(default_factory=dict)  # computer use: snapshot id -> the app it shows
     phone_actions: dict[str, list[dict]] = field(default_factory=dict)  # things its next reply does on their phone
     phone_notes: bool = False  # their phone shares its notifications (Profile → Phone)
@@ -426,6 +427,8 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append("What you know that may be relevant:\n" + "\n".join(f"- {r['text']}" for r in profile))
     if own:
         lines.append("Your relevant memories:\n" + "\n".join(f"- {t}" for t in own))
+    if taught := await playbooks.for_request(ctx.owner_id, query):
+        lines.append(taught)
     if proj:
         lines.append("Project memories:\n" + "\n".join(f"- {t}" for t in proj))
     role = tm["system_prompt"]
@@ -800,6 +803,9 @@ def make_gate(ctx: RunCtx):
                 continue  # the user turned off "ask before commands" for this computer's chat
             if tc["name"] == "browser_use" and ctx.proactive and ctx.event_type not in ("delegate", "phone_request"):
                 continue  # an automation or follow-up they set up browses on its own; ⚑ commits still ask (or were pre-approved)
+            if tc["name"] == "browser_attach" and (ctx.proactive and ctx.event_type not in ("delegate", "phone_request")
+                                                   or str(tc["args"].get("file") or "").strip().strip("/").lower() in ctx.made):
+                continue  # a run they set up to work alone, or a file the teammate made or saved itself this run
             if tc["name"] == "browser_fill_login" and (ctx.proactive and ctx.event_type not in ("delegate", "phone_request")
                                                        or passwords.allowed(ctx.owner_id, browser.site_of(str(tc["args"].get("site") or "")))):
                 continue  # a run they set up to work alone, or the next step of a sign-in they just OK'd

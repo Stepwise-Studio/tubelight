@@ -246,3 +246,50 @@ async def test_a_saved_sign_in_is_kept_and_filled_on_its_own_site_only(tmp_path,
         assert "hunter2" not in B.text(got)
     finally:
         await B.stop(owner)
+
+
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+POST_PAGE = f"""<textarea aria-label="What do you want to talk about?"></textarea>
+  <input type="file" id="f" hidden onchange="document.getElementById('o').textContent = 'got ' + this.files[0].name + ' ' + this.files[0].size">
+  <button onclick="document.getElementById('f').click()">Add a photo</button><p id="o">no photo</p>
+  <img alt="Made by the other site" src="data:image/png;base64,{PNG}">"""
+
+
+@needs_chromium
+async def test_a_file_goes_in_through_the_upload_box_and_an_image_comes_out(tmp_path, monkeypatch):
+    import base64
+    monkeypatch.setattr(B, "DATA", tmp_path / "browser")
+    monkeypatch.setitem(B.FAKE, "post.test", POST_PAGE)
+    owner = OWNER + "-files"
+    B.grant(owner, "post.test")
+    try:
+        snap = await B.look(owner, "https://post.test/", tab="sol")
+        by = lambda s, name: next(e for e in s["elements"] if e["name"] == name)  # noqa: E731
+        data, mime, _ = await B.save_file(owner, "sol", snap["snapshot"], by(snap, "Made by the other site")["id"])
+        assert data == base64.b64decode(PNG) and mime == "image/png"
+        got = await B.act(owner, snap["snapshot"], by(snap, "Add a photo")["id"], "CLICK", tab="sol")  # the picker stays shut
+        got = await B.attach(owner, "sol", "my pic.png", data)
+        assert f"got my pic.png {len(data)}" in B.text(got)
+        B.revoke(owner)
+        with pytest.raises(PermissionError):  # no OK for the site: nothing goes in
+            await B.attach(owner, "sol", "x.png", data)
+    finally:
+        await B.stop(owner)
+
+
+async def test_playbooks_keep_their_words_and_show_when_asked(env, monkeypatch):
+    from app import playbooks
+    o = "00000000-0000-0000-0000-0000000000ac"
+    steps = "1. Write a draft post\n2. Make an image for it\n3. Attach it\n4. Save it as a draft, don't post"
+    assert await playbooks.save(o, "LinkedIn post", "when they ask for a LinkedIn post", steps, "Nova") == "saved"
+    assert await playbooks.save(o, "Invoices", "when they ask to send the week's invoices", "1. ...", "Ivy") == "saved"
+    assert (await playbooks.find(o, "linkedin post"))["steps"] == steps
+    assert await playbooks.save(o, "LinkedIn post", "when they ask for a LinkedIn post", steps + "\n5. Tell me", "Nova") == "updated"
+    assert len(await playbooks.all_(o)) == 2
+    listed = await playbooks.for_request(o, "post on linkedin about memory")
+    assert "- Invoices:" in listed and "- LinkedIn post:" in listed
+    monkeypatch.setattr(playbooks, "SHOWN", -1.0)  # a clear match: its steps come along, word for word
+    shown = await playbooks.for_request(o, "post on linkedin about memory")
+    assert "exactly as they gave them" in shown and (steps + "\n5. Tell me" in shown or "\n1. ..." in shown)
+    assert await playbooks.remove(o, "Invoices") and not await playbooks.remove(o, "Invoices")
+    assert await playbooks.for_request(o + "x", "anything") == ""

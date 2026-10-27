@@ -6,7 +6,8 @@ Guardrails live here, in code, not in the prompt:
 - No LAN: the container sits on the internal tl-browser network; its only exit is tl-egress-proxy (no private addresses).
 - Sites: `browser_use` (one OK) lets teammates go to the sites named in it for GRANT_S; any other page the tab tries to
   load is refused before it loads (Fetch interception of the main frame). Popups are closed, downloads denied, file
-  pickers never open.
+  pickers never open: a file goes in only through `attach` (one Vault file the teammate names, asked about unless it
+  made the file itself this run) and out only through `save_file` (into the Vault).
 - Commits: a click or key that would post, send, buy, delete, confirm or submit is refused by `act`/`keys`. It only
   happens through `commit`, after the user approved a preview (screenshot + the text on the page) and only if the page
   still shows exactly what they approved (fingerprint).
@@ -143,6 +144,7 @@ class Tab:
         self.count = [0, 0]  # snapshots, element ids
         self.cursor: dict | None = None  # where the teammate last pointed and what it did there (the live view's cursor)
         self.captured: dict = {}  # what the user typed into a sign-in, to save if they say so (memory only, 10 min)
+        self.chooser: tuple[int, float] | None = None  # the upload box a click just opened (backend node, when)
 
     async def cdp(self, method: str, params: dict | None = None, timeout: float = 30) -> dict:
         self.used = self.browser.used = time.time()
@@ -203,6 +205,7 @@ def _run(owner_id: str) -> tuple[Any, str]:
     profile.mkdir(parents=True, exist_ok=True)
     for lock in profile.glob("Singleton*"):  # left by the last container: Chromium would think another one has it
         lock.unlink(missing_ok=True)
+    shutil.rmtree(profile / "uploads", ignore_errors=True)  # files attached last time
     uid = int(config.SANDBOX_UID) if config.SANDBOX_UID else os.getuid()
     try:
         os.chown(profile, uid, uid)
@@ -318,7 +321,7 @@ async def _setup(b: Any, session: str, guard: bool = True) -> None:
     await c("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
     await c("Emulation.setUserAgentOverride", {"userAgent": UA, "acceptLanguage": "en-US,en", "platform": "Linux armv8l",
                                                "userAgentMetadata": UA_META})
-    await c("Page.setInterceptFileChooserDialog", {"enabled": True})  # no uploads, ever: the picker never opens
+    await c("Page.setInterceptFileChooserDialog", {"enabled": True})  # the picker never opens: attach() fills it
     if guard:
         await c("Fetch.enable", {"patterns": [{"resourceType": "Document", "requestStage": "Request"}]})
 
@@ -343,6 +346,8 @@ def _on_event(b: Browser, m: dict) -> Any:
         t.loading = False
     elif method == "Page.screencastFrame":
         return _frame(b, t, p)
+    elif method == "Page.fileChooserOpened" and p.get("backendNodeId"):  # the picker never opens; attach() fills it
+        t.chooser = (int(p["backendNodeId"]), time.time())
     return None
 
 
@@ -1051,6 +1056,66 @@ async def _user_input(b: Tab, m: dict) -> dict | None:
         if url:
             await b.cdp("Page.navigate", {"url": url if re.match(r"https?://", url) else "https://" + url})
     return None
+
+
+# ------------------------------------------------------------------ files: attach one from the Vault, save one to it
+MAX_FILE = 25_000_000
+
+
+async def attach(owner_id: str, tab: str, name: str, data: bytes) -> dict:
+    """Puts a file into the page's upload box: the one the teammate's last click opened (the picker itself never
+    opens), else the page's file input. The file goes in through the profile folder the browser sees as /profile."""
+    b = await _tab(owner_id, tab)
+    async with b.lock:
+        url, _ = await _url(b)
+        _may_act(b, url)
+        node = b.chooser[0] if b.chooser and time.time() - b.chooser[1] < 300 else None
+        if node is None:
+            r = await b.cdp("Runtime.evaluate", {"expression": "document.querySelector('input[type=file]')"})
+            oid = (r.get("result") or {}).get("objectId")
+            if oid:
+                node = (await b.cdp("DOM.describeNode", {"objectId": oid}))["node"]["backendNodeId"]
+        if node is None:
+            raise LookupError("No upload box on this page yet: click the page's own add photo / attach button first "
+                              "(browser_act), then attach.")
+        safe = re.sub(r"[^\w.\- ]", "_", name).strip() or "file"
+        folder = DATA / owner_id / "uploads"
+        folder.mkdir(exist_ok=True)
+        (folder / safe).write_bytes(data)
+        (folder / safe).chmod(0o644)
+        await _point(b, None, f"attaching {safe}")
+        await b.cdp("DOM.setFileInputFiles", {"files": [f"/profile/uploads/{safe}"], "backendNodeId": node})
+        b.chooser = None
+        await settle(b)
+        return {"status": "done", "did": f"attached {safe}", **await snapshot(b)}
+
+
+SAVE = """async function () {
+  const el = this.tagName === 'IMG' || this.tagName === 'A' ? this : this.querySelector('img, a[href]') || this;
+  const src = el.currentSrc || el.src || el.href || '';
+  if (!src) return {error: 'nothing to save there'};
+  const r = await fetch(src, {credentials: 'include'});
+  if (!r.ok) return {error: 'the site answered ' + r.status};
+  const blob = await r.blob();
+  if (blob.size > %d) return {error: 'it is over 25 MB'};
+  const data = await new Promise((ok) => { const f = new FileReader(); f.onload = () => ok(f.result); f.readAsDataURL(blob) });
+  return {src: src.slice(0, 300), type: blob.type, data} }""" % MAX_FILE
+
+
+async def save_file(owner_id: str, tab: str, sid: str, element: str) -> tuple[bytes, str, str]:
+    """An image (or a link's file) on the page, fetched by the page itself (its sign-ins count): data, type, address."""
+    b = await _tab(owner_id, tab)
+    async with b.lock:
+        moved, e = await _check(b, sid, element)
+        if moved:
+            raise LookupError("The page changed since that snapshot: look again and pick the image again.")
+        await _point(b, e, f"saving “{e['name'] or e['role']}”")
+        r = await b.cdp("Runtime.callFunctionOn", {"objectId": await _obj(b, e), "functionDeclaration": SAVE,
+                                                   "returnByValue": True, "awaitPromise": True}, timeout=60)
+        got = (r.get("result") or {}).get("value") or {}
+        if got.get("error") or not got.get("data"):
+            raise RuntimeError(f"Couldn't save it: {got.get('error') or 'the page gave nothing back'}.")
+        return base64.b64decode(got["data"].split(",", 1)[1]), got.get("type") or "", got.get("src") or ""
 
 
 # ------------------------------------------------------------------ saved sign-ins (passwords.py keeps them)
