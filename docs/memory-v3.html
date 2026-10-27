@@ -320,15 +320,24 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <li><b>π</b>: the association reached through the graph, taking the best of the entities the fact mentions;</li>
     <li><b>P</b>: the fact's strength from §5.4.</li>
   </ul>
-  <p>The weights start at 0.5 / 0.25 / 0.25 and are tuned by grid search on the evaluation questions. The brief for the prompt is then filled one whole fact at a time in score order until the budget runs out, so nothing is cut mid-sentence.</p>
+  <p>The weights are set by hand at 0.5 / 0.25 / 0.25. They have not been fitted: twenty evaluation questions are too few to fit three weights without fitting the questions themselves, so fitting waits for a larger benchmark (§10). The brief for the prompt is then filled one whole fact at a time in score order until the budget runs out, so nothing is cut mid-sentence.</p>
 
   <h3>5.6 Scopes: who may hear what</h3>
   <p>The same memory serves several audiences, and they shouldn't all get the same thing.</p>
   <ul>
     <li>The user's own agents get the full ranked brief.</li>
-    <li>An assistant speaking to an <b>outside person</b> on the phone gets the <b>caller scope</b>: facts about that person or naming them, nothing flagged sensitive, nothing no longer true, and no open-ended search.</li>
+    <li>An assistant speaking to an <b>outside person</b> on the phone gets the <b>caller scope</b>: facts filed about that person, and promises that name them; nothing flagged sensitive, nothing no longer true, and no open-ended search. A fact filed about someone else that merely names the caller ("Priya says Sam owes her money") stays out: naming a person doesn't make a fact theirs to hear. An earlier version let every fact naming the caller through.</li>
   </ul>
-  <p>The restriction is enforced in the query that reads memory, not in the prompt. A prompt can be talked around; a query can't.</p>
+  <p>The restriction is enforced in the query that reads memory, not in the prompt. A prompt can be talked around; a query can't. It is only as good as the caller's identity, though: callers are recognised by phone number, and caller ID can be spoofed (§10).</p>
+
+  <h3>5.7 Provenance: words passed on keep their source's trust</h3>
+  <p>Trust is set per episode, by who said it: the user 2, an agent 1, outside content 0. That leaves a gap. When an agent reads an email and then writes "Dev's email says the user promised him ₹50,000", the sentence is the agent's, so it would be stored at trust 1, and a planted email could launder itself into a fact the system trusts more than the email. The fix is a rule on the log, not on the extractor: once an agent has read anything from outside during a turn (mail, web pages, files, app results, the screen, notifications), every reply it writes for the rest of that turn is stored at the outside trust level. Reading the user's own records (memory, to-dos, reminders) doesn't count as outside. Relayed replies still pass the stage-0 filter like any agent reply, so "Done." costs no model call.</p>
+
+  <h3>5.8 Time: what was true then</h3>
+  <p>Facts carry the interval they were true in, and a replaced fact is closed, not deleted. Reading used only the current ones, so "where did I work last year?" had no answer once the job changed. Recall now takes an optional period: facts true at any point in it come first, replaced ones included and marked as no longer true. The window test is interval overlap, <i>valid_from ≤ end</i> and <i>(valid_to, or the day itself for an event, or today) ≥ start</i>, plus commitments due inside it. The agent turns "last March" into dates; the store does the rest.</p>
+
+  <h3>5.9 What the extractor is shown</h3>
+  <p>To replace a fact, mark a promise done or retract something, the extractor has to see the fact. It was shown the 60 newest current facts about the people in the conversation. Once someone had more than 60 facts on record, anything older was invisible to it, so "I work at Swiggy now" couldn't close a year-old "works at Zomato". It is now shown, for each new episode, the eight nearest facts by meaning, then every open commitment, then the newest, up to 60 in all.</p>
 
   <h2>6. Seeing memory: the neural map</h2>
   <p>The goal is a picture that looks like a network of neurons and is accurate. Every visual property is a quantity from §5. Tapping anything opens the facts behind it and the exact words they came from.</p>
@@ -337,11 +346,12 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <tbody>
       <tr><td>A cell (node)</td><td>An entity: a person, project, place, or life period</td><td>§5.1</td></tr>
       <tr><td>Cell size</td><td>Area ∝ total importance of its current facts, so the radius grows with the square root</td><td>Area is judged more accurately than radius [24]</td></tr>
-      <tr><td>Brightness</td><td>Recall probability P, computed live, so unused memories dim along the power law</td><td>Eq. (4–5)</td></tr>
+      <tr><td>Brightness</td><td>Recall probability P, computed live, as the cell's fill opacity (0.22 to 0.85); every cell keeps a full ring, so a faded memory is quieter but never invisible. An earlier version also drew a blurred glow per cell, which washed the dark theme out and was removed.</td><td>Eq. (4–5)</td></tr>
       <tr><td>Fibre (edge) and its thickness</td><td>PPMI association between two entities</td><td>Eq. (6)</td></tr>
-      <tr><td>Distance between cells</td><td>Distance through the graph, with edge length ½ + 1/(½ + PPMI), laid out by stress majorization [25]. The leftover error (stress) is shown, so you can tell how faithful the picture is.</td><td>Eq. (9)</td></tr>
+      <tr><td>Distance between cells</td><td>Distance through the graph, with edge length ½ + 1/(½ + PPMI), laid out by stress majorization [25]. The leftover error (stress) is shown, so you can tell how faithful the picture is. Majorization places centres and ignores sizes, so cells then get nudged apart on screen until no two overlap; the stress shown is the layout's, before that nudge.</td><td>Eq. (9)</td></tr>
       <tr><td>Colour regions</td><td>Communities found by maximising modularity (Louvain [26]; Leiden [27] as an upgrade)</td><td>Q is shown</td></tr>
       <tr><td>Faint satellites</td><td>Tentative facts orbiting their entity</td><td>§5.3</td></tr>
+      <tr><td>Names</td><td>Labels are placed greedily, most important first: below, above, right or left of the cell, or on it, never over another label or another cell's middle. Each label's width comes from measuring it in the label font, so the box placed is the box drawn. About ten show at the fitted view, and more as you zoom in.</td><td>Readability, not a quantity</td></tr>
       <tr><td>A recall, played back</td><td>The real steps of eq. (7) from the question's starting entities, with each cell's share of activation written on it</td><td>Eq. (7)</td></tr>
     </tbody>
   </table></div>
@@ -407,7 +417,7 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
   <dl>
     <dt>Write precision and recall</dt><dd>On about 150 real episodes, hand-labelled keep / tentative / skip. Target: no important item skipped (recall ≥ 0.95 on items labelled keep), and under 10% noise among long-term facts. The baseline: 25% noise (2 of 8 facts) and at least 2 clear misses.</dd>
     <dt>Calibration</dt><dd>Expected calibration error (ECE): the gap between the gate's stated probabilities and how often they turn out right, which must be under 0.1. Without calibration, the thresholds in eq. (3) have no meaning.</dd>
-    <dt>Answer accuracy</dt><dd>The existing scenario suite must stay at 18/18. New scenarios cover three cases:
+    <dt>Answer accuracy</dt><dd>The existing scenario suite (18 scenarios when this was written, 20 now) must keep passing. New scenarios cover three cases:
       <ul>
         <li><b>Multi-step association:</b> "who asked for the thing the demo is about?"</li>
         <li><b>Fading:</b> an old trivial fact must not outrank a recent important one.</li>
@@ -423,19 +433,29 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <tbody>
       <tr><td class="num">P0</td><td>Write-side evaluation and a labelled sample of real history</td><td>Precision, recall and calibration are reported for the baseline</td></tr>
       <tr><td class="num">P1</td><td>Fixes: caller scope, re-reading history after extractor changes, no orphan entities, whole-line briefs</td><td>The caller-scope scenario passes; old scenarios still pass</td></tr>
-      <tr><td class="num">P2</td><td>Stage 0 filter, importance and durability ratings, the gate, the tentative tier, promotion and fading</td><td>Write-side targets in §8 are met</td></tr>
+      <tr><td class="num">P2</td><td>Stage 0 filter, importance and durability ratings, the gate, the tentative tier, promotion and fading</td><td>Write-side targets in §8 are met (met on synthetic users; not on real history, see Status)</td></tr>
       <tr><td class="num">P3</td><td>Activation, mentions, PPMI edges, PageRank recall, fitted ranking</td><td>The association and fading scenarios pass</td></tr>
       <tr><td class="num">P4</td><td>The neural map in the app, drawn natively</td><td>Every visual channel in §6 matches its computed value</td></tr>
       <tr><td class="num">P5</td><td>The memory agent, the curiosity queue, voice tools</td><td>Answers flow into the gate's training labels</td></tr>
     </tbody>
   </table></div>
 
-  <p><b>Status (built and measured).</b> All six phases are implemented in the case-study system. Results:</p>
+  <p><b>Status (built and measured, re-run 2026-10-27).</b> All six phases are implemented in the case-study system. The numbers below come from one run of the current code, with the gate's deployed weights, on three labelled sets: two synthetic users (one used for fitting, one held out) and the real user's own history (662 episodes, mostly app testing; 13 moments labelled keep).</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Extractor</th><th>Synthetic, fitting set: recall / noise</th><th>Synthetic, held out: recall / noise</th><th>Real history: recall / noise</th><th>Real: calibration error</th></tr></thead>
+    <tbody>
+      <tr><td>Gemini 3.5 Flash-Lite (deployed)</td><td class="num">79% / 0%</td><td class="num">95% / 0%</td><td class="num">38% (5 of 13) / 17% (2 of 12)</td><td class="num">0.24</td></tr>
+      <tr><td>GPT-4.1 mini</td><td class="num">89% / 0%</td><td class="num">95% / 0%</td><td class="num">62% (8 of 13) / 63% (73 of 116)</td><td class="num">0.59</td></tr>
+    </tbody>
+  </table></div>
+  <p>What this says, plainly:</p>
   <ul>
-    <li><b>Write path:</b> on a held-out synthetic user with realistic junk (device commands with results, roasts, test automations), 91% of important moments kept and no junk stored.</li>
-    <li><b>Calibration:</b> fitted weights cut calibration error on the held-out user from 0.11 to 0.02.</li>
-    <li><b>Answers:</b> the scenario suite scores 20/20, including the new multi-step association case.</li>
+    <li><b>Synthetic numbers overstate real performance.</b> On held-out synthetic data both extractors keep 95% of important moments and store no junk. On real history the deployed extractor keeps 38% (with 13 positives, an exact 95% Clopper–Pearson interval of 14–68%), and the gate's calibration error is 0.24, far above the 0.1 target. The gate was fitted on synthetic data and is not calibrated for real use yet.</li>
+    <li><b>A stronger extractor isn't the fix.</b> GPT-4.1 mini finds more of the real facts but rates nearly everything important: agents' activity reports, test tasks and one-off requests become "facts". Both extractors miss the same core facts (a course the user is taking, the name of their laptop, their email, their studio). These are said in passing, inside questions and requests, which is the hardest case for extraction and the one to work on next.</li>
+    <li><b>Answers:</b> the 20-scenario suite scores 20/20 with either extractor on the current code (re-run 2026-10-27). The suite is now too easy to tell two extractors apart, which is one more reason for a public benchmark.</li>
+    <li><b>Calibration on synthetic data:</b> fitted weights cut calibration error on the held-out synthetic user from 0.11 to 0.02.</li>
     <li><b>Deliberate sharing:</b> a 5,000-character life story went from 10 facts to 23 with paragraph-at-a-time reading and the second look.</li>
+    <li><b>No public benchmark yet.</b> Nothing here is comparable with published LongMemEval or LoCoMo results; that comparison is the next step.</li>
   </ul>
   <p>Three additions came from deployment rather than design:</p>
   <ul>
@@ -450,6 +470,10 @@ input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
     <li>The gate is only as good as its labels. Until there are about 100, it runs on its starting weights and should be read as a sensible default, not as calibrated.</li>
     <li>PPMI is noisy for rare entities: a single co-occurrence between two rarely seen entities looks strong. With little history the map and recall still use single co-occurrences; the "at least twice" rule should switch on once there are a few hundred episodes.</li>
     <li>PPMI is zero for an entity that comes up in nearly everything, such as the user's main project. That's correct, since such an entity carries no information about what goes with what, but it means recall reaches it through name match and similarity rather than through links.</li>
+    <li>The real-history labels are few (13 keep) and come from one user whose history is mostly testing. Every real-data number above has a wide interval.</li>
+    <li>Caller scope trusts the phone number. Caller ID can be spoofed, and whoever spoofs a known number hears that person's facts.</li>
+    <li>Agent replies logged before the provenance rule (§5.7) keep the agent's trust level; the rule applies from 2026-10-27 on.</li>
+    <li>Label placement on the map is greedy: in a crowded region some names wait until you zoom in.</li>
     <li>Stress majorization costs O(n²) per step. That is fine on a phone up to a few hundred entities. Beyond that, sparse stress [25] or a subset of landmark nodes is needed.</li>
   </ul>
 
