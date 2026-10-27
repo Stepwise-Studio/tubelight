@@ -18,8 +18,9 @@ Differences, stated with every result:
   to its budget, instead of Mem0's top-30 memory list.
 - Text turns only, as Mem0's adder did (images' captions are left out).
 Memory is built by app/mem.py exactly as on the server (extraction by MEM_MODEL, the gate, linking, profiles), in a
-scratch Postgres (TL_TEST_PG). Extraction uses GEMINI_BENCH_API_KEY (or the key BENCH_KEY names), a separate free quota,
-so the live app keeps its own.
+scratch Postgres (TL_TEST_PG). Run with BENCH_KEY=GEMINI_BENCH_API_KEY (evals/__init__.py) so extraction spends a
+separate free quota and the live app keeps its own. BENCH_RUN=<tag> builds a fresh set of memories and results for a
+changed pipeline (the baseline is the untagged run); compare runs on the same conversations.
 Results: evals/data/bench/results/ (gitignored; the dataset is fetched from snap-research/locomo).
 """
 import asyncio
@@ -34,14 +35,10 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from dotenv import dotenv_values
+from langchain_core.messages import SystemMessage
 
-_env = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
-_bench = os.environ.get("BENCH_KEY", "GEMINI_BENCH_API_KEY")  # a second free project's key splits a long ingest
-if _env.get(_bench):  # before app.config reads it
-    os.environ["GEMINI_API_KEY"] = _env[_bench]
-
-from langchain_core.messages import HumanMessage, SystemMessage  # noqa: E402
+if not os.environ.get("BENCH_KEY"):  # thousands of calls: never on the live app's quota
+    raise SystemExit("set BENCH_KEY=GEMINI_BENCH_API_KEY (or _2): see evals/__init__.py")
 
 from app import llm, mem  # noqa: E402
 
@@ -137,8 +134,11 @@ def sessions(conv: dict) -> list[tuple[datetime, list[dict]]]:
     return out
 
 
+RUN = os.environ.get("BENCH_RUN", "")
+
+
 def owner(sample: str, speaker: str) -> str:
-    return str(uuid.uuid5(NS, f"locomo|{sample}|{speaker}"))
+    return str(uuid.uuid5(NS, f"locomo|{sample}|{speaker}" + (f"|{RUN}" if RUN else "")))
 
 
 async def _db() -> None:
@@ -191,7 +191,7 @@ async def ingest(only: str = "") -> None:
 
 def _results(kind: str) -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
-    return OUT / f"locomo_{kind}.jsonl"
+    return OUT / f"locomo_{kind}{'_' + RUN if RUN else ''}.jsonl"
 
 
 def _done(path: Path) -> set[tuple[str, int]]:

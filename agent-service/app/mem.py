@@ -354,9 +354,12 @@ Current facts about them (id | about | since | from | text):
 {facts}
 
 What to record, as facts about an entity ("user" = {user} themself):
-- trait: who or what something is (role, employer, relationship to {user}, location, contact details).
+- trait: who or what someone or something is, and what they're like: role, employer, relationship to {user}, where
+  they live or come from, family and background, contact details; tastes and favourites, hobbies and what they do
+  regularly, values, opinions and feelings about things, things they made, own or care about, goals.
 - relation: how two entities are linked ("Saqlain is Razorpay's partner engineer on {user}'s payments integration").
-- event: something that happened or was said that matters later: a decision, a delivery, a change, and every
+- event: something that happened to someone or that they did: a decision, a delivery, a change, an experience (a
+  trip, an outing, an illness, a performance, a meeting), what they took from it, and why they did it; and every
   caller's message (what they called about, what they said happened, what they asked for).
 - commitment: something someone owes or was asked for: promises and requests alike, worded the way it was made
   ("Priya Raman asked {user} for a demo by 2026-09-12", "{user} promised Dev a PR review by Monday"), with a due date
@@ -373,6 +376,9 @@ Rules:
   naming them: "Saqlain called on 2026-10-10: the API keys were rotated and {user} must update staging".
 - One self-contained sentence per fact, names in full ("Meera works at Swiggy", not "she moved"). Dates as
   YYYY-MM-DD, with relative ones ("Friday", "next week", "today") worked out from the episode's own date.
+- An event's "since" is when it happened, not when it was mentioned, and its text says when too: "last week" in an
+  episode of 2023-06-09 is since 2023-06-02, "in the week before 2023-06-09"; "last year" there is "in 2022". If
+  only the mention date is known, say "by <that date>".
 - A new fact that makes a current one untrue lists it in "replaces" (a new job replaces the old job).
 - "done": current commitments the episodes show were handled. "wrong": current facts the episodes show are wrong
   (the user correcting a teammate counts).
@@ -399,7 +405,9 @@ Rules:
 - journal episodes are {user} talking to their memory on purpose: what they say there about their life, work and
   people is worth keeping unless it's trivial.
 - Small talk, tests of the app and device commands need nothing; skip them. But don't skip a real fact because the
-  chat around it is casual: record every fact that passes the rules above.
+  chat around it is casual: a personal detail said in passing (a favourite book, what a trip was like, why someone
+  chose something) is a fact. Record every fact that passes the rules above, one per detail, and rate its
+  importance honestly: what's kept is decided from that rating, not by leaving facts out.
 
 Reply with JSON only:
 {{"entities": [{{"ref": "n1", "name": "full name", "kind": "person|org|project|place|period|thing", "aka": ["other names"],
