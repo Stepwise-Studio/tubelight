@@ -1,2 +1,0 @@
-int string tubelight_apps_description 0x0
-int xml tubelight_apps 0x0
