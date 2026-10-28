@@ -299,6 +299,13 @@ async def retry_message(message_id: str, user: User = Depends(current_user)):
     thread = await owned("threads", m["thread_id"], user, "conversation")
     if await db.one("runs", {"thread_id": f"eq.{m['thread_id']}", "status": "eq.running"}):
         raise HTTPException(409, "Already on it: wait for this reply to finish.")
+    # errors an automation left after this message aren't this message's: replaying it would answer an old request
+    # (2026-10-27: Retry under a failed inbox check re-ran "mark that invoice as read" from the day before)
+    errs = await db.select("messages", {"thread_id": f"eq.{m['thread_id']}", "kind": "eq.error",
+                                        "created_at": f"gt.{m['created_at']}", "select": "meta"})
+    if errs and all(str((e.get("meta") or {}).get("event_type") or "").startswith("automation:") for e in errs):
+        raise HTTPException(409, "That error came from an automation, not this message. Open the automation and tap "
+                                 "Run now to try it again.")
     await db.delete("messages", {"thread_id": f"eq.{m['thread_id']}", "kind": "eq.error", "created_at": f"gt.{m['created_at']}"})
     attachments = (m.get("meta") or {}).get("attachments") or []
     prompt = await _quoted(m["thread_id"], m.get("reply_to")) + m["text"] + await files.describe(user["id"], attachments)

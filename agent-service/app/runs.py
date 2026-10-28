@@ -178,7 +178,8 @@ async def _execute(run_id: str, owner_id: str, thread_id: str, trigger: str, gra
             if isinstance(e, GraphRecursionError) else llm.human_error(e))
         try:
             await db.insert("messages", {"thread_id": thread_id, "owner_id": owner_id, "sender_type": "system",
-                                         "text": text, "kind": "error", "run_id": run_id})
+                                         "text": text, "kind": "error", "run_id": run_id,
+                                         **({"meta": {"event_type": event_type}} if event_type else {})})
             await db.activity(owner_id, "error", type(e).__name__, run_id=run_id, thread_id=thread_id,
                               output={"error": str(e)[:1000]}, status="error")
             await _finish(run_id, owner_id, thread_id, "error", text, teammate_id=active)

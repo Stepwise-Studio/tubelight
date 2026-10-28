@@ -408,3 +408,36 @@ async def test_a_teammate_starts_a_named_chat(api, env):
     assert [t["title"] for t in made] == ["Maths 2"]
     assert fdb.rows("messages", thread_id=made[0]["id"])[0]["text"] == "Our Maths 2 chat."
     assert "already a chat" in fake.calls[-1][-1].content
+
+
+async def test_a_memory_outage_never_stops_a_reply(api, env, monkeypatch):
+    import httpx
+
+    from app import memory
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+
+    async def rate_limited(*_a, **_k):  # 2026-10-27: Cloudflare embeddings answered 429 and three runs died
+        raise httpx.HTTPStatusError("429 Too Many Requests", request=httpx.Request("POST", "https://cf"),
+                                    response=httpx.Response(429))
+    monkeypatch.setattr(memory, "search", rate_limited)
+    fake.script = [ai("Checked your inbox.")]
+    await api.post(f"/threads/dm:{dev['id']}/messages", json={"text": "check my inbox"})
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Checked your inbox."]
+    assert fdb.rows("runs")[0]["status"] == "done"
+    assert any(a.get("name") == "memory_unavailable" for a in fdb.rows("activity"))
+
+
+async def test_retry_under_an_automation_error_never_replays_an_old_message(api, env):
+    fdb, _ = env
+    dev = teammate(fdb, "dev", "developer")
+    t = f"dm:{dev['id']}"
+    old = await fdb.insert("messages", {"thread_id": t, "owner_id": dev["owner_id"], "sender_type": "user", "kind": "text",
+                                        "text": "mark that invoice email as read", "created_at": "2026-10-26T15:30:00Z"})
+    await fdb.insert("messages", {"thread_id": t, "owner_id": dev["owner_id"], "sender_type": "system", "kind": "error",
+                                  "text": "Something went wrong", "created_at": "2026-10-27T08:44:20Z",
+                                  "meta": {"event_type": "automation:Inbox check"}})
+    r = await api.post(f"/messages/{old['id']}/retry")
+    assert r.status_code == 409 and "automation" in r.json()["detail"]
+    assert fdb.rows("messages", kind="error")  # the automation's error note stays

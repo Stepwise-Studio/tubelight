@@ -11,6 +11,7 @@ import difflib
 import logging
 import re
 import time
+from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -209,11 +210,44 @@ def _drop_nones(v: Any) -> Any:
     return v
 
 
+_GMAIL_DATE = re.compile(r"\b(after|before|newer|older):(\S+)", re.I)
+
+
+def gmail_query(q: str) -> str:
+    """Gmail's after:/before: take a date (2026/10/27) or Unix seconds, nothing else. Models write ISO times
+    ("after:2026-10-27T14:14+05:30"), which Gmail reads as a word no email contains: every search came back empty and
+    an inbox check reported 0 emails (2026-10-27). A time with a zone becomes Unix seconds, anything else a date."""
+    def fix(m: re.Match) -> str:
+        op, v = m.group(1), m.group(2)
+        if v.isdigit() or re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2}", v):
+            return m.group(0)  # already Gmail's own form
+        try:
+            when = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                when = datetime.combine(date.fromisoformat(v), datetime.min.time())
+            except ValueError:
+                return m.group(0)
+        return f"{op}:{int(when.timestamp())}" if when.tzinfo else f"{op}:{when:%Y/%m/%d}"
+    return _GMAIL_DATE.sub(fix, q)
+
+
+def _fix_gmail(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Gmail searches in a call, direct (GMAIL_FETCH_EMAILS) or inside Composio's multi-execute, made valid."""
+    if name.upper().startswith("GMAIL") and isinstance(args.get("query"), str):
+        return {**args, "query": gmail_query(args["query"])}
+    if isinstance(args.get("tools"), list):
+        return {**args, "tools": [{**x, "arguments": _fix_gmail(str(x.get("tool_slug") or ""), x["arguments"])}
+                                  if isinstance(x, dict) and isinstance(x.get("arguments"), dict) else x
+                                  for x in args["tools"]]}
+    return args
+
+
 def _lenient(t: BaseTool) -> BaseTool:
     """The same tool with null-tolerant arguments; nulls are dropped before Composio sees them."""
     raw = t.args_schema if isinstance(t.args_schema, dict) else t.args_schema.model_json_schema()
     return StructuredTool(name=t.name, description=_clip(t.description), args_schema=_lean(_nullable(copy.deepcopy(raw))),
-                          func=lambda **kw: t.invoke(_drop_nones(kw)))
+                          func=lambda **kw: t.invoke(_fix_gmail(t.name, _drop_nones(kw))))
 
 
 async def tools_for(user_id: str, toolkits: list[str]) -> list[BaseTool]:

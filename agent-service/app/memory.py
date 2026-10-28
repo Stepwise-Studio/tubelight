@@ -42,7 +42,11 @@ async def _embed_cloudflare(texts: list[str]) -> list[list[float]]:
 
     url = f"https://api.cloudflare.com/client/v4/accounts/{config.env('CF_ACCOUNT_ID')}/ai/run/@cf/baai/bge-small-en-v1.5"
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(url, headers={"Authorization": f"Bearer {config.env('CF_API_TOKEN')}"}, json={"text": texts})
+        for wait in (2, 6, 0):  # a rate limit or a hiccup is usually gone in seconds (2026-10-27: three runs died on one)
+            r = await c.post(url, headers={"Authorization": f"Bearer {config.env('CF_API_TOKEN')}"}, json={"text": texts})
+            if r.status_code != 429 and r.status_code < 500 or not wait:
+                break
+            await asyncio.sleep(wait)
     r.raise_for_status()
     return r.json()["result"]["data"]
 

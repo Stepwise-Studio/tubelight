@@ -242,20 +242,34 @@ async def other_chats(ctx: RunCtx) -> str:
     return "\n".join(out)
 
 
+async def _soft(ctx: RunCtx, what: str, coro: Any, empty: Any) -> Any:
+    """Memory is context, not the job: when a lookup fails (embeddings rate-limited, the database slow), the teammate
+    still does the work without it. 2026-10-27 three inbox automations died on one embedding 429 and paused."""
+    try:
+        return await coro
+    except Exception as e:
+        log.warning("%s unavailable for this run: %s", what, e)
+        await db.activity(ctx.owner_id, "event", "memory_unavailable", run_id=ctx.run_id, thread_id=ctx.thread_id,
+                          output={"what": what, "error": str(e)[:300]}, status="error")
+        return empty
+
+
 async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: list[str]) -> str:
     query = _last_human(msgs)[:500]
     shelf = memory.ns("user", ctx.owner_id)
     known, owed, prefs, profile = "", [], [], []
     if mem.ready():
         # a project's group chat brings its project's memory even when the message doesn't name it
-        known = await mem.recall(ctx.owner_id, query, brief=True, names=(ctx.project["name"],) if ctx.project else ())
+        known = await _soft(ctx, "memory", mem.recall(ctx.owner_id, query, brief=True,
+                                                      names=(ctx.project["name"],) if ctx.project else ()), "")
     else:
         owed = await memory.listing(shelf, limit=10, kind="commitment", done=False)
         prefs = await memory.listing(shelf, limit=12, kind="preference")
         seen = {r["key"] for r in owed + prefs}
-        profile = [r for r in await memory.search_rows(shelf, query, limit=8) if r["key"] not in seen]
-    own = await memory.search(memory.ns("teammate", tm["id"]), query)
-    proj = await memory.search(memory.ns("project", ctx.project["id"]), query) if ctx.project else []
+        profile = [r for r in await _soft(ctx, "memory", memory.search_rows(shelf, query, limit=8), []) if r["key"] not in seen]
+    own = await _soft(ctx, "lessons", memory.search(memory.ns("teammate", tm["id"]), query), [])
+    proj = await _soft(ctx, "project memory", memory.search(memory.ns("project", ctx.project["id"]), query), []) \
+        if ctx.project else []
 
     now = local_now(ctx)
     lines = [
@@ -398,7 +412,7 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
                      "statuses, results), check rather than repeat:\n" + ctx.brief)
     if tm["id"] in ctx.kb:
         names = ctx.kb[tm["id"]]
-        hits = await knowledge.search(tm["id"], query, limit=3) if query and names else []
+        hits = await _soft(ctx, "knowledge", knowledge.search(tm["id"], query, limit=3), []) if query and names else []
         lines.append(f"## Your knowledge base\nFiles {ctx.user_name} gave you to know ({len(names)}): "
                      + ", ".join(names[:25]) + (" and more" if len(names) > 25 else "")
                      + ". The knowledge tool searches them; answer from them when they cover the question and say "
@@ -427,7 +441,7 @@ async def preamble(ctx: RunCtx, tm: dict, msgs: list[BaseMessage], tool_names: l
         lines.append("What you know that may be relevant:\n" + "\n".join(f"- {r['text']}" for r in profile))
     if own:
         lines.append("Your relevant memories:\n" + "\n".join(f"- {t}" for t in own))
-    if taught := await playbooks.for_request(ctx.owner_id, query):
+    if taught := await _soft(ctx, "playbooks", playbooks.for_request(ctx.owner_id, query), None):
         lines.append(taught)
     if proj:
         lines.append("Project memories:\n" + "\n".join(f"- {t}" for t in proj))

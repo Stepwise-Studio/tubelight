@@ -356,3 +356,17 @@ async def test_email_attachments_are_read_as_text_in_one_call(monkeypatch, tmp_p
     assert [c[0] for c in calls] == ["GMAIL_GET_ATTACHMENT"] * 2
     ctx.only = ["github"]
     assert "isn't allowed" in await read.coroutine(files=[{"message_id": "m1", "attachment_id": "x1"}])
+
+
+def test_gmail_dates_become_what_gmail_understands():
+    from app.connectors import _fix_gmail, gmail_query
+    # 2026-10-27: "after:...T14:14+05:30" matched nothing, so an inbox check said 0 emails while 15 had arrived
+    assert gmail_query("after:2026/10/27 after:2026-10-27T14:14+05:30") == "after:2026/10/27 after:1793090640"
+    assert gmail_query("after:2026-10-27 is:unread") == "after:2026/10/27 is:unread"
+    assert gmail_query("before:2026-10-28T09:00:00Z") == "before:1793178000"
+    for kept in ("newer_than:2d from:college", "after:1793100000", "after:2026/10/27", "subject:after:party"):
+        assert gmail_query(kept) == kept
+    call = {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {"query": "after:2026-10-27"}},
+                      {"tool_slug": "SLACK_SEARCH", "arguments": {"query": "after:2026-10-27"}}]}
+    fixed = _fix_gmail("COMPOSIO_MULTI_EXECUTE_TOOL", call)
+    assert [x["arguments"]["query"] for x in fixed["tools"]] == ["after:2026/10/27", "after:2026-10-27"]
