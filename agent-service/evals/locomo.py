@@ -200,12 +200,12 @@ def _done(path: Path) -> set[tuple[str, int]]:
 
 
 async def _ask(model, prompt: str) -> str:
-    for attempt in range(6):
+    for attempt in range(40):  # long runs share one rate limit with other systems: wait it out, don't give up
         try:
             return (await model.ainvoke([SystemMessage(prompt)])).text
         except Exception as e:  # rate limits and timeouts: wait them out
             print("  retry:", str(e)[:120], flush=True)
-            await asyncio.sleep(10 * (attempt + 1))
+            await asyncio.sleep(min(90, 10 * (attempt + 1)))
     raise SystemExit("the answer model kept failing")
 
 
