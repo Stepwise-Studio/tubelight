@@ -123,6 +123,9 @@ create table if not exists mem_fact_sources (
   role text not null default 'says',    -- says (supports it) | done | wrong (closed it)
   primary key (fact, episode)
 );
+-- what was said, searchable word by word: recall's fallback when no fact holds the answer (only the user's own words)
+alter table mem_episodes add column if not exists tsv tsvector generated always as (to_tsvector('english', text)) stored;
+create index if not exists mem_episodes_tsv on mem_episodes using gin (tsv);
 """
 
 
@@ -965,9 +968,10 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         return ""
     blocks: list[tuple[str, list[str]]] = []
     seen: set = set()
+    qv = _vec((await memory.embed([query[:500]]))[0]) if query.strip() else None
     if since or until:
         lo, hi = since or date(1900, 1, 1), until or datetime.now(UTC).date()
-        vec = _vec((await memory.embed([query[:500] or "what happened"]))[0])
+        vec = qv or _vec((await memory.embed(["what happened"]))[0])
         # true at some point in [lo, hi]: started by its end, and not over before its start (an event is its own day)
         then = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'closed', 'tentative') "
                         "and ((valid_from <= %s and coalesce(valid_to, case when kind = 'event' then valid_from end, "
@@ -996,9 +1000,11 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
     for e in hit:
         # its own facts, and others that name it ("Jayanth owes Ananya the deck" may sit on Jayanth)
         pats = [rf"\m{re.escape(n)}\M" for n in [e["name"], *e["aliases"]] if len(n) > 2]
+        # most relevant to the question first: "what does Melanie do for fun" wants her hobbies, not her newest facts
+        order = "embedding <=> %s::vector" if qv else "learned_at desc"
         facts = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'tentative', 'closed') "
-                         "and (subject = %s or text ~* any(%s)) order by subject = %s desc, status = 'current' desc, "
-                         "learned_at desc limit 16", owner, e["id"], pats, e["id"])
+                         f"and (subject = %s or text ~* any(%s)) order by subject = %s desc, {order} limit 24",
+                         owner, e["id"], pats, e["id"], *([qv] if qv else []))
         facts = [f for f in facts if f["id"] not in seen]
         cur = [f for f in facts if f["status"] == "current"][:10] + [f for f in facts if f["status"] == "tentative"][:3]
         old = [f for f in facts if f["status"] == "closed"][:3]
@@ -1018,8 +1024,8 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         linked += [f"  {byid[eid]['name']}: {_line(f)[2:]}" for f in fs]
     blocks.append(("Linked to that (comes up with it):", linked))
     found = []
-    if query.strip():
-        vec = _vec((await memory.embed([query[:500]]))[0])
+    if qv:
+        vec = qv
         # bge-small puts unrelated facts at ~0.5 cosine and related ones at 0.6+; words that match count too
         found = await _q(
             f"select * from (select {_COLS}, 1 - (embedding <=> %s::vector) as cos, ts_rank(tsv, q) as tr, "
@@ -1038,6 +1044,7 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         found = sorted(found, key=lambda f: -f["r"])[:10]
         seen |= {f["id"] for f in found}
     blocks.append(("Related facts:", [_line(f) for f in found]))
+    blocks.append(("Said in their own words:", await _said(owner, query)))
     if brief:
         me = await user_entity(owner)
         prefs = await _q(f"select {_COLS} from mem_facts where subject = %s and kind = 'preference' and status = 'current' "
@@ -1049,6 +1056,22 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
     if used and seen:
         await _q(f"update mem_facts set {_HIT} where id = any(%s::uuid[])", [str(x) for x in seen])
     return _fit(blocks, budget)
+
+
+async def _said(owner: str, query: str) -> list[str]:
+    """The user's own words that match the question, for what no fact holds (a favourite book mentioned in passing).
+    Only ever the user's own (trust 2): an email or a web page shown verbatim to a teammate would be a way around every
+    check facts go through. Words behind a fact that faded or was shown wrong stay out: memory let go of them on
+    purpose. Never part of a caller's scope."""
+    words = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2]
+    if not words:
+        return []
+    rows = await _q("select occurred_at, speaker, ts_headline('english', text, q, 'MaxWords=40, MinWords=12, "
+                    "MaxFragments=1, StartSel=\"\", StopSel=\"\"') as bit from mem_episodes, to_tsquery('english', %s) q "
+                    "where owner = %s and trust = 2 and tsv @@ q and not exists (select 1 from mem_fact_sources s join mem_facts f "
+                    "on f.id = s.fact where s.episode = mem_episodes.id and f.status in ('faded', 'retracted')) "
+                    "order by ts_rank_cd(tsv, q) desc, occurred_at desc limit 3", " | ".join(words), owner)
+    return [f"- [{r['occurred_at']:%Y-%m-%d}] {r['speaker']}: {' '.join(r['bit'].split())}" for r in rows]
 
 
 async def about_caller(owner: str, name: str, phone: str = "", budget: int = 2500) -> str:

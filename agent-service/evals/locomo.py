@@ -191,7 +191,8 @@ async def ingest(only: str = "") -> None:
 
 def _results(kind: str) -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
-    return OUT / f"locomo_{kind}{'_' + RUN if RUN else ''}.jsonl"
+    tag = os.environ.get("BENCH_TAG", RUN)  # results of a recall change on memories an earlier run built
+    return OUT / f"locomo_{kind}{'_' + tag if tag else ''}.jsonl"
 
 
 def _done(path: Path) -> set[tuple[str, int]]:
