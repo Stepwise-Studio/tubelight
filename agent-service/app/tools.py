@@ -282,6 +282,12 @@ def title(name: str, args: dict[str, Any]) -> str:
     return s[:140]
 
 
+def fit_for(name: str, out: Any) -> str:
+    """A tool's result within its budget. A batch of attachments is meant to be big: at the general 40k, 15 resumes
+    read in one call kept only the first and last few, and the picks came from those (2026-10-29)."""
+    return results.fit(out, ATTACH_BUDGET + 2000 if name == "read_attachments" else results.BUDGET)
+
+
 async def run_tool(ctx: RunCtx, tm: dict, tool: BaseTool | None, name: str, args: dict[str, Any]) -> tuple[str, str]:
     """Execute one tool, log it, return (content, status)."""
     if tool is None:
@@ -290,7 +296,7 @@ async def run_tool(ctx: RunCtx, tm: dict, tool: BaseTool | None, name: str, args
     t0 = time.monotonic()
     try:
         out = await tool.ainvoke(args)
-        content, status = results.fit(out), "ok"  # never a silent cut: see results.py
+        content, status = fit_for(name, out), "ok"  # never a silent cut: see results.py
     except Exception as e:
         content, status = f"The tool failed: {e}", "error"
     await db.activity(

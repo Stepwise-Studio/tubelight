@@ -65,7 +65,7 @@ async def probe(owner: str, handle: str) -> dict:
             calls.append(tc["name"])
             t = by.get(tc["name"])
             run = t and tc["name"] not in SKIP and graph.T.classify_call(tc["name"], tc["args"]) != "act"
-            res = graph.T.results.fit(await t.ainvoke(tc["args"])) if run else "[skipped in the eval]"
+            res = graph.T.fit_for(tc["name"], await t.ainvoke(tc["args"])) if run else "[skipped in the eval]"
             data += bool(run and len(str(res)) > 80 and "fail" not in str(res)[:80].lower())
             convo.append(ToolMessage(res, tool_call_id=tc["id"], name=tc["name"]))
     reply = graph.said(convo[-1])

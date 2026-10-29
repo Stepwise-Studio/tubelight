@@ -409,3 +409,10 @@ async def test_attachments_are_found_from_the_email_not_copied_ids(monkeypatch, 
     got.clear()
     await read(files=[{"message_id": "m1", "attachment_id": "ANG3xxxx…", "file_name": "3.txt"}])  # a cut id
     assert got == ["ANG3" + "x" * 400]
+
+
+def test_a_batch_of_attachments_is_not_cut_to_the_general_budget():
+    from app import results, tools as T
+    batch = "\n\n".join(f"### {i}.pdf\n" + f"resume {i} " * 700 for i in range(15))  # ~110k characters
+    assert len(batch) > results.BUDGET and "resume 7" in T.fit_for("read_attachments", batch)
+    assert "RESULT CUT" in T.fit_for("web_search", batch)
