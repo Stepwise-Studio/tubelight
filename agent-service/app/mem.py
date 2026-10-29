@@ -32,7 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from . import config, db, llm, memgraph, memory
 
 log = logging.getLogger(__name__)
-VERSION = 5  # extractor version: episodes processed by an older one can be re-run after a prompt change
+VERSION = 6  # extractor version: episodes processed by an older one can be re-run after a prompt change
 QUIET = timedelta(seconds=90)  # a conversation is extracted once it's been quiet this long
 BATCH_CHARS = 6000
 SAME = 0.92  # cosine similarity above which a new fact restates a known one
