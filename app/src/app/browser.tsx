@@ -105,6 +105,9 @@ export default function BrowserScreen() {
           if (signin && !link.started) { // from a Sign in card: that teammate's tab, in their hands
             link.started = true
             link.send({ t: 'signin', key: signinTab, site, label: link.mate })
+          } else if (!signin && signinTab && !link.started) { // from a "using the browser · Watch" capsule: that tab
+            link.started = true
+            if (m.tab !== signinTab && m.tabs.some((t: { key: string }) => t.key === signinTab)) link.send({ t: 'tab', key: signinTab })
           }
         } else if (m.t === 'focus') {
           setInput(''); link.forget()

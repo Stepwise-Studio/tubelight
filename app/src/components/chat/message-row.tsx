@@ -133,10 +133,11 @@ function Body({ item, firstInGroup: first, lastInGroup: last, pauseAvatar, appro
   switch (m.kind) {
     case 'handoff': return <HandoffMessage m={m} first={first} last={last} paused={pauseAvatar} />
     case 'event': {
-      // An automation's capsule opens it (unless it was deleted).
+      // An automation's capsule opens it (unless it was deleted); a browser one opens the live view on that tab.
       const rule = m.meta.automation && m.meta.automation !== 'deleted' ? String(m.meta.rule_id ?? '') : ''
-      return <Capsule text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]}
-        onPress={rule ? () => openAutomation(rule) : undefined} />
+      const tab = m.meta.browser ? String(m.meta.browser) : ''
+      return <Capsule text={m.text || `Event: ${String(m.meta.event_type ?? 'external')}`} tone={tab ? 'tube' : m.meta.automation ? AUTOMATION_TONE[String(m.meta.automation)] : FOLLOWUP_TONE[String(m.meta.followup)]}
+        onPress={rule ? () => openAutomation(rule) : tab ? () => router.push({ pathname: '/browser', params: { tab } }) : undefined} />
     }
     case 'error': return <ErrorRow m={m} onRetry={actions.onRetryRun} />
     case 'approval':

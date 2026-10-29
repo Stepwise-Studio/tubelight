@@ -616,6 +616,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 got = await _b(browser.look(owner, browser.last_url(owner, tab), tab=tab, label=tm["name"]))
                 return f"They said keep going: 20 more minutes on {', '.join(sites)}. Carry on where you were.\n" + got
             got = await _b(browser.look(owner, sites[0], tab=tab, label=tm["name"]))
+            # a capsule in the chat opens the live view on this teammate's tab, so they can watch it work
+            await db.insert("messages", {"thread_id": ctx.thread_id, "owner_id": owner, "sender_type": "system",
+                                         "kind": "event", "text": f"{tm['name']} is using the browser: {', '.join(sites)} · Watch",
+                                         "meta": {"browser": tab}})
             return (f"They OK'd the browser on {', '.join(sites)} for: {task} (20 minutes). Work through it with "
                     "browser_act (browser_subtask for a run of simple steps). A ⚑ button (post, send, buy...) goes "
                     "through browser_commit, which shows them the screen first.\n" + got)

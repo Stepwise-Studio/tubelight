@@ -214,7 +214,10 @@ def _run(owner_id: str) -> tuple[Any, str]:
     args = ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run",
             "--no-default-browser-check", "--disable-sync", "--password-store=basic", "--disable-background-networking",
             "--disable-blink-features=AutomationControlled", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-            "--lang=en-US", f"--window-size={W},{H}", f"--user-agent={UA}", "--user-data-dir=/profile", "about:blank"]
+            "--lang=en-US", f"--window-size={W},{H}",
+            # lighter on the server: no sound, no video that plays itself (X, LinkedIn feeds), no background extras
+            "--mute-audio", "--autoplay-policy=user-gesture-required", "--disable-component-update",
+            "--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions", f"--user-agent={UA}", "--user-data-dir=/profile", "about:blank"]
     if config.BROWSER_PROXY:
         args.insert(0, f"--proxy-server={config.BROWSER_PROXY}")
     c = client.containers.run(
