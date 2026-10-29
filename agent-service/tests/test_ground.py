@@ -91,3 +91,18 @@ async def test_a_reply_of_written_out_calls_runs_them(api, env, monkeypatch):
     await settle()
     assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Found the resumes thread."]
     assert any(isinstance(m, ToolMessage) and m.name == "search_chat" for m in fake.calls[-1])
+
+
+async def test_the_checker_reads_the_newest_data_when_it_must_cut(monkeypatch):
+    from types import SimpleNamespace
+    from app import ground, llm
+    seen = []
+
+    class M:
+        async def ainvoke(self, msgs):
+            seen.append(msgs[-1].content)
+            return SimpleNamespace(text='{"ok": true, "problems": []}', content="")
+    monkeypatch.setattr(llm, "chat_model", lambda *a, **k: M())
+    old, resumes = "old search " * 30_000, "### 15.pdf resume of Spoorthi"
+    await ground.check("read all 15", old + resumes, "Spoorthi is a pick")
+    assert "Spoorthi" in seen[0].split("The reply:")[0] and "CUT IN YOUR COPY ONLY" in seen[0]

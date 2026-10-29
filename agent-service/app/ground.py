@@ -71,7 +71,7 @@ Reply with JSON only: {"problems": [{"kind": "missed|wrong|partial", "what": "<o
 An empty list when the reply is fair to the data."""
 
 DATA_MIN = 1500  # tool output this small (a saved to-do, a short lookup) isn't worth a second opinion
-CHECK_DATA = 120_000  # characters of data the checker reads (~30k tokens; every tool result fits several times)
+CHECK_DATA = 300_000  # characters the checker reads (~75k tokens): a turn of mail searches plus 15 resumes (~170k) fits
 # Composio's tool finder and schemas: how to call things, not data about the user. The checker never sees them.
 META = {"COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MANAGE_CONNECTIONS"}
 
@@ -86,9 +86,10 @@ async def check(request: str, data: str, reply: str) -> dict[str, Any]:
     """{"ok": bool, "problems": [...]}; ok when the checker itself fails (it never blocks a reply on its own outage)."""
     clipped = len(data) > CHECK_DATA
     prompt = (f"The request:\n{request[:2000]}\n\nThe data its tools returned"
-              + (f" (CUT: only the first {CHECK_DATA} of {len(data)} characters are shown here, so never call a "
-                 "claim wrong or made up because you can't see it)" if clipped else " (all of it)")
-              + f":\n{data[:CHECK_DATA]}\n\nThe reply:\n{reply[:6000]}")
+              + (f" (CUT IN YOUR COPY ONLY: the last {CHECK_DATA} of {len(data)} characters, the newest results; the "
+                 "teammate saw all of it, so never call a claim wrong, made up or partial because you can't see it)"
+                 if clipped else " (all of it)")
+              + f":\n{data[-CHECK_DATA:]}\n\nThe reply:\n{reply[:6000]}")
     try:
         # sized, so a big week of data goes to a model that can hold all of it (Groq's free tier can't)
         model = llm.chat_model(config.CHECK_MODEL, json=True, size=(len(prompt) + len(CHECK)) // 4)
