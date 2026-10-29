@@ -43,8 +43,11 @@ const ROLES = [
     ['reply', `${SANS} color: ${INK}; font-size: 15px; font-weight: 500;`],
     ['detail', `${SANS} color: rgba(255,255,255,0.78); font-size: 13px; padding-top: 2px;`],
 ];
-const DOT = c => `width: 10px; height: 10px; border-radius: 5px; background-color: ${c}; box-shadow: 0 0 6px rgba(255,255,255,0.4);`;
+const DOT = c => `width: 20px; height: 20px; border-radius: 10px; background-color: ${c}; box-shadow: 0 0 12px rgba(255,255,255,0.4);`;
 const CLOSE = 'border-radius: 99px; padding: 5px;';
+// Round marks are drawn at their largest size and scaled down: St draws a corner radius into a texture at the actor's
+// own size, so a 10 px circle scaled up 2.7x came out as a blurry squircle.
+const DOT_REST = 0.5;  // the dot's resting scale (10 px)
 const FADE_US = 300000;  // streamed words fade in over this
 
 function vbox(params) {  // GNOME 48 replaced `vertical` with `orientation`
@@ -137,13 +140,13 @@ class Pill {
         // The status mark: a ripple (halo) behind a glowing dot that breathes (breath) and swells with the voice (dot);
         // a white ring with one bright side turns in its place while it thinks or works (GNOME's spinner won't take
         // a colour).
-        const mark = new St.Widget({layout_manager: new Clutter.BinLayout(), style: 'width: 16px; height: 16px;',
+        const mark = new St.Widget({layout_manager: new Clutter.BinLayout(), style: 'width: 18px; height: 18px;',
             y_align: Clutter.ActorAlign.CENTER});
         const centred = {x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER};
-        this.halo = new St.Widget({style: 'width: 10px; height: 10px; border-radius: 5px; background-color: rgba(255,255,255,0.5);',
+        this.halo = new St.Widget({style: 'width: 28px; height: 28px; border-radius: 14px; background-color: rgba(255,255,255,0.5);',
             ...centred, opacity: 0});
         this.breath = new St.Widget({layout_manager: new Clutter.BinLayout(), ...centred});
-        this.dot = new St.Widget({style: DOT(INK), ...centred});
+        this.dot = new St.Widget({style: DOT(INK), ...centred, scale_x: DOT_REST, scale_y: DOT_REST});
         this.breath.add_child(this.dot);
         this.spinner = new St.Widget({style: 'width: 11px; height: 11px; border-radius: 99px; border: 2px solid rgba(255,255,255,0.22);' +
             `border-top-color: ${INK}; border-right-color: ${INK};`, ...centred, opacity: 0});
@@ -159,7 +162,7 @@ class Pill {
         this.verbKey = null;
 
         const close = new St.Button({style: CLOSE, can_focus: false, y_align: Clutter.ActorAlign.CENTER, opacity: 170,
-            child: new St.Icon({icon_name: 'window-close-symbolic', icon_size: 12, style: `color: ${INK};`})});
+            child: new St.Icon({icon_name: 'window-close-symbolic', icon_size: 14, style: `color: ${INK}; -st-icon-style: symbolic; icon-shadow: 0 0 0.6px ${INK};`})});
         close.connect('notify::hover', () => {
             close.set_style(close.hover ? `${CLOSE} background-color: rgba(255,255,255,0.14);` : CLOSE);
             close.ease({opacity: close.hover ? 255 : 170, duration: 160, mode: OUT});
@@ -201,7 +204,7 @@ class Pill {
         if (a.state)
             this.mode(a.state, a.verb);
         if (a.level !== undefined && (this.state === 'listening' || this.state === 'speaking')) {
-            const k = 1 + Math.min(1, Math.max(0, a.level)) ** 0.6 * 0.85;
+            const k = DOT_REST * (1 + Math.min(1, Math.max(0, a.level)) ** 0.6 * 0.85);
             this.dot.ease({scale_x: k, scale_y: k, duration: k > this.dot.scale_x ? 110 : 260,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
@@ -220,7 +223,7 @@ class Pill {
         this.breath.remove_all_transitions();
         this.halo.opacity = 0;
         if (busy) {
-            this.dot.ease({scale_x: 1, scale_y: 1, duration: 160, mode: OUT});
+            this.dot.ease({scale_x: DOT_REST, scale_y: DOT_REST, duration: 160, mode: OUT});
             this.breath.ease({opacity: 0, scale_x: 0.6, scale_y: 0.6, duration: 160, mode: OUT});
             if (!this.turning) {
                 this.turning = true;
@@ -240,16 +243,16 @@ class Pill {
         this.breath.ease({opacity: calm ? 190 : 255, scale_x: 1, scale_y: 1, duration: 200, mode: OUT,
             onComplete: () => !calm && this.state === state && this.pulse(state === 'speaking')});
         if (calm)
-            this.dot.ease({scale_x: 1, scale_y: 1, duration: 240, mode: OUT});
+            this.dot.ease({scale_x: DOT_REST, scale_y: DOT_REST, duration: 240, mode: OUT});
     }
 
     pulse(fast) {  // breathe in and out, and send a soft ring outward each breath
         const [s, d] = fast ? [1.22, 620] : [1.12, 1300];
         this.breath.ease({scale_x: s, scale_y: s, duration: d, mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
             autoReverse: true, repeatCount: -1});
-        this.halo.scale_x = this.halo.scale_y = 1;
+        this.halo.scale_x = this.halo.scale_y = 10 / 28;
         this.halo.opacity = 255;
-        const g = fast ? 2.4 : 2.7;
+        const g = (fast ? 2.4 : 2.7) * 10 / 28;
         this.halo.ease({scale_x: g, scale_y: g, opacity: 0, duration: d * 2, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             repeatCount: -1});
     }

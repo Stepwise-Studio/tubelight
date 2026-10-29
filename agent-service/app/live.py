@@ -104,6 +104,8 @@ DESKTOP_TOOLS = {"functionDeclarations": [
 ]}
 
 DESKTOP = """## On their computer (they pressed the hotkey)
+- Do exactly what they asked, nothing more: "open LinkedIn" means open it and stop (never start a post, a search
+  or a message they didn't ask for). If they seem to want more, ask in a few words.
 - They're at the computer and want it done now. Window and app commands (move, resize, maximize, minimize, put on a
   monitor, open, close, keys): call the tool straight away, no confirming, and say at most a few words after
   ("Done.", "On your laptop screen."). Several windows: one call each, back to back.
@@ -186,9 +188,11 @@ def setup(tm: dict, system: str, desktop: bool = False, voice: str = "") -> dict
         "tools": [_desktop_tools()] if desktop else [RUN_TASK],
         "inputAudioTranscription": {},
         "outputAudioTranscription": {},
-        # Server-side turn taking: a short pause ends the turn, and talking over the model interrupts it.
+        # Server-side turn taking: a pause ends the turn, and talking over the model interrupts it. At the desk people
+        # think mid-sentence ("open LinkedIn and… draft"), and 600 ms cut them off: there it waits 1.3 s, less eagerly.
         "realtimeInputConfig": {
-            "automaticActivityDetection": {"endOfSpeechSensitivity": "END_SENSITIVITY_HIGH", "silenceDurationMs": 600},
+            "automaticActivityDetection": {"endOfSpeechSensitivity": "END_SENSITIVITY_LOW", "silenceDurationMs": 1300}
+            if desktop else {"endOfSpeechSensitivity": "END_SENSITIVITY_HIGH", "silenceDurationMs": 600},
             "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
         },
         "contextWindowCompression": {"slidingWindow": {}},

@@ -327,14 +327,15 @@ class Session:
             return f"{w['app']} is now on {w['monitor_name']}, {w['w']}x{w['h']}" + (", maximized" if w["maximized"] else "") + "."
         if name == "open_app":
             r = s.launch(str(a["app"]))
-            return f"{r.get('app') or a['app']} is {'open' if r.get('status') == 'opened' else 'already open'}."
+            app = r.get("app") if r.get("app") and not str(r["app"]).isdigit() else a["app"]
+            return f"{app} is {'open' if r.get('status') == 'opened' else 'already open'}."
         if name == "close_app":
             return s.close_windows(str(a["app"]))
         if name == "look_at_app":
             return s.text(s.observe(str(a["app"]), str(a.get("window") or "")))[:9000]
         if name == "open_website":
             r = s.open_url(str(a["url"]), a.get("new_tab", True) is not False, str(a.get("browser") or ""))
-            return s.text(r)[:9000]
+            return ((r["note"] + "\n") if r.get("note") else "") + s.text(r)[:9000]
         if name == "read_page":
             r = s.page(str(a.get("browser") or ""))
             return f"{r['app']}, “{r['window']}”:\n{r['text']}" + ("\n(cut here: the page goes on)" if r["truncated"] else "")

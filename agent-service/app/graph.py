@@ -850,6 +850,8 @@ def make_gate(ctx: RunCtx):
                 tool_name, title = "browser_commit", f"Press “{draft['button']}” on {draft['site']}"[:80]
             else:
                 tool_name, title, draft = T.approval_view(tc["name"], tc["args"])
+                if not tool_name:
+                    continue  # a batch with no actions in it (Nova's empty multi-execute): nothing to OK, it fails by itself
             approval = await db.insert("approvals", {
                 "owner_id": ctx.owner_id, "thread_id": ctx.thread_id, "teammate_id": tm["id"], "run_id": ctx.run_id,
                 "tool_name": tool_name, "toolkit": tool_name.split("_")[0] if tool_name.isupper() else None,

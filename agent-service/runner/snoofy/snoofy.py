@@ -454,11 +454,24 @@ def act(sid: str, element: str, action: str, value: str = "") -> dict:
             try:
                 did = _do(dest, path, e, action, value)
             except ValueError:
-                if not (e.get("web") and action == "CLICK"):
+                if action == "CLICK" and e["role"] == "page tab" and _select_tab(dest, path):
+                    did = f"switched to the tab “{e['name']}”"
+                elif e.get("web") and action == "CLICK":
+                    did = _web_press(dest, path, e, snap["app"])
+                else:
                     raise
-                did = _web_press(dest, path, e, snap["app"])
         reacted = ev.settle()
     return {"status": "done", "did": did, "reacted": reacted, **observe(snap["app"], snap["title"])}
+
+
+def _select_tab(dest: str, path: str) -> bool:
+    """A tab that offers no click (browsers' own tab strips): its tab list selects it, like a click would."""
+    try:
+        parent = _prop(dest, path, ACC, "Parent")[1]
+        index = _get(dest, path, "GetIndexInParent")[0]
+        return _ok(_get(dest, parent, "SelectChild", GLib.Variant("(i)", (index,)), "org.a11y.atspi.Selection"))
+    except (GLib.Error, IndexError, TypeError):
+        return False
 
 
 def _focus(dest: str, path: str, what: str) -> None:
@@ -1005,6 +1018,15 @@ def open_url(url: str, new_tab: bool = True, app_name: str = "") -> dict:
     if not any(_flat(name) in _flat(a["app"]) or _flat(a["app"]) in _flat(name) for a in apps()):
         r = launch(name)
         name, new_tab = r.get("app") or name, False  # a fresh window already has an empty tab
+    site = re.sub(r"^(https?://)?(www\.)?", "", url.strip().lower()).split("/")[0].split(".")[0]
+    if new_tab and site and " " not in url.strip():  # that site is open already: go to its tab, not a second one
+        snap = _s(lambda: observe(name), None)
+        if snap and site in _flat(snap["window"]):
+            return {**snap, "note": "that site is already open in front"}
+        tab = next((e for e in (snap or {}).get("elements", []) if e["role"] == "page tab" and site in _flat(e["name"])), None)
+        if tab and _select_tab(_snaps[snap["snapshot"]]["dest"], tab["path"]):
+            time.sleep(0.3)
+            return {**observe(name), "note": f"switched to the open tab “{tab['name']}”"}
     keys(["ctrl+t" if new_tab else "ctrl+l", f"text:{url.strip()}", "enter"], name)
     with _events.on(None) as ev:  # the page loading: wait for the browser to go quiet (8 s at most)
         ev.settle(quiet=0.6, idle=1.5, most=8)
