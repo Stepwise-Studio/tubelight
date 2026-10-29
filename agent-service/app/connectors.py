@@ -148,6 +148,8 @@ def name_of(toolkit: str) -> str:
 
 async def execute(user_id: str, slug: str, args: dict[str, Any]) -> dict[str, Any]:
     """Run one Composio tool directly (no model in the loop) and return its data; raises with Composio's reason."""
+    args = _fix_gmail(slug, args)  # the inbox tool's searches too, not only the model's own calls
+
     def run() -> dict[str, Any]:
         r = _client().tools.execute(slug, user_id=user_id, arguments=args, dangerously_skip_version_check=True)
         return r if isinstance(r, dict) else r.model_dump()

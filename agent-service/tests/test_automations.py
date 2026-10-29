@@ -235,3 +235,26 @@ def test_setting_choices_read_names_from_a_tool_result():
     repos = {"repositories": [{"id": 9, "name": "app", "full_name": "acme/app"}]}
     assert _options(repos, "GITHUB") == [{"value": "app", "label": "acme/app", "sets": {"owner": "acme", "repo": "app"}}]
     assert _options({"calendars": [{"id": "primary", "summary": "Me"}]}, "GOOGLECALENDAR")[0]["label"] == "Me"
+
+
+async def test_the_last_run_that_counts_is_the_last_one_that_worked(env):
+    fdb, _ = env
+    rule = {"id": "r1"}
+    fdb.tables["runs"] = [{"id": "ok", "status": "done"}, {"id": "bad", "status": "error"}]
+    fdb.tables["events"] = [
+        {"id": "e1", "rule_id": "r1", "status": "routed", "run_id": "ok", "created_at": "2026-10-29T04:30:11+00:00"},
+        {"id": "e2", "rule_id": "r1", "status": "routed", "run_id": "bad", "created_at": "2026-10-29T06:30:27+00:00"}]
+    assert "It last ran Thu Oct 29, 10:00 AM" in await events._since(rule, "e3", "Asia/Kolkata")  # not 12:00, the failed one
+
+
+def test_direct_gmail_calls_get_valid_dates_too(monkeypatch):
+    seen = {}
+
+    class Tools:
+        def execute(self, slug, user_id, arguments, **_):
+            seen.update(arguments)
+            return {"successful": True, "data": {}}
+    monkeypatch.setattr(connectors, "_client", lambda: SimpleNamespace(tools=Tools()))
+    import asyncio
+    asyncio.run(connectors.execute("u", "GMAIL_FETCH_EMAILS", {"query": "newer_than:24h after:2026-10-29T12:00+05:30"}))
+    assert seen["query"] == "newer_than:24h after:1793255400"

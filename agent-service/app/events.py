@@ -60,9 +60,14 @@ QUIET = ("\n\nIf the instructions ask you to post something every time (a fact, 
 
 
 async def _since(rule: dict[str, Any], event_id: str, tz: str) -> str:
-    """When this automation last ran, so a digest covers only what's new."""
+    """When this automation last ran well, so a digest covers only what's new. A run that failed told them nothing:
+    counting it made the next run look at the 4 minutes since and say QUIET over 2 hours of mail (2026-10-29)."""
     prev = await db.select("events", {"rule_id": f"eq.{rule['id']}", "status": "eq.routed", "id": f"neq.{event_id}",
-                                      "order": "created_at.desc", "limit": "1", "select": "created_at"})
+                                      "order": "created_at.desc", "limit": "10", "select": "created_at,run_id"})
+    ids = [e["run_id"] for e in prev if e.get("run_id")]
+    done = {r["id"] for r in await db.select("runs", {"id": f"in.({','.join(ids)})", "status": "eq.done",
+                                                       "select": "id"})} if ids else set()
+    prev = [e for e in prev if not e.get("run_id") or e["run_id"] in done][:1]
     if not prev:
         return "This is its first run: cover what's recent (the last day at most)."
     try:
