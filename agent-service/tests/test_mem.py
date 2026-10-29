@@ -558,9 +558,9 @@ async def test_own_words_answer_what_no_fact_holds_and_outside_words_never_show(
 
 async def test_recall_still_works_when_embeddings_are_down(m, monkeypatch):
     _, owner = m
-    a = await episode(owner, "Saqlain is my senior from college. I'm preparing for GATE in February")
-    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Saqlain", "kind": "person"}],
-                           "facts": [{"about": "n1", "text": "Saqlain is Jayanth's senior from college", "episode": 1,
+    a = await episode(owner, "Rehan is my senior from college. I'm preparing for GATE in February")
+    await run(owner, [a], {"entities": [{"ref": "n1", "name": "Rehan", "kind": "person"}],
+                           "facts": [{"about": "n1", "text": "Rehan is Jayanth's senior from college", "episode": 1,
                                       "quote": "my senior from college"},
                                      {"about": "user", "text": "Jayanth is preparing for GATE in February", "episode": 1,
                                       "quote": "preparing for GATE"}]})
@@ -568,6 +568,6 @@ async def test_recall_still_works_when_embeddings_are_down(m, monkeypatch):
     async def down(texts):
         raise RuntimeError("429 daily free allocation used up")
     monkeypatch.setattr(mem.memory, "embed", down)  # Cloudflare's neurons gone for the day
-    text = await mem.recall(owner, "who is Saqlain and when is my GATE exam?")
+    text = await mem.recall(owner, "who is Rehan and when is my GATE exam?")
     assert "senior from college" in text and "GATE in February" in text
     assert "GATE" in await mem.recall(owner, "my GATE plans", since=(T0 - timedelta(days=5)).date())
