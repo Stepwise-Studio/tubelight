@@ -73,6 +73,24 @@ async def test_compaction_summarizes_and_remembers(env, monkeypatch):
     assert fdb.rows("activity", type="compaction")[0]["name"] == "summarize"
 
 
+async def test_a_summary_survives_embeddings_being_down(env, monkeypatch):
+    fdb, fake = env
+    dev = teammate(fdb, "dev", "developer")
+    ctx = graph.RunCtx(run_id="r", owner_id=OWNER, thread_id=f"dm:{dev['id']}", members=[dev])
+
+    async def window(model):
+        return 1000
+
+    async def down(*a, **k):
+        raise RuntimeError("429 daily neurons used up")
+    monkeypatch.setattr(graph.llm, "context_window", window)
+    monkeypatch.setattr(graph.memory, "add", down)
+    fake.script = [ai("We agreed to ship on Friday.\nFACTS:\n- Release is on Friday")]
+    updates, out = await graph.compact(ctx, dev, _history(10, tool_size=10, human_size=400))
+    assert updates and out[0].content.startswith("[Summary of the earlier conversation]")
+    assert fdb.rows("activity", type="compaction")[0]["name"] == "summarize" and not fdb.rows("activity", type="error")
+
+
 def test_event_rule_matching():
     rule = {"event_type": "error", "match": {"service": "web"}, "enabled": True}
     assert events.matches(rule, "error", {"service": "web", "message": "boom"})
@@ -370,3 +388,24 @@ def test_gmail_dates_become_what_gmail_understands():
                       {"tool_slug": "SLACK_SEARCH", "arguments": {"query": "after:2026-10-27"}}]}
     fixed = _fix_gmail("COMPOSIO_MULTI_EXECUTE_TOOL", call)
     assert [x["arguments"]["query"] for x in fixed["tools"]] == ["after:2026/10/27", "after:2026-10-27"]
+
+
+async def test_attachments_are_found_from_the_email_not_copied_ids(monkeypatch, tmp_path):
+    from app import connectors, graph, tools as T
+    (tmp_path / "a.txt").write_text("resume text")
+    got = []
+
+    async def fake(user_id, slug, args):
+        if slug == "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID":
+            return {"attachmentList": [{"filename": f"{i}.txt", "attachmentId": f"ANG{i}" + "x" * 400} for i in range(15)]}
+        got.append(args["attachment_id"])
+        return {"file": {"name": args["file_name"], "mimetype": "text/plain", "s3url": str(tmp_path / "a.txt")}}
+    monkeypatch.setattr(connectors, "execute", fake)
+    ctx = graph.RunCtx(run_id="r", owner_id="o", thread_id="dm:x", members=[])
+    tm = {"id": "t", "name": "Ivy", "handle": "ivy", "role": "x", "allowed_toolkits": []}
+    read = {t.name: t for t in T.build(ctx, tm, [])}["read_attachments"].coroutine
+    out = await read(files=[{"message_id": "m1"}])  # the whole email
+    assert out.count("resume text") == 15 and len(got) == 15
+    got.clear()
+    await read(files=[{"message_id": "m1", "attachment_id": "ANG3xxxx…", "file_name": "3.txt"}])  # a cut id
+    assert got == ["ANG3" + "x" * 400]

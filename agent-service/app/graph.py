@@ -499,7 +499,10 @@ async def compact(ctx: RunCtx, tm: dict, msgs: list[BaseMessage]) -> tuple[list,
             summary, _, facts = res.text.partition("FACTS:")
             for f in (l.strip("- ").strip() for l in facts.splitlines()):
                 if f:
-                    await memory.add(memory.ns("teammate", tm["id"]), f)
+                    try:  # embeddings down: the fact is lost, not the summary (else every turn re-summarised)
+                        await memory.add(memory.ns("teammate", tm["id"]), f)
+                    except Exception as e:
+                        log.warning("compaction: couldn't keep a fact (%s)", str(e)[:120])
             note = HumanMessage(f"[Summary of the earlier conversation]\n{summary.strip()}", name="summary")
             updates = [RemoveMessage(id=REMOVE_ALL_MESSAGES), note, *keep]
             msgs, stage = [note, *keep], "summarize"

@@ -6,6 +6,7 @@ teammate summed those up as the week. Here data keeps every item: long text fiel
 items are missing and how to get them. Plain text (logs, pages) keeps head and tail with the same kind of note."""
 import ast
 import json
+import re
 from typing import Any
 
 BUDGET = 40_000  # characters of one tool result (~10k tokens; bigger requests route past Groq, llm.chat_model size)
@@ -35,6 +36,11 @@ def _bare(v: Any) -> Any:
     return v
 
 
+# Ids and tokens are kept whole: a shortened attachmentId came back as "Invalid attachment token" and 14 of 15 resumes
+# went unread (2026-10-29). A cut id is worse than none: the model uses it.
+KEEP = re.compile(r"(^|_)id$|Id$|ID$|token|Token|^(threadId|messageId|historyId)$")
+
+
 def _cap(v: Any, n: int, cut: list[int]) -> Any:
     if isinstance(v, str):
         if len(v) > n:
@@ -42,7 +48,7 @@ def _cap(v: Any, n: int, cut: list[int]) -> Any:
             return v[:n] + "…"
         return v
     if isinstance(v, dict):
-        return {k: _cap(x, n, cut) for k, x in v.items()}
+        return {k: x if isinstance(k, str) and KEEP.search(k) else _cap(x, n, cut) for k, x in v.items()}
     if isinstance(v, (list, tuple)):
         return [_cap(x, n, cut) for x in v]
     return v

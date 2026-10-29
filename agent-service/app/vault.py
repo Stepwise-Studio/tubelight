@@ -18,6 +18,7 @@ import re
 import shutil
 import time
 import uuid
+from urllib.parse import unquote
 from datetime import UTC, date, datetime
 from datetime import time as dt_time
 from pathlib import Path
@@ -63,6 +64,8 @@ def file_path(owner_id: str, key: str, suffix: str = "") -> Path:
 
 
 def clean_name(name: str) -> str:
+    if re.search(r"%[0-9A-Fa-f]{2}", str(name or "")):  # a URL-encoded name ("Brief%20(1).pdf") from a share/upload
+        name = unquote(str(name))
     name = re.sub(r"[\x00-\x1f/\\]", "", " ".join(str(name or "").split()))[:200].strip(". ")
     if not name:
         raise ValueError("Give it a name.")

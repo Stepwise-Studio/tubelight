@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import unquote
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -515,14 +516,34 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             return f"Couldn't open {url}: {why}" if why else f"{url} had no readable text (it may need a login or be mostly images)."
         return f"{title}\n{url}\n\n" + (text if len(text) <= 9000 else text[:9000] + f"\n[... {len(text) - 9000} more chars]")
 
+    async def resolve(files: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Attachment ids looked up from the email itself: a model copying 400-character ids gets them wrong (cut ones
+        read "Invalid attachment token", 2026-10-29). A message_id alone means every attachment of that email."""
+        out: list[dict[str, str]] = []
+        lists: dict[str, list] = {}
+        for f in files:
+            if not isinstance(f, dict) or not f.get("message_id"):
+                continue
+            aid, name, mid = str(f.get("attachment_id") or ""), str(f.get("file_name") or ""), str(f["message_id"])
+            if mid not in lists:
+                try:
+                    lists[mid] = (await connectors.execute(ctx.owner_id, "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", {
+                        "message_id": mid, "format": "full", "user_id": "me"})).get("attachmentList") or []
+                except Exception:
+                    lists[mid] = []
+            got = [a for a in lists[mid] if not name or a.get("filename") == name]
+            out += [{"message_id": mid, "attachment_id": a.get("attachmentId"), "file_name": a.get("filename")}
+                    for a in got] or [{"message_id": mid, "attachment_id": aid, "file_name": name}]
+        return [f for f in out if f.get("attachment_id")][:ATTACH_MAX]
+
     # Email attachments (resumes, invoices, decks) as text, many in one call: one model turn reads a whole batch.
     async def read_attachments(files: list[dict[str, str]]) -> str:
-        """files: [{message_id, attachment_id, file_name}] from the attachmentList of fetched emails."""
+        """files: [{message_id, file_name}] (attachment_id optional) from fetched emails."""
         if ctx.only is not None and "gmail" not in ctx.only:
             return "This automation isn't allowed to use Gmail."
-        files = [f for f in files if isinstance(f, dict) and f.get("message_id") and f.get("attachment_id")][:ATTACH_MAX]
+        files = await resolve(files)
         if not files:
-            return "Give message_id, attachment_id and file_name for each attachment (from the email's attachmentList)."
+            return "Give the email's message_id (and file_name for one attachment; just message_id reads them all)."
         per = max(1500, ATTACH_BUDGET // len(files))
         gate = asyncio.Semaphore(4)
 
@@ -539,7 +560,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         """Gmail attachments → files in their vault (folder made if missing)."""
         if ctx.only is not None and "gmail" not in ctx.only:
             return "This automation isn't allowed to use Gmail."
-        files = [f for f in files if isinstance(f, dict) and f.get("message_id") and f.get("attachment_id")][:ATTACH_MAX]
+        files = await resolve(files)
         if not files:
             return "Give message_id, attachment_id and file_name for each attachment (from the email's attachmentList)."
         parent = await vault.ensure_folder(ctx.owner_id, folder)
@@ -580,13 +601,14 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         StructuredTool.from_function(
             coroutine=save_attachments, name="save_attachments",
             description="Save Gmail attachments as files in their vault (the Vault tab), up to 40 in one call. files: "
-                        "[{message_id, attachment_id, file_name}] from each email's attachmentList; folder: a folder "
+                        "[{message_id, file_name}] (just {message_id} = every attachment of that email); folder: a folder "
                         "path like 'Hiring/Resumes Oct' (made if it doesn't exist), empty for the top."),
         StructuredTool.from_function(
             coroutine=read_attachments, name="read_attachments",
             description="Read Gmail attachments (PDF, Word, Excel, PowerPoint, text, images) as text, up to 40 in one "
-                        "call: resumes, invoices, reports. files: [{message_id, attachment_id, file_name}] taken from "
-                        "each fetched email's attachmentList. Read them all in one call, not one by one."),
+                        "call: resumes, invoices, reports. files: [{message_id}] reads every attachment of that email; "
+                        "[{message_id, file_name}] one of them (no need to copy attachment ids). Read them all in one "
+                        "call, not one by one."),
         StructuredTool.from_function(
             coroutine=web_search, name="web_search",
             description="Search the web for current information (news, docs, prices, people, anything after your "
@@ -1177,6 +1199,7 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 return "/".join(reversed(parts))
 
             paths = {full(r).lower(): r for r in rows}
+            paths |= {unquote(k): r for k, r in paths.items() if "%" in k}  # "Brief%20(1).pdf" asked for as "Brief (1).pdf"
 
             def line(r: dict) -> str:
                 return f"- {full(r)}/" if r["kind"] == "folder" else f"- {full(r)} ({r['size'] / 1e6:.1f} MB, {r['mime']})"

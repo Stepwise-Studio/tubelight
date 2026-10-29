@@ -84,16 +84,21 @@ def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
                      + (f", {with_files} with attachments" if with_files else "") + ": "
                      + "; ".join(subjects[:15]) + (f"; +{len(subjects) - 15} more" if len(subjects) > 15 else "")
                      + f" (message_ids {', '.join(str(m.get('messageId')) for m in ms[:50])})")
+        # one mail carrying many files (15 resumes in one) is its own thing, not one of the batch
+        for m in ms:
+            if len(m.get("attachmentList") or []) >= 3:
+                lines.append(f"  - in it, {_at(m, zone):%a %b %d}: {m.get('subject') or '(no subject)'} — "
+                             f"{len(m['attachmentList'])} attachments (message_id {m.get('messageId')})")
     for m in singles:
         at = _at(m, zone)
         flags = [f for f, l in (("unread", "UNREAD"), ("important", "IMPORTANT"), ("starred", "STARRED")) if l in _labels(m)]
         atts = m.get("attachmentList") or []
-        names = [f"{a.get('filename') or a.get('name') or 'file'} (attachment_id {a.get('attachmentId') or a.get('id')})"
-                 for a in atts if isinstance(a, dict)]
+        # names only: read_attachments finds the files from the message_id (copied 400-character ids came back cut)
+        names = [str(a.get("filename") or a.get("name") or "file") for a in atts if isinstance(a, dict)]
         lines.append(f"- {at:%a %b %d %I:%M %p} · {m.get('sender', '')} · {m.get('subject') or '(no subject)'}"
                      + (f" — {s}" if (s := _snippet(m)) else "")
                      + (f" [{', '.join(flags)}]" if flags else "")
-                     + (f" [attachments: {', '.join(names)}]" if names else "")
+                     + (f" [{len(names)} attachments: {', '.join(names[:8])}{', …' if len(names) > 8 else ''}]" if names else "")
                      + f" (message_id {m.get('messageId')})")
     for cat, senders in sorted(folded.items(), key=lambda kv: -sum(map(len, kv[1].values()))):
         n = sum(map(len, senders.values()))

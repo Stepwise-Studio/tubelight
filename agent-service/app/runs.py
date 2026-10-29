@@ -2,9 +2,10 @@
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
@@ -60,9 +61,34 @@ async def _knowledge(owner_id: str, members: list[dict]) -> dict[str, list[str]]
     return out
 
 
+async def _resumable(run: dict[str, Any]) -> bool:
+    """A chat request cut off by a restart in the last 15 minutes, stopped while a teammate was thinking or reading:
+    safe to go on from its last checkpoint. Never one stopped inside an action (it could happen twice)."""
+    started = datetime.fromisoformat(run["started_at"]) if run.get("started_at") else None
+    if run["trigger"] != "message" or not started or datetime.now(UTC) - started > timedelta(minutes=15):
+        return False
+    ctx = await load_ctx(run["id"], run["owner_id"], run["thread_id"], run["trigger"], None)
+    state = await graph.build(ctx, memory.checkpointer).aget_state({"configurable": {"thread_id": run["thread_id"]}})
+    if not state.next or state.interrupts:
+        return False
+    if {"tools", "wait"} & set(state.next):
+        last = next((m for m in reversed(state.values.get("messages") or []) if isinstance(m, AIMessage)), None)
+        return bool(last and last.tool_calls) and all(
+            graph.T.classify_call(tc["name"], tc["args"]) == "read" for tc in last.tool_calls)
+    return True
+
+
 async def sweep_orphans() -> None:
-    """Runs still marked running at startup died with the previous process; close them out."""
+    """Runs still marked running at startup died with the previous process. A recent chat request goes on where it
+    stopped (two of Ivy's replies died in deploys, 2026-10-29); the rest are closed out."""
     for run in await db.select("runs", {"status": "eq.running"}):
+        try:
+            if await _resumable(run):
+                log.info("resuming run %s after a restart", run["id"])
+                _spawn(run["id"], _execute(run["id"], run["owner_id"], run["thread_id"], run["trigger"], None))
+                continue
+        except Exception:
+            log.exception("could not check run %s for resuming", run["id"])
         await _finish(run["id"], run["owner_id"], run["thread_id"], "error", "Interrupted by a server restart.",
                       teammate_id=run["teammate_id"])
 

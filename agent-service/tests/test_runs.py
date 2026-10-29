@@ -441,3 +441,42 @@ async def test_retry_under_an_automation_error_never_replays_an_old_message(api,
     r = await api.post(f"/messages/{old['id']}/retry")
     assert r.status_code == 409 and "automation" in r.json()["detail"]
     assert fdb.rows("messages", kind="error")  # the automation's error note stays
+
+
+async def test_a_chat_reply_cut_off_by_a_restart_goes_on_where_it_stopped(env):
+    from datetime import UTC, datetime
+    from app import memory, runs
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "Inbox")
+    thread = f"dm:{ivy['id']}"
+    run = await fdb.insert("runs", {"owner_id": ivy["owner_id"], "thread_id": thread, "trigger": "message",
+                                    "teammate_id": ivy["id"], "status": "running", "started_at": datetime.now(UTC).isoformat()})
+    ctx = await runs.load_ctx(run["id"], ivy["owner_id"], thread, "message", None)
+    app = graph.build(ctx, memory.checkpointer)
+    await app.aupdate_state({"configurable": {"thread_id": thread}},  # the message was in, Ivy was mid-reply
+                            {"messages": [HumanMessage("read the 15 resumes")], "active": ivy["id"], "queue": []},
+                            as_node="router")
+    fake.script = [ai("Read all 15: here are the picks.")]
+    await runs.sweep_orphans()
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Read all 15: here are the picks."]
+    assert fdb.rows("runs", id=run["id"])[0]["status"] == "done"
+
+
+async def test_a_run_stopped_inside_an_action_is_not_redone(env):
+    from datetime import UTC, datetime
+    from app import memory, runs
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "Inbox")
+    thread = f"dm:{ivy['id']}"
+    run = await fdb.insert("runs", {"owner_id": ivy["owner_id"], "thread_id": thread, "trigger": "message",
+                                    "teammate_id": ivy["id"], "status": "running", "started_at": datetime.now(UTC).isoformat()})
+    ctx = await runs.load_ctx(run["id"], ivy["owner_id"], thread, "message", None)
+    send = ai(calls=[("GMAIL_SEND_EMAIL", {"to": "a@b.c", "body": "hi"})])
+    send.name = "ivy"
+    await graph.build(ctx, memory.checkpointer).aupdate_state({"configurable": {"thread_id": thread}},
+                                                              {"messages": [HumanMessage("send it"), send], "active": ivy["id"]},
+                                                              as_node="gate")
+    await runs.sweep_orphans()
+    await settle()
+    assert fdb.rows("runs", id=run["id"])[0]["error"] == "Interrupted by a server restart." and not fake.calls

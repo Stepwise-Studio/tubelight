@@ -165,3 +165,17 @@ def test_office_files_are_changed_in_place_with_their_formatting():
         d.edit("n.docx", doc, [{"replace": "not there", "with": "x"}])
     with pytest.raises(ValueError):
         d.edit("n.pdf", doc, [{"replace": "a", "with": "b"}])
+
+
+async def test_a_url_encoded_name_is_found_by_its_real_name(env, tmp_path, monkeypatch):
+    from app import graph, tools
+
+    monkeypatch.setattr(vault, "ROOT", tmp_path)
+    assert (await vault.add_bytes(U, "Brief%20(1).md", b"new"))["name"] == "Brief (1).md"  # stored decoded from now on
+    real = vault.clean_name
+    monkeypatch.setattr(vault, "clean_name", lambda n: n)  # a file saved before that fix keeps its %20
+    await vault.add_bytes(U, "MiVi_Brief%20(1).md", b"what to look for")
+    monkeypatch.setattr(vault, "clean_name", real)
+    ivy = {"id": "i1", "name": "Ivy", "handle": "ivy", "role": "Inbox", "avatar_shape": "face:ivy", "allowed_toolkits": []}
+    tool = {t.name: t for t in tools.build(graph.RunCtx(run_id="r", owner_id=U, thread_id="dm:i1", members=[ivy]), ivy, [])}["vault"]
+    assert "what to look for" in await tool.ainvoke({"action": "read", "path": "MiVi_Brief (1).md"})

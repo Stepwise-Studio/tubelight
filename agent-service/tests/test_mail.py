@@ -16,7 +16,7 @@ def test_digest_lists_real_mail_and_folds_the_noise():
     out = mail.digest(mails, "Asia/Kolkata", "in the last 7 days")
     assert out.startswith("6 emails in the last 7 days (1 unread).")
     assert "People and services, not promotions/social/updates (2)" in out and "Sat Oct 24 03:00 PM · Asha <a@x.com> · Hi — Can we meet Tuesday?" in out
-    assert "cv.pdf (attachment_id A1)" in out and "(message_id id1)" in out and "OTP" in out
+    assert "[1 attachments: cv.pdf]" in out and "A1" not in out and "(message_id id1)" in out and "OTP" in out
     assert "Promotions (4): Rapido ×4 (Deal 2)" in out
 
 
@@ -32,3 +32,11 @@ def test_a_stack_from_one_sender_reads_as_one_batch():
     out = mail.digest([*hr, m(7, ["INBOX"])], "Asia/Kolkata", "this week")
     assert "BATCH: 3 emails from HR <hr@acme.com>" in out and "Fw: Application – Ravi" in out
     assert "message_ids id0, id1, id2" in out and out.count("· Asha <a@x.com> ·") == 1
+
+
+def test_the_one_mail_with_fifteen_resumes_stands_out_of_its_batch():
+    cvs = [{"filename": f"{i}.pdf", "attachmentId": "x" * 400} for i in range(15)]
+    hr = [m(i, ["INBOX"], "HR <hr@mxc.com>", f"Fw: Application {i}", att=[cvs[0]]) for i in range(37)]
+    hr.append(m(99, ["INBOX"], "HR <hr@mxc.com>", "Junior AI Engineer profiles : 2-3 years", att=cvs))
+    out = mail.digest(hr, "Asia/Kolkata", "this month")
+    assert "Junior AI Engineer profiles : 2-3 years — 15 attachments (message_id id99)" in out and "x" * 400 not in out

@@ -29,3 +29,11 @@ def test_when_items_must_go_it_says_how_many():
 def test_plain_text_says_it_was_cut():
     out = results.fit("a" * 50_000)
     assert "RESULT CUT" in out and out.startswith("a") and out.endswith("a")
+
+
+def test_ids_stay_whole_when_text_shrinks():
+    token = "ANGjdJ" + "x" * 700
+    big = {"messages": [{"messageId": f"m{i}", "body": "y" * 3000,
+                         "attachmentList": [{"attachmentId": token, "filename": f"{i}.pdf"}]} for i in range(30)]}
+    out = results.fit(big)
+    assert "every item is here" in out and out.count(token) == 30
