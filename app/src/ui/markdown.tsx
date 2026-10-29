@@ -1,7 +1,10 @@
 import * as Clipboard from 'expo-clipboard'
 import * as WebBrowser from 'expo-web-browser'
 import { Children, isValidElement, memo, useState, type ReactElement, type ReactNode } from 'react'
-import { Linking, ScrollView, Text as RNText, View, type TextStyle, type ViewStyle } from 'react-native'
+import { Linking, Text as RNText, View, type TextStyle, type ViewStyle } from 'react-native'
+// Gesture handler's ScrollView: the chat's swipe-to-reply pan wraps every message, and a plain native one never got
+// the sideways drag (tables couldn't be scrolled, 2026-10-29).
+import { ScrollView } from 'react-native-gesture-handler'
 import { Renderer, useMarkdown, type MarkedStyles } from 'react-native-marked'
 import { Highlight, themes } from 'prism-react-renderer'
 import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
@@ -119,10 +122,11 @@ class TubeRenderer extends Renderer {
     return <Table key={this.getKey()} header={header} rows={rows} c={this.c} />
   }
   codespan(text: string): ReactNode {
-    // Short code (a command, a package) is a chip: a small inline view with rounded corners, shorter than the line so
-    // chips on neighbouring lines keep apart. Android can't pad or round a text span. Long code stays a text span on
-    // a wash so it can still wrap.
-    if (text.length <= 28) {
+    // Short code (a command, a flag) is a chip: a small inline view with rounded corners, shorter than the line so
+    // chips on neighbouring lines keep apart. Android can't pad or round a text span. An inline view can't wrap, and
+    // one that met the end of a line was squeezed out of it (emails in a long list, 2026-10-29), so anything longer
+    // stays a text span on a wash that wraps with the words.
+    if (text.length <= 12) {
       return (
         <View key={this.getKey()} style={{ backgroundColor: this.c.panel3, borderRadius: 5, paddingHorizontal: 5, transform: [{ translateY: 5 }] }}>
           <RNText style={{ fontFamily: typeScale.mono.fontFamily, fontSize: 13, lineHeight: 18, color: this.c.ink }}>{text}</RNText>

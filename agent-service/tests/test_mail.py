@@ -40,3 +40,11 @@ def test_the_one_mail_with_fifteen_resumes_stands_out_of_its_batch():
     hr.append(m(99, ["INBOX"], "HR <hr@mxc.com>", "Junior AI Engineer profiles : 2-3 years", att=cvs))
     out = mail.digest(hr, "Asia/Kolkata", "this month")
     assert "Junior AI Engineer profiles : 2-3 years — 15 attachments (message_id id99)" in out and "x" * 400 not in out
+
+
+def test_updates_are_read_not_folded():
+    alert = m(1, ["CATEGORY_UPDATES", "INBOX"], "Google <no-reply@accounts.google.com>", "You shared data with Ranobi")
+    alert["preview"] = "{'body': 'You gave Ranobi access to your Google Account data', 'subject': 'x'}"
+    out = mail.digest([alert, m(2, ["CATEGORY_PROMOTIONS"], "Rapido <r@x>", "Deal")], "Asia/Kolkata", "today")
+    assert "Updates (1)" in out and "You shared data with Ranobi — You gave Ranobi access" in out
+    assert "Promotions (1): Rapido" in out

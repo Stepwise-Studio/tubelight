@@ -13,8 +13,10 @@ from . import connectors
 PAGE = 100
 MAX_MAILS = 500
 BATCH = 3  # this many from one sender read as one batch
-FOLDED = {"CATEGORY_PROMOTIONS": "Promotions", "CATEGORY_SOCIAL": "Social", "CATEGORY_UPDATES": "Updates",
-          "CATEGORY_FORUMS": "Forums"}
+FOLDED = {"CATEGORY_PROMOTIONS": "Promotions", "CATEGORY_SOCIAL": "Social", "CATEGORY_FORUMS": "Forums"}
+# Updates are read, not folded: security alerts, sign-in codes, account changes and bills live there ("You shared data
+# with Ranobi" ×4 was folded to a subject and summed up as noise, 2026-10-29).
+UPDATES_SHOWN = 40
 
 
 async def fetch(owner_id: str, query: str) -> list[dict[str, Any]]:
@@ -60,11 +62,16 @@ def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
     zone = ZoneInfo(tz)
     unread = sum("UNREAD" in _labels(m) for m in mails)
     lines = [f"{len(mails)} emails {period} ({unread} unread)" + (" — capped, there are more" if len(mails) >= MAX_MAILS else "") + "."]
-    keep, folded = [], {}
+    keep, folded, updates = [], {}, []
     for m in mails:
         labels = _labels(m)
         cat = next((FOLDED[l] for l in labels if l in FOLDED), None)
-        if cat and "IMPORTANT" not in labels and "STARRED" not in labels:
+        if "CATEGORY_UPDATES" in labels and not cat and "IMPORTANT" not in labels and "STARRED" not in labels:
+            if len(updates) < UPDATES_SHOWN:
+                updates.append(m)
+            else:
+                folded.setdefault("More updates", {}).setdefault(_who(m.get("sender", "")), []).append(m.get("subject") or "")
+        elif cat and "IMPORTANT" not in labels and "STARRED" not in labels:
             folded.setdefault(cat, {}).setdefault(_who(m.get("sender", "")), []).append(m.get("subject") or "")
         else:
             keep.append(m)
@@ -100,6 +107,11 @@ def digest(mails: list[dict[str, Any]], tz: str, period: str) -> str:
                      + (f" [{', '.join(flags)}]" if flags else "")
                      + (f" [{len(names)} attachments: {', '.join(names[:8])}{', …' if len(names) > 8 else ''}]" if names else "")
                      + f" (message_id {m.get('messageId')})")
+    if updates:
+        lines.append(f"\nUpdates ({len(updates)}): notices, alerts, codes, receipts, newsletters; read each, some need them:")
+        for m in updates:
+            lines.append(f"- {_at(m, zone):%a %b %d %I:%M %p} · {_who(m.get('sender', ''))} · {m.get('subject') or '(no subject)'}"
+                         + (f" — {s[:140]}" if (s := _snippet(m)) else "") + f" (message_id {m.get('messageId')})")
     for cat, senders in sorted(folded.items(), key=lambda kv: -sum(map(len, kv[1].values()))):
         n = sum(map(len, senders.values()))
         top = sorted(senders.items(), key=lambda kv: -len(kv[1]))

@@ -599,9 +599,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             coroutine=inbox, name="inbox",
             description="Their whole Gmail inbox for a period in one call: every email (up to 500), mail that may need "
                         "them one per line (time, sender, subject, preview, unread/important, attachments, ids), "
-                        "promotions/social/updates folded into counts per sender. Use it FIRST for any summary, catch-up "
-                        "or 'anything I need to see' (days: 1 for today, 7 for a week; query: extra Gmail search, like "
-                        "'from:college' or 'is:unread'). Open single emails for detail only when a line isn't enough."))
+                        "updates (alerts, codes, notices, receipts) one per line with what they say, promotions and "
+                        "social folded into counts per sender. Use it FIRST for any summary, catch-up or 'anything I "
+                        "need to see' (days: 1 for today, 7 for a week, 0.08 for the last 2 hours; query: extra Gmail "
+                        "search, like 'from:college' or 'is:unread'). Open single emails for detail only when a line "
+                        "isn't enough."))
 
     tools += [
         StructuredTool.from_function(
