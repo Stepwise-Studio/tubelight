@@ -968,15 +968,25 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
         return ""
     blocks: list[tuple[str, list[str]]] = []
     seen: set = set()
-    qv = _vec((await memory.embed([query[:500]]))[0]) if query.strip() else None
+    try:
+        qv = _vec((await memory.embed([query[:500]]))[0]) if query.strip() else None
+    except Exception as e:  # embeddings down (Cloudflare's daily neurons gone): names and words still find facts
+        log.warning("memory: recall without embeddings (%s)", str(e)[:120])
+        qv = None
     if since or until:
         lo, hi = since or date(1900, 1, 1), until or datetime.now(UTC).date()
-        vec = qv or _vec((await memory.embed(["what happened"]))[0])
+        vec = qv
+        if not vec and not query.strip():
+            try:
+                vec = _vec((await memory.embed(["what happened"]))[0])
+            except Exception:
+                pass
         # true at some point in [lo, hi]: started by its end, and not over before its start (an event is its own day)
         then = await _q(f"select {_COLS} from mem_facts where owner = %s and status in ('current', 'closed', 'tentative') "
                         "and ((valid_from <= %s and coalesce(valid_to, case when kind = 'event' then valid_from end, "
                         "current_date) >= %s) or (kind = 'commitment' and due between %s and %s)) "
-                        "order by embedding <=> %s::vector limit 15", owner, hi, lo, lo, hi, vec)
+                        + ("order by embedding <=> %s::vector limit 15" if vec else "order by valid_from desc nulls last limit 15"),
+                        owner, hi, lo, lo, hi, *([vec] if vec else []))
         seen |= {f["id"] for f in then}
         blocks.append((f"True between {lo} and {hi}:", [_line(f) for f in sorted(then, key=lambda f: f["valid_from"] or lo)]))
     words = {w for w in _norm(" ".join([query, *names])).split() if len(w) > 2}
@@ -1042,6 +1052,11 @@ async def recall(owner: str, query: str, *, phone: str = "", names: tuple[str, .
             link = min(1.0, 2 * max((pi.get(str(m), 0.0) for m in f["mentions"]), default=0.0))
             f["r"] = memgraph.rank(sim, link, memgraph.strength([f["learned_at"], *f["hits"]], now, f["salience"]))
         found = sorted(found, key=lambda f: -f["r"])[:10]
+        seen |= {f["id"] for f in found}
+    elif words := [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2]:  # no vector: matching words
+        found = [f for f in await _q(
+            f"select {_COLS} from mem_facts, to_tsquery('english', %s) q where owner = %s and status = 'current' "
+            "and tsv @@ q order by ts_rank(tsv, q) desc limit 12", " | ".join(words[:40]), owner) if f["id"] not in seen][:10]
         seen |= {f["id"] for f in found}
     blocks.append(("Related facts:", [_line(f) for f in found]))
     blocks.append(("Said in their own words:", await _said(owner, query)))

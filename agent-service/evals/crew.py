@@ -6,13 +6,14 @@ Nothing is written to any chat. Run inside the server container:
 Checks per probe: the judge said look, the first move was a tool call, a data tool returned something, the reply
 isn't the stale answer planted in history (where one is). Read the replies too: the checks can't judge accuracy."""
 import asyncio
+import json
 import re
 import sys
 import uuid
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app import db, graph, ground, llm, runs
+from app import db, graph, ground, llm, mem, memory, runs
 
 STALE = "Quiet week, nothing needs you: 8 newsletters and promos, no urgent items."
 # Facts from the user's real data that a fair reply must carry (dated: the inbox moves on, refresh them when it does).
@@ -28,7 +29,15 @@ PROBES = {  # handle: (request, stale answer planted before it, or "")
 SKIP = {"ask_teammate"}
 
 
+async def ready() -> None:
+    """Open the store and memory as the server does: without them the vault, memory and lessons all read empty."""
+    if memory._pool is None:
+        await memory.init()
+        await mem.setup()
+
+
 async def probe(owner: str, handle: str) -> dict:
+    await ready()
     request, stale = PROBES[handle]
     tm = await db.one("teammates", {"owner_id": f"eq.{owner}", "handle": f"eq.{handle}"})
     ctx = await runs.load_ctx(str(uuid.uuid4()), owner, f"dm:{tm['id']}", "message")
@@ -41,7 +50,14 @@ async def probe(owner: str, handle: str) -> dict:
         convo.append(ground.note(verdict["what"]))
     calls, data = [], 0
     for step in range(8):
-        out = await llm.chat_model(tm["model"], tools, must_use_tool=verdict["look"] and step == 0).ainvoke(convo)
+        size = (len(convo[0].content) + sum(len(t.description) + len(json.dumps(t.tool_call_schema if isinstance(
+            t.tool_call_schema, dict) else t.tool_call_schema.model_json_schema())) for t in tools)) // 4 \
+            + graph.estimate_tokens(convo[1:])  # as graph's node sizes it: big requests skip Groq's 8k budget
+        for skip in range(2):  # an empty reply goes to the next model, as graph._stream does
+            out = await llm.chat_model(tm["model"], tools, size=size, skip=skip,
+                                       must_use_tool=verdict["look"] and step == 0).ainvoke(convo)
+            if out.tool_calls or graph.said(out).strip():
+                break
         convo.append(out)
         if not out.tool_calls:
             break

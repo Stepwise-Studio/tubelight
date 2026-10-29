@@ -1398,8 +1398,8 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
 
         async def computer_apps() -> str:
             got = await computers.call(dev, "live", {}, 15)
-            return "Apps running now (memory, CPU; closable = safe to close): " + "; ".join(
-                f"{a['name']} {a['mem'] / 1e9:.1f} GB CPU {a['cpu']:.0f}%{' closable' if a.get('closable') else ''}"
+            return "Apps running now (memory, CPU, whether it's safe to close): " + "; ".join(
+                f"{a['name']} {a['mem'] / 1e9:.1f} GB CPU {a['cpu']:.0f}% {'closable' if a.get('closable') else 'NOT closable'}"
                 for a in got["apps"])
 
         def _snap(got: dict) -> str:
