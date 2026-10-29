@@ -53,16 +53,20 @@ async def remove(owner_id: str, name: str) -> bool:
     return bool(hit)
 
 
+async def match(owner_id: str, query: str) -> dict[str, Any] | None:
+    """The playbook this request clearly asks for, if one does."""
+    if not query.strip():
+        return None
+    got = await memory.store.asearch(_ns(owner_id), query=query[:500], limit=1)
+    return got[0].value if got and (got[0].score or 0) >= SHOWN else None
+
+
 async def for_request(owner_id: str, query: str) -> str:
     """The preamble's part: the list, and the steps of the one this request clearly asks for."""
     rows = await all_(owner_id)
     if not rows:
         return ""
-    best = None
-    if query.strip():
-        got = await memory.store.asearch(_ns(owner_id), query=query[:500], limit=1)
-        if got and (got[0].score or 0) >= SHOWN:
-            best = got[0].value
+    best = await match(owner_id, query)
     lines = ["Playbooks they taught you (how they want these done, in their words). When a request fits one, follow "
              "its steps in order; read one with playbook (action read) first if it isn't shown below. A request that "
              "only looks similar (another site, another kind of task) isn't covered:"]

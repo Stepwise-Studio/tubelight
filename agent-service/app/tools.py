@@ -1500,7 +1500,11 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
         async def computer_subtask(app: str, goal: str, inputs: list[str] | None = None, done_when: str = "", max_steps: int = 12) -> str:
             if not cu.granted(ctx.owner_id, dev, app):
                 return f"Ask first: call computer_use with app {app!r} and the task; they OK it once."
-            return await cu.subtask(dev, app, goal, inputs or [], done_when, max_steps)
+            from . import playbooks, skills
+            taught = await playbooks.match(ctx.owner_id, f"{goal} ({app})")
+            guide = "\n\n".join(g for g in (skills.guide(app, goal), f"How they want it done (their playbook "
+                                              f"“{taught['name']}”):\n{taught['steps']}" if taught else "") if g)
+            return await cu.subtask(dev, app, goal, inputs or [], done_when, max_steps, guide=guide)
 
         async def computer_close_app(name: str, force: bool = False) -> str:
             return await computers.call(dev, "quit_app", {"name": name, "force": force, "full": True}, 30)

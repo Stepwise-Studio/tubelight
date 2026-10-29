@@ -283,12 +283,21 @@ def _read(dest: str, root: str, whole: bool = False) -> list[dict]:
     return sorted((n for n in nodes.values() if "role" in n), key=lambda n: n["order"])
 
 
+WEB_FIELDS = {"entry", "text", "textbox", "search box", "password text"}
+WEB_PRESS = {"button", "push button", "link", "toggle button", "menu item", "page tab", "check box", "radio button"}
+
+
 def _walk(dest: str, root: str, pid: int) -> list[dict]:
     out: list[dict] = []
     for n in _read(dest, root):
         if not n["depth"] or n.get("hidden"):
             continue
         acts, value = _actions(n["names"], n["ifaces"], n["role"], n["states"]), _value(n)
+        if n["web"]:  # pages: typing goes in as keys and a button without a click is focused + Entered (act())
+            if ("editable" in n["states"] or n["role"] in WEB_FIELDS) and "TYPE" not in acts:
+                acts = [*acts, "TYPE"]
+            if n["role"] in WEB_PRESS and "focusable" in n["states"] and not set(acts) & {"CLICK", "TYPE"}:
+                acts = ["CLICK", *acts]
         echo = not acts and not value and n["name"] == n["parent"]  # a label repeating its button's name
         if echo or not (n["name"] or acts or value or n["role"] in SHAPE_ROLES):
             continue
@@ -298,7 +307,8 @@ def _walk(dest: str, root: str, pid: int) -> list[dict]:
                 _count[1] += 1
                 _ids[key] = f"e{_count[1]}"
         out.append({"id": _ids[key], "path": n["path"], "role": n["role"], "name": n["name"], "value": value,
-                    "actions": acts, "depth": n["depth"], "focused": "focused" in n["states"]})
+                    "actions": acts, "depth": n["depth"], "focused": "focused" in n["states"], "web": n["web"],
+                    "multi": "multi line" in n["states"]})
         if len(out) >= MAX_ELEMENTS:
             break
     return out
@@ -439,20 +449,72 @@ def act(sid: str, element: str, action: str, value: str = "") -> dict:
         raise PermissionError("That's a password field: Snoofy never types passwords. The browser's own password "
                               "manager fills it, or they type it themselves.")
     with _events.on(dest) as ev:
-        did = _do(dest, path, e, action, value)
+        if e.get("web") and action in ("TYPE", "TYPE_TEXT", "SET_TEXT", "REPLACE"):
+            did = _web_type(dest, path, e, action, value, snap["app"])
+        else:
+            try:
+                did = _do(dest, path, e, action, value)
+            except ValueError:
+                if not (e.get("web") and action == "CLICK"):
+                    raise
+                did = _web_press(dest, path, e, snap["app"])
         reacted = ev.settle()
     return {"status": "done", "did": did, "reacted": reacted, **observe(snap["app"], snap["title"])}
 
 
-# Labels that read like something the user would lose or couldn't take back (arc-cua's risk words, minus the routine
-# "close" and "clear"). Callers ask the user before pressing one: act() itself doesn't refuse, the caller decides.
-RISKY = re.compile(r"\b(delete|remove|erase|trash|discard|clear all|empty trash|permanently|send|post|publish|share|"
-                   r"reply all|forward|tweet|buy|purchase|pay|checkout|check out|place order|order now|subscribe|donate|"
-                   r"quit|sign out|log out|logout|shut down|restart|uninstall|reset)\b", re.I)
+def _focus(dest: str, path: str, what: str) -> None:
+    if not _ok(_s(lambda: _get(dest, path, "GrabFocus", None, I_COMP), None)):
+        raise ValueError(f"{what} can't take focus.")
+
+
+def _web_type(dest: str, path: str, e: dict, action: str, value: str, app_name: str) -> str:
+    """Pages only notice typing that arrives as key presses (setting the text through accessibility leaves the
+    page's own code unaware: YouTube's search went nowhere), so a web field is focused and typed into for real."""
+    what = f"{e['role']} “{e['name']}”"
+    _focus(dest, path, what)
+    lent = _lend(app_name)
+    try:
+        time.sleep(0.05)
+        if action == "REPLACE" or not e.get("multi"):
+            _remote.keys("ctrl+a")
+        _remote.type(value)
+    finally:
+        if lent:
+            _s(lambda: _shell("Place", {"id": lent, "focus": True}), None)
+    time.sleep(0.15)
+    got = _s(lambda: _get(dest, path, "GetText", GLib.Variant("(ii)", (0, 12000)), I_TEXT)[0], None)
+    if got is not None and value.strip()[:40] not in " ".join(got.split()) and " ".join(value.split())[:40] not in " ".join(got.split()):
+        return f"typed into {what}, but it now reads {got[:120]!r}: look before going on"
+    return f"typed into {what}"
+
+
+def _web_press(dest: str, path: str, e: dict, app_name: str) -> str:
+    """A page's button that offers no click to accessibility: focus it and press Enter, as a keyboard user would."""
+    what = f"{e['role']} “{e['name']}”"
+    _focus(dest, path, what)
+    lent = _lend(app_name)
+    try:
+        time.sleep(0.05)
+        _remote.keys("enter")
+    finally:
+        if lent:
+            _s(lambda: _shell("Place", {"id": lent, "focus": True}), None)
+    return f"pressed {what} (focus + Enter)"
+
+
+# Labels that commit something the user would lose or couldn't take back. A routine word only counts when it leads a
+# short label ("Post", "Send now", "Delete draft"): "Start a post" or "Sender" just open or name things. The strong
+# phrases count anywhere. Callers ask the user before pressing one: act() itself doesn't refuse, the caller decides.
+LEAD = re.compile(r"^\W*(delete|remove|erase|trash|discard|send|post|repost|publish|share|reply all|forward|tweet|buy|"
+                  r"purchase|pay|checkout|check out|place order|order now|subscribe|donate|quit|sign out|log out|logout|"
+                  r"shut down|restart|uninstall|reset|submit|confirm)\b", re.I)
+STRONG = re.compile(r"\b(permanently|empty trash|clear all|place order|pay now|buy now|delete account|delete forever)\b", re.I)
+RISKY = LEAD  # the old name
 
 
 def risky(name: str) -> bool:
-    return bool(RISKY.search(name or ""))
+    n = " ".join((name or "").split())
+    return bool(STRONG.search(n) or LEAD.match(n) and len(n.split()) <= 4)
 
 
 def element(sid: str, eid: str) -> dict:

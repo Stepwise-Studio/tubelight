@@ -87,10 +87,18 @@ DESKTOP_TOOLS = {"functionDeclarations": [
     {"name": "look_at_app", "description": "Read an app's window: every button, field, link, item and text on screen, each "
      "with an id like e12 and what can be done to it. app: its name (Zen, Files, Settings...). window: part of a title.",
      "parameters": {"type": "OBJECT", "properties": {"app": _S, "window": _S}, "required": ["app"]}},
-    {"name": "act_in_app", "description": "Do one thing to one element from look_at_app (or the last act_in_app): action "
-     "CLICK, DOUBLE_CLICK (open an item), RIGHT_CLICK, TYPE (value: the field's new text), FOCUS, READ, SCROLL_TO. Answers "
-     "with the screen after; if the app changed first, nothing happens and you get the new screen. confirmed: only after "
-     "they said yes out loud to a button that deletes, sends or pays.",
+    {"name": "work_in_app", "description": "Get something done inside an app or website that takes more than one step "
+     "(search, fill in a form, draft a post, go through menus, edit a cell). A worker that knows the site does the "
+     "clicks and typing and answers DONE, BLOCKED (why), NEEDS_INPUT or NEEDS_OK (it stopped before a post/send/delete/"
+     "pay button: ask them, then act_in_app that one button with confirmed). app: the app (Zen for websites). task: the "
+     "goal in plain words, e.g. 'draft a LinkedIn post with this text, don't post it'. text: every exact piece of "
+     "text it may type (the whole post, the search words), nothing else gets typed.",
+     "parameters": {"type": "OBJECT", "properties": {"app": _S, "task": _S, "text": {"type": "ARRAY", "items": _S}},
+                    "required": ["app", "task"]}},
+    {"name": "act_in_app", "description": "Do ONE thing to one element from look_at_app or work_in_app's screen: action "
+     "CLICK, DOUBLE_CLICK (open an item), RIGHT_CLICK, TYPE (value: the field's new text), FOCUS, READ, SCROLL_TO. Only "
+     "for a single obvious step, or the one button work_in_app stopped at after their yes; anything longer is "
+     "work_in_app. confirmed: only after they said yes out loud to a button that posts, sends, deletes or pays.",
      "parameters": {"type": "OBJECT", "properties": {"snapshot": _S, "element": _S, "action": _S, "value": _S,
                                                      "confirmed": {"type": "BOOLEAN"}}, "required": ["snapshot", "element", "action"]}},
 ]}
@@ -100,13 +108,18 @@ DESKTOP = """## On their computer (they pressed the hotkey)
   monitor, open, close, keys): call the tool straight away, no confirming, and say at most a few words after
   ("Done.", "On your laptop screen."). Several windows: one call each, back to back.
 - When you're unsure which window they mean, call list_windows first rather than asking.
-- Inside an app (search, type in a box, click, select, read what's on screen): look_at_app, then act_in_app on its
-  ids, one step at a time, checking each answer. A search box: TYPE into it, then press_keys ["enter"]. Scrolling:
-  press_keys ["page_down"] (or page_up) with the app. It's done only when the screen you got back shows it: never say
-  it worked otherwise.
-- The web: open_website (their own browser, already signed in to their sites), then look_at_app / act_in_app in it.
-  read_page reads a whole article, thread or results page at once. Tabs are on screen in look_at_app: click one to
-  switch; ctrl+w closes the one in front.
+- Inside an app or on a page, anything with more than one step (search, fill in, draft, go through menus): one
+  work_in_app call with the goal and the exact text; don't click through it yourself. look_at_app / read_page to
+  see or read; act_in_app only for one obvious click. It's done only when the answer says DONE: never say it worked
+  otherwise, and on BLOCKED say why in a few words.
+- The web: open_website first (their own browser, already signed in), then work_in_app with app = that browser.
+  Tabs: ctrl+w closes the one in front.
+- The right teammate does the thinking: a post or anything for social media, ask the crew's social media person
+  (run_task with teammate) to write it, and say "Asking <name>"; mail, a calendar, a project: whoever owns it.
+  Then type what they wrote with work_in_app, word for word. No one fits: do it yourself.
+- Connected apps first: when the task can be done through a connected app (Notion, Gmail, Calendar, Linear...),
+  run_task does it there, faster and more reliably. Use the screen for what those can't do, or when they want to
+  watch it happen ("show me", "open it").
 - Signing in: open the site's sign-in page; their browser's password manager fills it (pick their account if it
   asks), then press the sign-in button. Never type, ask for or say a password: if nothing fills it, they type it.
 - While you work through steps, say nothing between them (no "continuing", no "still working"): one short line when
@@ -183,6 +196,10 @@ def setup(tm: dict, system: str, desktop: bool = False, voice: str = "") -> dict
 def _desktop_tools() -> dict:
     """The local tools plus run_task (switch_to_text needs the app's chat, which the hotkey doesn't have)."""
     run_task = next(f for f in RUN_TASK["functionDeclarations"] if f["name"] == "run_task")
+    run_task = {**run_task, "parameters": {**run_task["parameters"], "properties": {
+        **run_task["parameters"]["properties"],
+        "teammate": {"type": "STRING", "description": "A crew member's name to ask instead (the social media person "
+                     "for posts, the mail person for email); empty = this computer's own teammate."}}}}
     return {"functionDeclarations": [*DESKTOP_TOOLS["functionDeclarations"], run_task]}
 
 

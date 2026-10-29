@@ -221,3 +221,40 @@ async def test_the_hotkey_hands_bigger_tasks_to_the_computers_chat(api, env):
                        headers={"Authorization": f"Bearer {claimed['token']}"})
     assert r.status_code == 200
     assert (await api.post("/runner/voice/task", json={"request": "x"})).status_code == 401  # only a linked computer
+
+
+async def test_the_hotkey_asks_a_named_teammate_and_hands_app_work_to_the_worker(api, env, monkeypatch):
+    from langchain_core.messages import AIMessage
+    from app import computer_use, db
+    _, fake = env
+    code = computers.pair_code(OWNER)["code"]
+    claimed = await computers.claim(code, "laptop", "Linux")
+    auth = {"Authorization": f"Bearer {claimed['token']}"}
+    from tests.conftest import teammate
+    nova = teammate(env[0], "nova", "social media")
+    fake.script[:] = [AIMessage("Shipping today: Tubelight's new hotkey.")]
+    r = await api.post("/runner/voice/task", json={"request": "write a LinkedIn post", "teammate": "Nova"}, headers=auth)
+    assert "Shipping today" in r.json()["result"]
+    assert (await db.select("messages", {"thread_id": f"eq.dm:{nova['id']}", "sender_type": "eq.user"}))[-1]["text"] == \
+        "write a LinkedIn post"  # asked in Nova's own chat
+    r = await api.post("/runner/voice/task", json={"request": "x", "teammate": "Nobody"}, headers=auth)
+    assert "No teammate called Nobody" in r.json()["result"]
+    seen = {}
+
+    async def subtask(cid, app, goal, inputs, done_when, max_steps, guide=""):
+        seen.update(app=app, inputs=inputs, guide=guide)
+        return "DONE: the post is in the box"
+    monkeypatch.setattr(computer_use, "subtask", subtask)
+    r = await api.post("/runner/voice/work", json={"app": "Zen", "goal": "draft this, don't post it",
+                                                   "text": ["Shipping today"], "window": "Feed | LinkedIn — Zen Browser"},
+                       headers=auth)
+    assert r.json()["result"].startswith("DONE") and seen["inputs"] == ["Shipping today"]
+    assert "Start a post" in seen["guide"] and "TYPE into a field types it for real" in seen["guide"]
+
+
+def test_only_a_commit_button_is_risky_and_guides_match_the_site():
+    from app import computer_use, skills
+    assert computer_use.risky_label("Post") and computer_use.risky_label("Send now") and computer_use.risky_label("Empty trash")
+    assert not computer_use.risky_label("Start a post") and not computer_use.risky_label("Sender")
+    assert "LinkedIn" in skills.guide("Zen", "Feed | LinkedIn") and skills.guide("Calculator", "add 2") == ""
+    assert "X (Twitter)" in skills.guide("Zen", "draft a post on X")

@@ -77,7 +77,7 @@ SUBTASK = """You operate one app on {device} for a teammate, one action at a tim
 Goal: {goal}
 Done when: {done}
 Text you may type (use exactly these, nothing else): {inputs}
-
+{guide}
 Each element on screen is "[id] role “name” = value (actions)", sometimes with what it's also called (aka “Clear”) and
 the app's id for it ({{btn_clear}}). Find the element by its name, aka or app id and copy its [id] from that same line
 (ids are not in any order; never guess one). Check the steps so far: each says what really happened; if one
@@ -119,12 +119,18 @@ def _plain(t: str) -> str:
     return re.sub(r"[\s,]", "", t).lower()
 
 
-# Controls the fast model may not press on its own: their label reads like something the user would lose or couldn't
-# take back (arc-cua's risk words, minus a bare "close"/"clear", which are routine). The teammate asks the user first.
-RISKY = re.compile(r"\b(delete|remove|erase|trash|discard|clear all|empty trash|permanently|send|post|publish|share|"
-                   r"reply all|forward|tweet|buy|purchase|pay|checkout|check out|place order|order now|subscribe|donate|"
-                   r"quit|sign out|log out|logout|shut down|restart|uninstall|reset)\b", re.I)
+# Controls the fast model may not press on its own: they commit something the user would lose or couldn't take back
+# (same rule as Snoofy's: a routine word only when it leads a short label, "Start a post" opens a box; strong phrases
+# anywhere). The teammate asks the user first.
+LEAD = re.compile(r"^\W*(delete|remove|erase|trash|discard|send|post|repost|publish|share|reply all|forward|tweet|buy|"
+                  r"purchase|pay|checkout|check out|place order|order now|subscribe|donate|quit|sign out|log out|logout|"
+                  r"shut down|restart|uninstall|reset|submit|confirm)\b", re.I)
+STRONG = re.compile(r"\b(permanently|empty trash|clear all|place order|pay now|buy now|delete account|delete forever)\b", re.I)
 
+
+def risky_label(name: str) -> bool:
+    n = " ".join((name or "").split())
+    return bool(STRONG.search(n) or LEAD.match(n) and len(n.split()) <= 4)
 
 def name_of(screen: str, element: str) -> str:
     m = re.search(rf"\[{re.escape(element)}\] [^“\n]*“([^”\n]*)”", screen)
@@ -134,7 +140,7 @@ def name_of(screen: str, element: str) -> str:
 def risky(screen: str, element: str) -> str:
     """The name of the element on this screen if pressing it is risky, else ""."""
     name = name_of(screen, element)
-    return name if RISKY.search(name) else ""
+    return name if risky_label(name) else ""
 
 
 def _by_name(d: dict[str, Any], screen: str) -> None:
@@ -147,7 +153,8 @@ def _by_name(d: dict[str, Any], screen: str) -> None:
             d["element"] = hits[0]
 
 
-async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str], screen: str, kind: dict[str, str] = DESKTOP) -> dict[str, Any]:
+async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str], screen: str, kind: dict[str, str] = DESKTOP,
+                 guide: str = "") -> dict[str, Any]:
     """The fast model's next action for this screen. It may only type text from `inputs`: anything else comes back as
     NEEDS_INPUT; the same step three times in a row comes back as BLOCKED. DONE must quote the screen: a claim the
     screen doesn't show is sent back to look again (twice), then BLOCKED (gpt-oss once said "shows 1000" over 11,02,200)."""
@@ -159,7 +166,8 @@ async def decide(goal: str, inputs: list[str], done_when: str, steps: list[str],
         res = await model.ainvoke([
             SystemMessage("You are a precise UI operator. Answer with JSON only."),
             HumanMessage(SUBTASK.format(goal=goal, done=done_when or "the goal is visibly reached", inputs=json.dumps(inputs or []),
-                                        steps="\n".join([*steps, *notes]) or "(none yet)", screen=screen, **kind)),
+                                        steps="\n".join([*steps, *notes]) or "(none yet)", screen=screen,
+                                        guide=f"How it's done here (follow it):\n{guide}\n" if guide else "", **kind)),
         ])
         d = _json(res.text)
         d["action"] = str(d.get("action", "")).upper()
@@ -191,7 +199,7 @@ def _json(text: str) -> dict[str, Any]:
 
 
 async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: str, max_steps: int,
-                  call: Any = None, kind: dict[str, str] = DESKTOP) -> str:
+                  call: Any = None, kind: dict[str, str] = DESKTOP, guide: str = "") -> str:
     """The fast-model loop on the user's computer: look, pick an action allowed on what's on screen, act, until done or
     stuck. (The phone runs the same loop itself: lib/phone.ts workInApp → POST /phone/step; the server browser passes
     its own `call`, and a click it refuses for needing the user's OK ends the loop with NEEDS_OK.)"""
@@ -202,7 +210,7 @@ async def subtask(cid: str, app: str, goal: str, inputs: list[str], done_when: s
     snap, screen = got["snapshot"], got["text"]
     steps: list[str] = []
     for _ in range(max(1, min(max_steps, 25))):
-        d = await decide(goal, inputs, done_when, steps, screen, kind)
+        d = await decide(goal, inputs, done_when, steps, screen, kind, guide)
         action, why = d["action"], d["why"]
         if action in ("DONE", "BLOCKED", "NEEDS_INPUT"):
             return f"{action}: {why}\nSteps: " + ("; ".join(steps) or "none") + f"\n{screen}"

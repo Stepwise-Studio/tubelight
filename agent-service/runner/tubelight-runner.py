@@ -498,8 +498,16 @@ def ui_apps(c: dict, a: dict) -> list:
     return _driver(c, a).apps()
 
 
+def _step(text: str) -> None:
+    """Tells the hotkey's card what the worker is doing (when a hotkey session is waiting on it)."""
+    tv = sys.modules.get("tubelight_voice")
+    if tv and hasattr(tv, "step"):
+        tv.step(text[:60])
+
+
 def ui_look(c: dict, a: dict) -> dict:
     d = _driver(c, a)
+    _step(f"Looking at {a['app']}")
     snap = d.observe(a["app"], a.get("window") or "")
     return {"snapshot": snap["snapshot"], "app": snap["app"], "text": d.text(snap)}
 
@@ -516,6 +524,9 @@ def ui_act(c: dict, a: dict) -> dict:
     e = d.element(a["snapshot"], a["element"])
     if str(a["action"]).upper() in ("CLICK", "DOUBLE_CLICK") and d.risky(e["name"]) and not a.get("confirmed"):
         return {"status": "needs_ok", "step": f"press “{e['name']}”", "typed": d.typed(a["snapshot"])}
+    verb = {"TYPE": "Typing into", "REPLACE": "Typing into", "FOCUS": "Going to", "READ": "Reading",
+            "SCROLL_TO": "Scrolling to"}.get(str(a["action"]).upper(), "Clicking")
+    _step(f"{verb} “{e['name'][:40]}”" if e["name"] else f"{verb} {e['role']}")
     return _with_text(d, d.act(a["snapshot"], a["element"], a["action"], str(a.get("value") or "")))
 
 
@@ -524,6 +535,7 @@ def ui_keys(c: dict, a: dict) -> dict:
     sent = next((k for k in a["keys"] if re.match(r"^(ctrl|control|meta|super|cmd|mod)\+(enter|return)$", str(k).strip(), re.I)), None)
     if sent and not a.get("confirmed"):
         return {"status": "needs_ok", "step": f"press {sent}", "typed": []}
+    _step("Pressing " + ", ".join(map(str, a["keys"]))[:40])
     return _with_text(d, d.keys(list(a["keys"]), a.get("app") or ""))
 
 

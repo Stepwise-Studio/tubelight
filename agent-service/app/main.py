@@ -23,7 +23,8 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import automations, browser, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, passwords, phone, push, reactions, repo, runs, sandbox, sync, todos, usage, vault
+from . import automations, browser, clock, computers, config, connectors, db, drive, events, files, followups, images, knowledge, live, llm, mem, memory, mind, passwords, phone, playbooks, push, reactions, repo, runs, sandbox, skills, sync, todos, usage, vault
+from . import computer_use as cu
 from .auth import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1322,6 +1323,8 @@ async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_
     ctx = await runs.load_ctx(str(uuid.uuid4()), who[0], thread_id, "message", None)
     tm = next((m for m in ctx.members if m["id"] == tm_id), ctx.members[0])
     system = await live.instruction(ctx, tm, thread_id) + "\n\n" + live.DESKTOP
+    if crew := [m for m in ctx.crew if m["id"] != tm_id]:
+        system += "\n\nThe crew (for run_task's teammate):\n" + "\n".join(f"- {m['name']}: {m.get('role') or 'teammate'}" for m in crew)
     if body.screen.strip():
         system += "\n\nWhat was in front when they pressed the hotkey (seen, not said):\n" + body.screen
     try:
@@ -1334,6 +1337,7 @@ async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_
 
 class RunnerVoiceTask(BaseModel):
     request: str = Field(min_length=1, max_length=4000)
+    teammate: str = Field("", max_length=80)  # a crew member by name: asked in their own chat instead
 
 
 VOICE_TASK_WAIT_S = 90
@@ -1354,6 +1358,13 @@ async def runner_voice_task(body: RunnerVoiceTask, who: tuple[str, str] = Depend
     waiting on), like the phone's voice mode, but waited for here."""
     owner_id = who[0]
     tm_id, thread_id = await _computer_chat(*who)
+    if body.teammate.strip():
+        want = body.teammate.strip().lstrip("@").lower()
+        crew = await db.select("teammates", {"owner_id": f"eq.{owner_id}", "select": "id,name,handle"})
+        mate = next((m for m in crew if want in (m["name"].lower(), m["handle"].lower())), None)
+        if not mate:
+            return {"result": f"No teammate called {body.teammate}. The crew: " + ", ".join(m["name"] for m in crew)}
+        tm_id, thread_id = mate["id"], f"dm:{mate['id']}"
     message = await db.insert("messages", {"thread_id": thread_id, "owner_id": owner_id, "sender_type": "user",
                                            "text": body.request, "meta": {"voice_task": True}})
     run_id = await runs.start(owner_id, thread_id, body.request, teammate_id=tm_id, message_id=message["id"])
@@ -1377,6 +1388,28 @@ async def runner_voice_task(body: RunnerVoiceTask, who: tuple[str, str] = Depend
         if run.get("status") in ("failed", "cancelled"):
             return {"result": f"It {run['status']}."}
     return {"result": "Still working on it; the answer will be in the chat on their phone."}
+
+
+class RunnerWork(BaseModel):
+    app: str = Field(min_length=1, max_length=120)
+    goal: str = Field(min_length=1, max_length=2000)
+    text: list[str] = Field(default_factory=list, max_length=8)  # exactly what may be typed (a post, a search)
+    window: str = Field("", max_length=200)  # the window's title, for picking the site's know-how
+
+
+@app.post("/runner/voice/work")
+async def runner_voice_work(body: RunnerWork, who: tuple[str, str] = Depends(runner_auth)):
+    """work_in_app from the hotkey: the step-by-step worker (computer_use.subtask) drives the app, with the site's
+    know-how (skills) and the playbook the user taught for it, so the voice only talks."""
+    owner_id, cid = who
+    taught = await playbooks.match(owner_id, f"{body.goal} ({body.app} {body.window})")
+    guide = "\n\n".join(g for g in (skills.guide(body.app, body.window, body.goal),
+                                       f"How they want it done (their playbook “{taught['name']}”):\n{taught['steps']}" if taught else "") if g)
+    try:
+        out = await cu.subtask(cid, body.app, body.goal, [t[:4000] for t in body.text], "", 20, guide=guide)
+    except Exception as e:  # the computer went away, the app closed
+        return {"result": f"BLOCKED: {str(e)[:200]}"}
+    return {"result": out[:6000]}
 
 
 class RunnerTranscript(BaseModel):

@@ -105,6 +105,16 @@ class Voice:
             self.session = Session(self)
 
 
+_live: list = []  # the session that's on, for step()
+
+
+def step(text: str) -> None:
+    """The runner's app ops call this while the worker drives an app, so the card says what it's doing right now."""
+    sess = _live[0] if _live else None
+    if sess and sess.tasks and not sess.over:
+        _later(sess.ctx, sess._step, text)
+
+
 class Session:
     """One press of the hotkey: listening, talking, doing, until it goes quiet."""
 
@@ -120,6 +130,7 @@ class Session:
         self.tasks = 0
         self.verb = ""
         self.over = False
+        _live[:] = [self]
         print("voice: listening", flush=True)
         self.show("listening")
         self.mic = self._mic()
@@ -267,6 +278,11 @@ class Session:
     def show(self, state: str) -> None:
         self.v.pill(state=state, verb=self.verb if state == "working" else "", turns=self._view())
 
+    def _step(self, text: str) -> None:
+        if self.tasks and not self.over:
+            self.verb = text
+            self.show("working")
+
     # ---------------------------------------------------------- tools
     def _tool(self, fc: dict) -> None:
         name, args = fc.get("name"), fc.get("args") or {}
@@ -287,9 +303,22 @@ class Session:
 
     def _do(self, name: str, a: dict) -> str:
         if name == "run_task":
-            status, got = self.v.api(self.v.load(), "/runner/voice/task", {"request": str(a.get("request") or "")}, timeout=120)
+            status, got = self.v.api(self.v.load(), "/runner/voice/task", {"request": str(a.get("request") or ""),
+                                                                            "teammate": str(a.get("teammate") or "")}, timeout=120)
             return (got or {}).get("result") or (got or {}).get("detail") or f"The server answered {status}."
         s = self.v.driver()
+        if name == "work_in_app":
+            app = str(a.get("app") or "")
+            title = next((w["title"] for w in reversed(s.windows().get("windows") or [])
+                          if _flat(app) and _flat(app) in _flat(w.get("app", "") + w.get("title", ""))), "")
+            status, got = self.v.api(self.v.load(), "/runner/voice/work", {
+                "app": app, "goal": str(a.get("task") or ""), "text": [str(t) for t in a.get("text") or []][:8],
+                "window": title}, timeout=240)
+            out = (got or {}).get("result") or (got or {}).get("detail") or f"The server answered {status}."
+            if m := re.search(r"NEEDS_OK.*?press “([^”]+)”", out):
+                snap = re.search(r"Snapshot (s\d+)", out)
+                out = self._ask(f"press “{m.group(1)}”", s.typed(snap.group(1)) if snap else []) + "\n" + out
+            return out
         if name == "list_windows":
             return _windows_line(s.windows())
         if name == "place_window":
@@ -406,6 +435,10 @@ def _pretty(app: str) -> str:
     return app[:1].upper() + app[1:] if app else ""
 
 
+def _flat(t: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (t or "").lower())
+
+
 def _doing(name: str, a: dict) -> str:
     """The card's spinner line while a tool runs."""
     app = _pretty(str(a.get("app") or a.get("window") or ""))
@@ -419,6 +452,10 @@ def _doing(name: str, a: dict) -> str:
         return "Opening " + str(a.get("url") or "the page").removeprefix("https://").removeprefix("www.")[:40]
     if name == "read_page":
         return "Reading the page"
+    if name == "work_in_app":
+        return f"Working in {app}" if app else "Working…"
+    if name == "run_task" and a.get("teammate"):
+        return f"Asking {_pretty(str(a['teammate']))}"
     return {"open_app": f"Opening {app}", "close_app": f"Closing {app}", "press_keys": f"Pressing keys in {app}".strip(),
             "list_windows": "Looking at your windows", "look_at_app": f"Looking at {app}",
             "run_task": "Asking your teammate: " + str(a.get("request") or "")[:70]}.get(name, "Working…")
