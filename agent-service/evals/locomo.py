@@ -135,6 +135,7 @@ def sessions(conv: dict) -> list[tuple[datetime, list[dict]]]:
 
 
 RUN = os.environ.get("BENCH_RUN", "")
+BUDGET = int(os.environ.get("BENCH_BUDGET", "3500"))  # recall's characters per speaker (production: 3500)
 
 
 def owner(sample: str, speaker: str) -> str:
@@ -239,8 +240,8 @@ async def answer(only: str = "", full: bool = False) -> None:
             if full:  # one transcript holds both speakers' words: shown once, under the first speaker
                 ma, mb = whole, "(the conversation above holds both speakers' words)"
             else:
-                ma = await mem.recall(owner(sample, a), q, brief=True)
-                mb = await mem.recall(owner(sample, b), q, brief=True)
+                ma = await mem.recall(owner(sample, a), q, brief=True, budget=BUDGET)
+                mb = await mem.recall(owner(sample, b), q, brief=True, budget=BUDGET)
             got = (await _ask(model, ANSWER_PROMPT.format(speaker_1_user_id=a, speaker_1_memories=ma or "(nothing)",
                                                           speaker_2_user_id=b, speaker_2_memories=mb or "(nothing)",
                                                           question=q))).strip()
