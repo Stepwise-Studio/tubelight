@@ -14,7 +14,6 @@ Window control, the global hotkey and the status pill live in Snoofy's GNOME She
 """
 import json
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -811,9 +810,8 @@ def install_windows() -> dict:
     on = list(settings.get_strv("enabled-extensions"))
     if EXT not in on:
         settings.set_strv("enabled-extensions", on + [EXT])
-    if changed and shutil.which("gnome-extensions"):  # already loaded (an update): reload it now
-        subprocess.run(["gnome-extensions", "disable", EXT], capture_output=True, timeout=5)
-        subprocess.run(["gnome-extensions", "enable", EXT], capture_output=True, timeout=5)
+    # An update waits for the next log-in: GNOME 45+ can't load an extension's new code into a running shell, and a
+    # disable + enable to try leaves it switched off (window control and the hotkey gone) until then.
     return windows_state()
 
 

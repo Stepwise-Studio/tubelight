@@ -127,6 +127,8 @@ DESKTOP = """## On their computer (they pressed the hotkey)
 - Buttons (or ctrl+enter) that post, send, delete or pay: first say exactly what will happen, with what's written
   ("Post 'shipping today' on X?"), then wait for their yes; only then call again with confirmed. Their own words are
   checked: a yes you assume doesn't count.
+- Spreadsheets, documents, slides ("make me a sheet for…", "add a totals row to this file"): run_task; the teammate
+  makes or changes the file and opens it here in LibreOffice.
 - Anything else that needs their apps, files, mail or the crew: run_task, as usual. Its answer also lands in the chat
   with you on their phone.
 - They can see a small card with what's said and the full answers, but no chat: never say "in the chat below".

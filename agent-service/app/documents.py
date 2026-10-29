@@ -577,3 +577,129 @@ def make(kind: str, title: str, content: str) -> tuple[str, bytes]:
             raise ValueError(f"For {ext}, content must be a JSON object.")
         return name, (make_xlsx(title, spec) if ext == "xlsx" else make_pptx(title, spec))
     return name, (make_docx(title, content) if ext == "docx" else make_pdf(title, content))
+
+
+def edit(name: str, data: bytes, changes: list[dict[str, Any]]) -> bytes:
+    """Changes to a file they gave, made in the file itself so its formatting, other sheets and slides stay as they
+    were (rebuilding it from its text would lose all that). Raises ValueError on a change that doesn't fit."""
+    kind = KINDS.get(name.rsplit(".", 1)[-1].lower())
+    if kind not in ("xlsx", "docx", "pptx"):
+        raise ValueError("Only .xlsx, .docx and .pptx files can be changed in place; make a new one instead.")
+    if not changes:
+        raise ValueError("No changes given.")
+    return {"xlsx": _edit_xlsx, "docx": _edit_docx, "pptx": _edit_pptx}[kind](data, changes)
+
+
+def _edit_xlsx(data: bytes, changes: list[dict[str, Any]]) -> bytes:
+    _no_broken_numpy()
+    from copy import copy
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(data))
+
+    def sheet(c: dict[str, Any]):
+        want = c.get("sheet")
+        if not want:
+            return wb.active
+        if want not in wb.sheetnames:
+            raise ValueError(f"No sheet {want!r}; the sheets are {', '.join(wb.sheetnames)}.")
+        return wb[want]
+
+    def styled_row(ws, values: list[Any], at: int) -> None:
+        for i, v in enumerate(values, 1):  # each cell takes the look of the one above it (number formats, fonts)
+            cell, above = ws.cell(at, i, _cell(v)), ws.cell(at - 1, i) if at > 1 else None
+            if above is not None and above.has_style:
+                cell.font, cell.number_format, cell.alignment, cell.border = (copy(above.font), above.number_format,
+                                                                              copy(above.alignment), copy(above.border))
+
+    for c in changes:
+        if "add_sheet" in c:
+            ws = wb.create_sheet(str(c["add_sheet"])[:31])
+            for r in [c.get("columns") or [], *(c.get("rows") or [])]:
+                if r:
+                    ws.append([_cell(v) for v in r])
+        elif "cell" in c:
+            sheet(c)[str(c["cell"])] = _cell(c.get("value"))
+        elif "append" in c:
+            ws = sheet(c)
+            styled_row(ws, list(c["append"]), ws.max_row + 1)
+        elif "insert_row" in c:
+            ws, at = sheet(c), int(c["insert_row"])
+            ws.insert_rows(at)
+            styled_row(ws, list(c.get("values") or []), at)
+        elif "delete_row" in c:
+            sheet(c).delete_rows(int(c["delete_row"]))
+        elif "column" in c:  # a new column: header + a value or formula per row ("=B{row}*C{row}")
+            ws = sheet(c)
+            col = ws.max_column + 1 if c["column"] in ("", "new") else ws[f"{c['column']}1"].column
+            ws.cell(1, col, c.get("header") or "")
+            if ws.cell(1, col - 1).has_style and col > 1:
+                ws.cell(1, col).font, ws.cell(1, col).fill = copy(ws.cell(1, col - 1).font), copy(ws.cell(1, col - 1).fill)
+            for r in range(2, ws.max_row + 1):
+                ws.cell(r, col, _cell(str(c.get("formula") or "").replace("{row}", str(r))))
+        else:
+            raise ValueError(f"Unknown change {c}: use cell/value, append, insert_row/values, delete_row, column, add_sheet.")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _replace_in(paragraphs, old: str, new: str) -> int:
+    """Replaces text in paragraphs, keeping the first run's formatting for the changed part."""
+    n = 0
+    for p in paragraphs:
+        if old in p.text:
+            if any(old in r.text for r in p.runs):
+                for r in p.runs:
+                    if old in r.text:
+                        r.text = r.text.replace(old, new)
+            else:  # split across runs: the whole paragraph goes in its first run
+                text = p.text.replace(old, new)
+                for r in p.runs[1:]:
+                    r.text = ""
+                p.runs[0].text = text
+            n += 1
+    return n
+
+
+def _edit_docx(data: bytes, changes: list[dict[str, Any]]) -> bytes:
+    from docx import Document
+
+    doc = Document(io.BytesIO(data))
+    cells = [p for t in doc.tables for row in t.rows for cell in row.cells for p in cell.paragraphs]
+    for c in changes:
+        if "replace" in c:
+            if not _replace_in([*doc.paragraphs, *cells], str(c["replace"]), str(c.get("with", ""))):
+                raise ValueError(f"{c['replace']!r} isn't in the document.")
+        elif "append" in c:
+            for line in str(c["append"]).split("\n\n"):
+                doc.add_paragraph(line.strip())
+        elif "after" in c:
+            at = next((p for p in doc.paragraphs if str(c["after"]) in p.text), None)
+            if at is None:
+                raise ValueError(f"{c['after']!r} isn't in the document.")
+            new = at.insert_paragraph_before("")  # then moved below `at`
+            at._p.addnext(new._p)
+            new.add_run(str(c.get("insert") or ""))
+            new.style = at.style
+        else:
+            raise ValueError(f"Unknown change {c}: use replace/with, append, after/insert.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _edit_pptx(data: bytes, changes: list[dict[str, Any]]) -> bytes:
+    from pptx import Presentation
+
+    deck = Presentation(io.BytesIO(data))
+    paras = [p for s in deck.slides for sh in s.shapes if sh.has_text_frame for p in sh.text_frame.paragraphs]
+    for c in changes:
+        if "replace" not in c:
+            raise ValueError(f"Unknown change {c}: slides take replace/with (a new deck: make_document).")
+        if not _replace_in(paras, str(c["replace"]), str(c.get("with", ""))):
+            raise ValueError(f"{c['replace']!r} isn't on any slide.")
+    buf = io.BytesIO()
+    deck.save(buf)
+    return buf.getvalue()

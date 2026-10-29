@@ -108,7 +108,7 @@ INTERNAL = {
     "memory_search": "read", "memory_why": "read", "memory_confirm": "read", "memory_dismiss": "read",
     "memory_correct": "read", "memory_merge": "read",
     "computer_list": "read", "computer_read": "read", "computer_write": "act", "computer_run": "act",
-    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_browse": "read", "computer_read_page": "read", "computer_windows": "read", "computer_place_window": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
+    "computer_send_file": "read", "computer_receive": "read", "computer_screenshot": "read", "computer_apps": "read", "computer_close_app": "act", "computer_to_drive": "act", "computer_use": "act", "computer_look": "read", "computer_act": "read", "computer_keys": "read", "computer_browse": "read", "computer_read_page": "read", "computer_windows": "read", "computer_place_window": "read", "computer_subtask": "read", "computer_start_job": "act", "generate_image": "read", "make_document": "read", "edit_document": "read", "computer_open_file": "read", "phone_action": "read", "phone_send": "act", "phone_use_app": "act", "phone_notifications": "read", "ask_phone": "read", "phone_status": "read",
     "todos": "read", "vault": "read", "knowledge": "read", "alarms": "read", "reminders": "read",
 }
 # Tools that pause the run for the user (question card / connect card). The graph intercepts them.
@@ -119,7 +119,7 @@ LABELS = {
     "remember": "Saving to memory", "playbook": "Checking its playbooks", "browser_save": "Saving from the page", "browser_attach": "Attaching a file", "recall": "Searching memory", "search_chat": "Searching the chat",
     "follow_up": "Setting a follow-up", "automate": "Setting up an automation", "app_events": "Checking app events",
     "spawn_helper": "Working with a helper", "read_file": "Reading a file", "write_file": "Writing a file",
-    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_browse": "Opening a website", "computer_read_page": "Reading the page", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
+    "git_push": "Pushing commits", "todos": "Checking your to-dos", "alarms": "Setting your alarms", "reminders": "Setting your reminders", "vault": "Looking in your vault", "knowledge": "Looking in its notes", "generate_image": "Drawing an image", "make_document": "Writing a document", "edit_document": "Editing your file", "computer_open_file": "Opening it on your computer", "phone_action": "Doing it on your phone", "phone_send": "Sending from your phone", "phone_use_app": "Using an app on your phone", "phone_notifications": "Reading your notifications", "ask_phone": "Asking your phone", "phone_status": "Checking your phone", "computer_screenshot": "Looking at your screen", "computer_apps": "Checking running apps", "computer_close_app": "Closing an app", "computer_use": "Asking to use an app", "computer_look": "Looking at an app", "computer_act": "Using an app", "computer_keys": "Pressing keys", "computer_browse": "Opening a website", "computer_read_page": "Reading the page", "computer_windows": "Checking your windows", "computer_place_window": "Arranging your windows", "computer_subtask": "Working in an app", "computer_to_drive": "Uploading to Google Drive", "computer_list": "Looking in your folders", "computer_read": "Reading your file",
     "computer_write": "Writing your file", "computer_run": "Running a command on your computer", "ask_user": "Asking you", "connect_app": "Asking you to connect an app",
 }
 HELPER_STEPS = 6
@@ -980,6 +980,48 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
             ctx.outgoing.setdefault(tm["id"], []).append(await files.upload(ctx.owner_id, name, data))
             return f"{name} ({len(data) / 1e3:.0f} KB) is attached to your reply. Say a line about what's in it; don't paste it."
 
+        async def _source(file: str) -> tuple[str, bytes] | None:
+            """A file they gave: an attachment in this chat's recent messages, else a Vault file, by (part of) its name."""
+            want = file.strip().lower()
+            mine = list(ctx.outgoing.get(tm["id"], []))
+            rows = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "order": "created_at.desc",
+                                                "limit": "30", "select": "meta"})
+            atts = [*mine, *(a for r in rows for a in (r.get("meta") or {}).get("attachments") or [])]
+            hit = next((a for a in atts if a["name"].lower() == want), None) or next(
+                (a for a in atts if want and want in a["name"].lower()), None)
+            if hit:
+                return hit["name"], await files._download(ctx.owner_id, hit["path"])
+            from . import vault
+            rows = [r for r in await vault.items(ctx.owner_id) if r.get("kind") != "folder"]
+            row = next((r for r in rows if r["name"].lower() == want), None) or next(
+                (r for r in rows if want and want in r["name"].lower()), None)
+            return (row["name"], await asyncio.to_thread(vault.read_bytes, ctx.owner_id, row["id"])) if row else None
+
+        async def edit_document(file: str, changes: list[dict]) -> str:
+            got = await _source(file)
+            if not got:
+                return f"No file called {file!r} in this chat or the Vault. Ask them to attach it."
+            name, data = got
+            try:
+                new = await asyncio.to_thread(documents.edit, name, data, changes)
+            except ValueError as e:
+                return f"Not changed: {e}"
+            ctx.outgoing.setdefault(tm["id"], []).append(up := await files.upload(ctx.owner_id, name, new))
+            ctx.made.add(up["path"])
+            return f"{name} changed in place ({len(changes)} changes, its formatting kept) and attached to your reply."
+
+        tools.append(StructuredTool.from_function(
+            coroutine=edit_document, name="edit_document",
+            description=(
+                "Change a spreadsheet, Word document or slide deck they gave (attached in this chat, or in their Vault) "
+                "in the file itself, so its formatting, other sheets and slides stay: better than making a new one "
+                "when they say 'add/update/fix this in my file'. file: its name (or part). changes, in order: xlsx "
+                "{\"cell\": \"B5\", \"value\": 12} | {\"append\": [\"Total\", \"=SUM(B2:B9)\"]} | {\"insert_row\": 3, "
+                "\"values\": [..]} | {\"delete_row\": 4} | {\"column\": \"new\", \"header\": \"Total\", \"formula\": "
+                "\"=B{row}*C{row}\"} | {\"add_sheet\": \"Summary\", \"columns\": [..], \"rows\": [[..]]}, each with "
+                "\"sheet\" when not the first (row 1 is the header row, so the first data row is 2); docx {\"replace\": "
+                "\"old text\", \"with\": \"new\"} | {\"append\": \"a new paragraph\"} | {\"after\": \"text of a paragraph\", "
+                "\"insert\": \"the new one\"}; pptx {\"replace\", \"with\"}. Read the file first (it's in their message).")))
         tools.append(StructuredTool.from_function(
             coroutine=make_document, name="make_document",
             description=(
@@ -1522,6 +1564,20 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                                                                   "b64": base64.b64encode(data).decode()}, 180))
             return "Saved on the computer: " + ", ".join(saved)
 
+        async def computer_open_file(file: str, folder: str = "~/Documents/Tubelight") -> str:
+            want = file.strip().lower()
+            rows = await db.select("messages", {"thread_id": f"eq.{ctx.thread_id}", "order": "created_at.desc",
+                                                "limit": "30", "select": "meta"})
+            atts = [*ctx.outgoing.get(tm["id"], []), *(a for r in rows for a in (r.get("meta") or {}).get("attachments") or [])]
+            hit = next((a for a in atts if a["name"].lower() == want), None) or next(
+                (a for a in atts if want and want in a["name"].lower()), None)
+            if not hit:
+                return f"No file called {file!r} in this chat: make or edit it first, or ask them to attach it."
+            data = await files._download(ctx.owner_id, hit["path"])
+            where = await computers.call(dev, "open_file", {"name": hit["name"], "folder": folder, "full": True,
+                                                            "b64": base64.b64encode(data).decode()}, 120)
+            return f"Saved as {where} and opened on the computer (LibreOffice for office files)."
+
         async def computer_start_job(cmd: str, title: str, cwd: str = "~") -> str:
             got = await computers.call(dev, "job_start", {"cmd": cmd, "title": title, "cwd": cwd, "full": True})
             return (f"Started in the background (job {got['id']}). Its output goes to {got['log']}; when it ends, the "
@@ -1532,6 +1588,10 @@ def build(ctx: RunCtx, tm: dict, composio_tools: list[BaseTool], helper: bool = 
                 description="Start a long command (a big download, a build, a backup, anything over a few minutes) in the "
                             "background on this computer. It keeps running past the 10-minute command limit and reports "
                             "back in this chat when it finishes. title: 2-6 words. To check on it, tail its log."),
+            StructuredTool.from_function(coroutine=computer_open_file, name="computer_open_file",
+                description="Put a file from this chat (one you just made or edited, or one they attached) on this "
+                            "computer and open it there, so they see it in front of them (spreadsheets, documents and "
+                            "slides open in LibreOffice). file: its name. Never overwrites: a copy gets a (1)."),
             StructuredTool.from_function(coroutine=computer_send_file, name="computer_send_file",
                 description="Send a file from this computer to the chat, so they can open it on their phone (up to 25 MB)."),
             StructuredTool.from_function(coroutine=computer_to_drive, name="computer_to_drive",

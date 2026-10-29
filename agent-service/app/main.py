@@ -1323,8 +1323,12 @@ async def runner_voice(body: RunnerVoice, who: tuple[str, str] = Depends(runner_
     ctx = await runs.load_ctx(str(uuid.uuid4()), who[0], thread_id, "message", None)
     tm = next((m for m in ctx.members if m["id"] == tm_id), ctx.members[0])
     system = await live.instruction(ctx, tm, thread_id) + "\n\n" + live.DESKTOP
-    if crew := [m for m in ctx.crew if m["id"] != tm_id]:
-        system += "\n\nThe crew (for run_task's teammate):\n" + "\n".join(f"- {m['name']}: {m.get('role') or 'teammate'}" for m in crew)
+    crew = await db.select("teammates", {"owner_id": f"eq.{who[0]}", "id": f"neq.{tm_id}",
+                                         "select": "name,role,allowed_toolkits", "order": "created_at"})
+    if crew:
+        system += "\n\nThe crew (for run_task's teammate; a task in a connected app goes to whoever has it):\n" + "\n".join(
+            f"- {m['name']}: {m.get('role') or 'teammate'}" + (f" (apps: {', '.join(connectors.name_of(t) for t in m['allowed_toolkits'])})"
+                                                             if m.get("allowed_toolkits") else "") for m in crew)
     if body.screen.strip():
         system += "\n\nWhat was in front when they pressed the hotkey (seen, not said):\n" + body.screen
     try:

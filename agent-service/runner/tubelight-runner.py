@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-VERSION = "17"  # 17: websites in your own browser (open, read whole pages), posts/sends only after a yes; 16: the hotkey (say it, it's done), windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
+VERSION = "17"  # 17: websites in your own browser (open, read whole pages, typing pages notice), posts/sends only after a yes, files opened on the computer, the hotkey's worker; 16: the hotkey (say it, it's done), windows moved/resized between monitors (a shell extension), looks 3x faster, keys lent to the right app, text fields read again, says when an app didn't react; 15: folders kept in sync with the Vault; 14: fetches a missing part; 13: using apps (read windows, click, type, keys, open apps); 12: one monitor's screenshot; 11: GNOME apps are closable; 10: screenshots, closing apps; 9: live apps; 8: the window updates on open; 7: long jobs, status; 6: files both ways; 5: updates itself; 3: full access from its chat; 4: admin commands with a password typed on the phone
 HERE = Path(__file__).resolve().parent
 SERVER = (HERE / "server.txt").read_text().strip() if (HERE / "server.txt").exists() else ""  # set by the .deb
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tubelight"
@@ -393,6 +393,15 @@ KEEP = ("GNOME Shell", "Xwayland", "systemd", "dbus", "pipewire", "wireplumber",
 
 def _closable(name: str) -> bool:
     return not name.startswith(KEEP)
+
+
+def open_file(c: dict, a: dict) -> str:
+    """A file from the phone, saved like fs_put and opened in the app that handles it (LibreOffice for .xlsx/.docx/
+    .pptx): the user sees the result in front of them."""
+    p = fs_put(c, {**a, "folder": a.get("folder") or "~/Documents/Tubelight"})
+    subprocess.Popen(["xdg-open", p], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+    return p
 
 
 def quit_app(c: dict, a: dict) -> str:
@@ -766,7 +775,7 @@ def box_close(c: dict, a: dict) -> str:
     return diff
 
 
-OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "job_start": job_start, "live": live,
+OPS = {"fs_list": fs_list, "fs_read": fs_read, "fs_write": fs_write, "shell": shell, "fs_get": fs_get, "fs_put": fs_put, "open_file": open_file, "job_start": job_start, "live": live,
        "quit_app": quit_app, "screenshot": screenshot,
        "ui_apps": ui_apps, "ui_look": ui_look, "ui_act": ui_act, "ui_keys": ui_keys, "ui_launch": ui_launch, "ui_open": ui_open, "ui_page": ui_page, "ui_windows": ui_windows, "ui_place": ui_place,
        "box_start": box_start, "box_exec": lambda c, a: box_exec_raw(box_dir(a["key"]).name, a["cmd"], int(a["timeout"])),

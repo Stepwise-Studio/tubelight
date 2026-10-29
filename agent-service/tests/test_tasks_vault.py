@@ -150,3 +150,18 @@ async def test_ensure_folder_reuses_and_makes_paths(env, tmp_path, monkeypatch):
     rows = await vault.items(U)
     assert len([r for r in rows if r["kind"] == "folder"]) == 2
     assert next(r for r in rows if r["id"] == leaf)["parent"] == hiring["id"]
+
+
+def test_office_files_are_changed_in_place_with_their_formatting():
+    from app import documents as d
+    sheet = d.make("xlsx", "Spend", '{"sheets": [{"name": "Spend", "columns": ["Item", "Cost"], "rows": [["Rent", 1200], '
+                   '["Food", 300]], "formats": {"Cost": "#,##0.00"}}]}')[1]
+    out = d.read_xlsx(d.edit("s.xlsx", sheet, [{"append": ["Total", "=SUM(B2:B3)"]}]))
+    assert "| Total | 1,500.00 |" in out  # the formula works and the new row took the column's number format
+    doc = d.make("docx", "Note", "# Hi\n\nThe price is **100**.")[1]
+    assert "The price is 120." in d.read_docx(d.edit("n.docx", doc, [{"replace": "100", "with": "120"}]))
+    import pytest
+    with pytest.raises(ValueError):
+        d.edit("n.docx", doc, [{"replace": "not there", "with": "x"}])
+    with pytest.raises(ValueError):
+        d.edit("n.pdf", doc, [{"replace": "a", "with": "b"}])
