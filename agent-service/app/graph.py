@@ -540,6 +540,31 @@ _HARMONY = re.compile(r"<\|(start|channel|message|constrain|call|end|return)\|>"
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
 
+def stray_calls(text: str, names: set[str]) -> list[dict[str, Any]]:
+    """Tool calls written out as the whole reply instead of made: [[{"name": "inbox", "parameters": {...}}]] from
+    Nemotron when Gemini stumbled (2026-10-29: Ivy's turn ended on that JSON). Only this teammate's own tools, and only
+    when the reply is nothing but the calls."""
+    fenced = re.search(r"```(?:json)?\s*([\[{].*?[\]}])\s*```", text, re.S)
+    body = (fenced.group(1) if fenced else text).strip()
+    if not body or body[0] not in "[{":
+        return []
+    try:
+        got, length = json.JSONDecoder().raw_decode(body)
+    except ValueError:
+        return []
+    if body[length:].strip() or (fenced and (text[:fenced.start()] + text[fenced.end():]).strip()):
+        return []
+    while isinstance(got, list) and len(got) == 1 and isinstance(got[0], list):
+        got = got[0]
+    calls = []
+    for c in got if isinstance(got, list) else [got]:
+        args = isinstance(c, dict) and next((c[k] for k in ("parameters", "arguments", "args") if isinstance(c.get(k), dict)), None)
+        if not isinstance(c, dict) or c.get("name") not in names or args is None:
+            return []
+        calls.append({"name": c["name"], "args": args, "id": f"call_{uuid.uuid4().hex[:24]}", "type": "tool_call"})
+    return calls
+
+
 def stray_card(text: str) -> tuple[str, str, dict[str, Any]] | None:
     """A card's arguments written out as the reply instead of called (free models do this now and then): the JSON of
     an ask_user, browser_signin or connect_app call, bare or in a ```json block. Returns (the words around it, the
@@ -616,6 +641,9 @@ async def _stream(ctx: RunCtx, tm: dict, model, messages: list[BaseMessage], str
     if said(acc) and not acc.tool_calls and not acc.response_metadata.get("finish_reason"):
         # The stream stopped mid-reply with no error (free tiers do this): never save the fragment as the answer.
         raise StreamCut(f"reply stream ended without finishing after {len(said(acc))} chars")
+    if not acc.tool_calls and (calls := stray_calls(said(acc), {t.name for t in ctx._tools.get(tm["id"], [])})):
+        return AIMessage(content="", tool_calls=calls, id=acc.id or str(uuid.uuid4()),
+                         response_metadata=acc.response_metadata, usage_metadata=acc.usage_metadata)
     if not acc.tool_calls and (card := stray_card(said(acc))):
         # The model wrote a card as JSON text (Gemini does, now and then): ask it as the card it meant.
         words, name, args = card

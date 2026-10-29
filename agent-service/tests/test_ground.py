@@ -68,3 +68,26 @@ async def test_quiet_is_never_the_answer_to_a_direct_message(api, env):
     assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == [
         "14 emails since yesterday, all routine: Google setup, Medium, Truecaller."]
     assert "QUIET is no answer" in fake.calls[-1][-1].content
+
+
+def test_tool_calls_written_out_as_text_become_real_calls():
+    from app import graph
+    names = {"inbox", "read_attachments"}
+    text = '[[\n{\n  "name": "inbox",\n  "parameters": {"days": 7, "query": "from:hr@mxc.com"}\n},\n{"name": "read_attachments", "arguments": {"files": [{"message_id": "m1"}]}}\n]]'
+    calls = graph.stray_calls(text, names)
+    assert [(c["name"], c["args"]) for c in calls] == [("inbox", {"days": 7, "query": "from:hr@mxc.com"}),
+                                                     ("read_attachments", {"files": [{"message_id": "m1"}]})]
+    assert graph.stray_calls('```json\n{"name": "inbox", "parameters": {"days": 1}}\n```', names)[0]["args"] == {"days": 1}
+    assert not graph.stray_calls('Here is the plan: {"name": "inbox", "parameters": {}}', names)  # words around: a reply
+    assert not graph.stray_calls('[{"name": "send_money", "parameters": {}}]', names)  # not its tool
+    assert not graph.stray_calls('{"name": "Asha", "score": 9}', names)
+
+
+async def test_a_reply_of_written_out_calls_runs_them(api, env, monkeypatch):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "Inbox manager")
+    fake.script = [ai('[{"name": "search_chat", "parameters": {"query": "resumes"}}]'), ai("Found the resumes thread.")]
+    await api.post(f"/threads/dm:{ivy['id']}/messages", json={"text": "find the resumes we talked about"})
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == ["Found the resumes thread."]
+    assert any(isinstance(m, ToolMessage) and m.name == "search_chat" for m in fake.calls[-1])

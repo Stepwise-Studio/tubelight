@@ -56,8 +56,8 @@ async def probe(owner: str, handle: str) -> dict:
         for skip in range(2):  # an empty reply goes to the next model, as graph._stream does
             out = await llm.chat_model(tm["model"], tools, size=size, skip=skip,
                                        must_use_tool=verdict["look"] and step == 0).ainvoke(convo)
-            if out.tool_calls or graph.said(out).strip():
-                break
+            if out.tool_calls or (graph.said(out).strip() and not (verdict["look"] and step == 0)):
+                break  # as graph's node: told to look but answered in words -> drawn again on the next model
         convo.append(out)
         if not out.tool_calls:
             break
