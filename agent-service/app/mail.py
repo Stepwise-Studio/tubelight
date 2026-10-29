@@ -21,7 +21,7 @@ async def fetch(owner_id: str, query: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     token = ""
     while len(out) < MAX_MAILS:
-        args: dict[str, Any] = {"query": query, "max_results": PAGE, "verbose": False, "include_payload": False}
+        args: dict[str, Any] = {"query": query, "max_results": PAGE, "verbose": True, "include_payload": False}  # verbose: attachment lists
         if token:
             args["page_token"] = token
         d = await connectors.execute(owner_id, "GMAIL_FETCH_EMAILS", args)
