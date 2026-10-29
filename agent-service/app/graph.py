@@ -715,6 +715,15 @@ def make_teammate(ctx: RunCtx, tm: dict):
                                convo, stream_id)
         if not ai.tool_calls and said(ai).strip():
             ai, stream_id = await _checked(ctx, tm, model, convo, view, ai, stream_id)
+        if not ai.tool_calls and not ctx.proactive and said(ai).strip(" .").upper() == "QUIET":
+            # QUIET means "post nothing" and only automations may say it. Copied from the automation turns in the chat,
+            # it answered "check all my mails from yesterday" with one word over 14 emails (2026-10-29).
+            log.warning("%s said QUIET to a direct message; redrawing", tm["handle"])
+            await db.broadcast(ctx.thread_id, "done", {**_ids(ctx, tm), "stream_id": stream_id, "discarded": True})
+            stream_id = str(uuid.uuid4())
+            ai = await _stream(ctx, tm, model, [*convo, ai, HumanMessage(
+                "[Note: they wrote to you themselves, so QUIET is no answer (it is only for automation runs). Answer "
+                "their message from what you found, even if it's only routine mail.]", name="system_note")], stream_id)
         ai.name = tm["handle"]
         text = said(ai).strip()
         done = {**_ids(ctx, tm), "stream_id": stream_id}

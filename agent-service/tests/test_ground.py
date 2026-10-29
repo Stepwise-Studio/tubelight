@@ -57,3 +57,14 @@ async def test_a_reply_that_brushes_off_the_data_is_redrawn_once(api, env, monke
 
 async def _big():
     return "x" * 3000, "ok"
+
+
+async def test_quiet_is_never_the_answer_to_a_direct_message(api, env):
+    fdb, fake = env
+    ivy = teammate(fdb, "ivy", "Inbox manager")
+    fake.script = [ai("QUIET"), ai("14 emails since yesterday, all routine: Google setup, Medium, Truecaller.")]
+    await api.post(f"/threads/dm:{ivy['id']}/messages", json={"text": "check all the mails I got since yesterday"})
+    await settle()
+    assert [m["text"] for m in fdb.rows("messages", sender_type="teammate")] == [
+        "14 emails since yesterday, all routine: Google setup, Medium, Truecaller."]
+    assert "QUIET is no answer" in fake.calls[-1][-1].content
