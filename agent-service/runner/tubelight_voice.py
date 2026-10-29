@@ -72,8 +72,15 @@ class Voice:
         try:
             ok = self.bus.call_sync(*SHELL, "Hotkey", GLib.Variant("(s)", (accel,)), GLib.VariantType("(b)"), 0, 3000, None).unpack()[0]
             print(f"voice: hotkey {accel} {'ready' if ok else 'is taken by something else'}", flush=True)
-        except GLib.Error as e:  # Snoofy's extension isn't loaded yet (it starts at the next log-in)
+        except GLib.Error as e:  # Snoofy's extension isn't loaded yet: at a log-in the shell is up a few seconds first
             print(f"voice: no hotkey yet ({e.message.split(': ')[-1]})", flush=True)
+            self._tries = getattr(self, "_tries", 0) + 1
+            if self._tries <= 40:  # ask again every 3 s for 2 minutes, then wait for the next shell start
+                src = GLib.timeout_source_new_seconds(3)
+                src.set_callback(lambda *_: self._grab() or False)
+                src.attach(self.ctx)
+            return
+        self._tries = 0
 
     def pill(self, **a) -> None:
         self.bus.call(*SHELL, "Pill", GLib.Variant("(s)", (json.dumps(a),)), None, 0, 1000, None, None)
